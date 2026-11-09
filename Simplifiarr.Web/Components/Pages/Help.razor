@@ -1,0 +1,175 @@
+@page "/help"
+
+<PageTitle>Help</PageTitle>
+
+<h1>Help</h1>
+
+<p class="lead">
+    Store once. Seed everywhere. Waste nothing.
+</p>
+
+<p>
+    Simplifiarr finds duplicate copies of your media between your download
+    folders and your libraries, and lets you replace the wasted copy with an
+    NTFS hardlink instead - so the file exists once on disk but shows up in
+    both places. It also finds completed downloads that haven't been added to
+    a library yet ("promotion opportunities") and can hardlink them in.
+    Nothing is ever copied between drives, and nothing is deleted without
+    going through Quarantine first.
+</p>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <h3>Home</h3>
+
+        <p>
+            The dashboard is read-only - it doesn't scan anything itself. Every
+            number on it reflects whatever the Hardlinks and Potential Waste
+            pages last found. Click a card to jump to the page that
+            produced that number and run a fresh scan there.
+        </p>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <h3>Drive Profiles (Settings)</h3>
+
+        <p>
+            Before scanning anything, set up a Drive Profile for each physical
+            drive you use. A profile groups together the paths that live on
+            one drive: its download folder, and its Movie/TV/Book/Audiobook/Music/Comic
+            library folders. This matters because hardlinks only work between two
+            paths on the <strong>same</strong> drive - Simplifiarr will never
+            copy a file across drives to "fix" this.
+        </p>
+
+        <p>
+            Go to <strong>Settings</strong>, click <strong>Add Drive Profile</strong>,
+            and fill in:
+        </p>
+
+        <ul>
+            <li><strong>Drive Root</strong> - e.g. <code>C:\</code> or <code>E:\</code></li>
+            <li><strong>Download Path</strong> - where completed torrents land</li>
+            <li><strong>Movie Library / TV Library / Book Library / Audiobook Library / Music Library / Comic Library</strong> - your organized library folders (leave any blank if you don't use that library on this drive)</li>
+            <li><strong>Audiobook Download Path / Music Download Path / Comic Download Path</strong> - dedicated download-side folders for audiobooks, music, and comics. Audiobook and music files share the same formats (MP3/M4A/M4B/FLAC) and can't be told apart by content alone, so each needs its own download subfolder to scan; comics get a dedicated folder too so classification never depends on guesswork - leave blank to skip scanning for that type</li>
+            <li><strong>Seed Only Path</strong> - optional, for torrents you only keep for seeding</li>
+        </ul>
+
+        <p>
+            Each path shows <span style="color:green">Exists</span> or
+            <span style="color:red">Missing</span> as you type, so you can
+            catch typos before saving. Click <strong>Save Settings</strong> when done -
+            if the save fails (usually a file-permission issue on
+            <code>C:\ProgramData\Simplifiarr\settings.json</code>), you'll see a red
+            banner explaining why.
+        </p>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <h3>Hardlinks (Promotion Opportunities)</h3>
+
+        <p>
+            This page finds completed downloads that aren't in a library yet
+            and lets you hardlink them in. Each drive gets its own card:
+        </p>
+
+        <ul>
+            <li><strong>Scan Drive</strong> - scans Movies, then TV, then Books, then Audiobooks, then Music, then Comics for that drive, one after another</li>
+            <li><strong>Scan Movies / Scan TV / Scan Books / Scan Audiobooks / Scan Music / Scan Comics</strong> - scan just that one library. Scanning one never touches the cached results of the others, so you can refresh just what changed.</li>
+        </ul>
+
+        <p>
+            <strong>Movies</strong>, <strong>Books</strong>,
+            <strong>Audiobooks</strong>, <strong>Music</strong>, and <strong>Comics</strong> show one row per
+            item. <strong>TV</strong> groups episodes by show and season -
+            if you have a season pack sitting in your downloads and only some
+            episodes are missing from your library, you'll see one card per
+            show/season with a "Promote All N Episode(s)" button, plus an
+            expandable list to promote individual episodes instead.
+        </p>
+
+        <p>
+            Clicking <strong>Promote</strong> shows a preview of exactly what
+            will happen (source file, target path, planned actions) before
+            anything is touched - nothing happens until you click
+            <strong>Confirm Promotion</strong>.
+        </p>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <h3>Potential Waste</h3>
+
+        <p>
+            This page finds files that already exist in <em>both</em> your
+            download folder and your library as separate copies - storage
+            being wasted on a duplicate. It uses the same per-drive,
+            per-library (Movies/TV) scan buttons as Hardlinks.
+        </p>
+
+        <p>
+            Each result can be converted individually, or you can check
+            several and click <strong>Convert Selected</strong> to batch-process
+            them one at a time. Converting a file:
+        </p>
+
+        <ol>
+            <li>Moves the existing library copy to Quarantine (nothing is deleted yet)</li>
+            <li>Creates an NTFS hardlink in its place pointing at the download copy</li>
+            <li>Verifies the hardlink actually took effect before calling it a success</li>
+        </ol>
+
+        <p>
+            Files already hardlinked (no waste) don't show up in this list at
+            all - that count feeds the "Healthy Hardlinks" number on Home
+            instead.
+        </p>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <h3>Quarantine</h3>
+
+        <p>
+            Every file a conversion displaces lands here instead of being
+            deleted immediately. Review what's in Quarantine and delete it
+            permanently once you're confident the hardlink is working
+            correctly - that's the point where the space is actually
+            reclaimed (and shows up as "Storage Saved" on Home).
+        </p>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <h3>History</h3>
+
+        <p>
+            An audit log of every conversion, promotion, and permanent
+            deletion Simplifiarr has performed, with totals for conversions,
+            deletes, and reclaimed space. <strong>Clear History</strong> permanently
+            erases this log - it asks for confirmation first, and it does not
+            undo any conversions or deletions themselves, only the record of
+            them.
+        </p>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <h3>Tips</h3>
+
+        <ul>
+            <li>Scans read every file in the folders you configure, so the first scan of a large library can take a while - later scans of the same folder within a page reuse what was already found where possible.</li>
+            <li>If a scan button seems stuck, give it a bit longer before assuming something's wrong - real disk scanning takes real time.</li>
+            <li>Hardlinks require the source and target to be on the same NTFS volume. If a path is on the wrong drive for its profile, promotion/conversion will be blocked rather than silently copying the file.</li>
+            <li>Quarantine is your safety net - nothing is permanently deleted until you delete it from Quarantine yourself.</li>
+        </ul>
+    </div>
+</div>

@@ -1,0 +1,23 @@
+@if (!string.IsNullOrWhiteSpace(Message))
+{
+    <div class="alert @AlertClass mt-3">
+        @Message
+    </div>
+}
+
+@code
+{
+    [Parameter]
+    public string? Message { get; set; }
+
+    [Parameter]
+    public StatusSeverity Severity { get; set; } = StatusSeverity.Info;
+
+    private string AlertClass =>
+        Severity switch
+        {
+            StatusSeverity.Success => "alert-success",
+            StatusSeverity.Danger => "alert-danger",
+            _ => "alert-info"
+        };
+}

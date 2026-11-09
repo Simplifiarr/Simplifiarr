@@ -1,0 +1,122 @@
+﻿using Simplifiarr.Core.Models;
+using Simplifiarr.Core.Services;
+using Simplifiarr.Web.Components;
+using Microsoft.Extensions.Hosting.WindowsServices;
+
+var builder = WebApplication.CreateBuilder(args);
+builder.Host.UseWindowsService();
+
+// Give in-flight work 20 seconds to finish when the service is stopped.
+builder.Services.Configure<HostOptions>(options =>
+    options.ShutdownTimeout = TimeSpan.FromSeconds(20));
+
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
+
+builder.Services.AddHttpClient<IQbittorrentScanner, QbittorrentScanner>();
+
+builder.Services.AddHttpClient<IRadarrClient, RadarrClient>();
+builder.Services.AddHttpClient<ISonarrClient, SonarrClient>();
+builder.Services.AddHttpClient<IProwlarrClient, ProwlarrClient>();
+builder.Services.AddHttpClient<IJellyfinClient, JellyfinClient>();
+
+builder.Services.AddSingleton<IFileScannerService, FileScannerService>();
+builder.Services.AddSingleton<IHardlinkService, HardlinkService>();
+builder.Services.AddSingleton<IDuplicateCandidateService, DuplicateCandidateService>();
+builder.Services.AddSingleton<IDashboardSummaryService, DashboardSummaryService>();
+builder.Services.AddSingleton<IHardlinkConversionPlanner, HardlinkConversionPlanner>();
+builder.Services.AddSingleton<IRemediationPreviewService, RemediationPreviewService>();
+builder.Services.AddSingleton<IHardlinkRemediationService, HardlinkRemediationService>();
+builder.Services.AddSingleton<IQuarantineService, QuarantineService>();
+builder.Services.AddSingleton<IQuarantineInventoryService, QuarantineInventoryService>();
+builder.Services.AddSingleton<IQuarantineManagementService, QuarantineManagementService>();
+builder.Services.AddSingleton<IHistoryService, HistoryService>();
+builder.Services.AddSingleton<ISettingsService, SettingsService>();
+builder.Services.AddSingleton<IMediaCatalogService, MediaCatalogService>();
+builder.Services.AddSingleton<IMediaCatalogPopulationService, MediaCatalogPopulationService>();
+builder.Services.AddSingleton<ITorrentCatalogPopulationService, TorrentCatalogPopulationService>();
+builder.Services.AddSingleton<IAssetTorrentMatcher, AssetTorrentMatcher>();
+builder.Services.AddSingleton<IReleaseParser, ReleaseParser>();
+builder.Services.AddSingleton<IAssetMatchAnalysisService, AssetMatchAnalysisService>();
+builder.Services.AddSingleton<IMediaActionAnalysisService, MediaActionAnalysisService>();
+builder.Services.AddSingleton<IAssetIdentityService, AssetIdentityService>();
+builder.Services.AddSingleton<IPromotionPlanService, PromotionPlanService>();
+builder.Services.AddSingleton<IPromotionPreviewService, PromotionPreviewService>();
+builder.Services.AddSingleton<IPromotionExecuteService, PromotionExecuteService>();
+builder.Services.AddSingleton<IMoviePromotionCandidateService, MoviePromotionCandidateService>();
+builder.Services.AddSingleton<IPromotionCandidateCacheService, PromotionCandidateCacheService>();
+builder.Services.AddSingleton<IMediaMetadataExtractor, FfprobeMediaMetadataExtractor>();
+builder.Services.AddSingleton<ITorrentClassificationService, TorrentClassificationService>();
+builder.Services.AddSingleton<ILibraryTargetResolver, LibraryTargetResolver>();
+builder.Services.AddSingleton<IBookMetadataExtractor, BookMetadataExtractor>();
+builder.Services.AddSingleton<IBookLibraryTargetResolver, BookLibraryTargetResolver>();
+builder.Services.AddSingleton<IBookPromotionCandidateCacheService, BookPromotionCandidateCacheService>();
+builder.Services.AddSingleton<IBookPromotionCandidateService, BookPromotionCandidateService>();
+builder.Services.AddSingleton<IAudiobookMetadataExtractor, AudiobookMetadataExtractor>();
+builder.Services.AddSingleton<IAudiobookLibraryTargetResolver, AudiobookLibraryTargetResolver>();
+builder.Services.AddSingleton<IAudiobookPromotionCandidateCacheService, AudiobookPromotionCandidateCacheService>();
+builder.Services.AddSingleton<IAudiobookPromotionCandidateService, AudiobookPromotionCandidateService>();
+builder.Services.AddSingleton<IMusicMetadataExtractor, MusicMetadataExtractor>();
+builder.Services.AddSingleton<IMusicLibraryTargetResolver, MusicLibraryTargetResolver>();
+builder.Services.AddSingleton<IMusicPromotionCandidateCacheService, MusicPromotionCandidateCacheService>();
+builder.Services.AddSingleton<IMusicPromotionCandidateService, MusicPromotionCandidateService>();
+builder.Services.AddSingleton<IComicMetadataExtractor, ComicMetadataExtractor>();
+builder.Services.AddSingleton<IComicLibraryTargetResolver, ComicLibraryTargetResolver>();
+builder.Services.AddSingleton<IComicPromotionCandidateCacheService, ComicPromotionCandidateCacheService>();
+builder.Services.AddSingleton<IComicPromotionCandidateService, ComicPromotionCandidateService>();
+builder.Services.AddSingleton<IWasteCandidateCacheService, WasteCandidateCacheService>();
+builder.Services.AddSingleton<IWasteCandidateService, WasteCandidateService>();
+builder.Services.AddSingleton<IBlockedFileCacheService, BlockedFileCacheService>();
+builder.Services.AddSingleton<IBlockedFileService, BlockedFileService>();
+builder.Services.AddSingleton<ISizeReductionCandidateCacheService, SizeReductionCandidateCacheService>();
+builder.Services.AddSingleton<ISizeReductionCandidateService, SizeReductionCandidateService>();
+builder.Services.AddSingleton<IFileInventoryService, FileInventoryCacheService>();
+builder.Services.AddSingleton<IIgnoredItemsService, IgnoredItemsService>();
+builder.Services.AddSingleton<IDuplicateAssetAnalysisService, DuplicateAssetAnalysisService>();
+builder.Services.AddSingleton<IArrEnrichmentService, ArrEnrichmentService>();
+builder.Services.AddSingleton<ICollectionService, CollectionService>();
+builder.Services.AddSingleton<ICollectionBuilderService, CollectionBuilderService>();
+builder.Services.AddSingleton<IJunkFileScannerService, JunkFileScannerService>();
+builder.Services.AddSingleton<IDownloadCleanupService, DownloadCleanupService>();
+builder.Services.AddSingleton<ITorrentPieceVerificationService, TorrentPieceVerificationService>();
+builder.Services.AddSingleton<ITorrentReconstructionService, TorrentReconstructionService>();
+builder.Services.AddSingleton<IWholeTorrentCandidateService, WholeTorrentCandidateService>();
+
+var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    var settingsService =
+        scope.ServiceProvider.GetRequiredService<ISettingsService>();
+
+    await settingsService.GetSettingsAsync();
+}
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error", createScopeForErrors: true);
+    app.UseHsts();
+}
+
+app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+
+app.UseHttpsRedirection();
+
+app.UseAntiforgery();
+
+app.MapStaticAssets();
+
+app.MapRazorComponents<App>()
+    .AddInteractiveServerRenderMode();
+
+try
+{
+    app.Run();
+}
+catch (OperationCanceledException)
+{
+    // If stopping takes longer than the shutdown timeout, WindowsServiceLifetime
+    // throws this from StopAsync. Left unhandled it crashes the process, which
+    // then lingers in Windows Error Reporting with the install folder locked and
+    // makes the updater hang. Exit cleanly instead.
+}

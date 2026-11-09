@@ -1,0 +1,25 @@
+<div class="empty-state">
+    <i class="bi bi-@Icon" aria-hidden="true"></i>
+
+    @if (Message is not null)
+    {
+        @Message
+    }
+    else
+    {
+        <p class="mb-0">@Text</p>
+    }
+</div>
+
+@code
+{
+    /// <summary>Bootstrap Icon name without the "bi-" prefix, e.g. "inbox".</summary>
+    [Parameter]
+    public string Icon { get; set; } = "inbox";
+
+    [Parameter]
+    public string Text { get; set; } = string.Empty;
+
+    [Parameter]
+    public RenderFragment? Message { get; set; }
+}

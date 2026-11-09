@@ -1,0 +1,43 @@
+# Build output
+bin/
+obj/
+**/bin/
+**/obj/
+
+# User/local backups and scratch files
+*.backup
+*.current.txt
+*.queue.backup
+*.queuev1.backup
+
+# Visual Studio / IDE
+.vs/
+.vscode/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log
+
+# Local environment/config secrets
+.env
+*.user
+*.suo
+
+# Local development artifacts
+Logs/
+Reports/
+.claude/
+
+# Private working notes - these describe one person's own setup and library,
+# so they stay on the author's machine and out of the public repo
+SIMPLIFIARR_BIBLE.md
+OVERHAUL_PLAN.md
+
+
+# Broader backup-file safety net (catches *-backup and *.pre-* naming, not just *.backup)
+*-backup
+*.pre-*
+

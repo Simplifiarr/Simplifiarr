@@ -1,0 +1,3377 @@
+@page "/hardlinks"
+@rendermode InteractiveServer
+
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+
+@inject IMoviePromotionCandidateService PromotionCandidateService
+@inject ISettingsService SettingsService
+@inject IPromotionCandidateCacheService PromotionCandidateCache
+@inject IPromotionPreviewService PromotionPreviewService
+@inject IPromotionExecuteService PromotionExecuteService
+@inject IBookPromotionCandidateService BookPromotionCandidateService
+@inject IBookPromotionCandidateCacheService BookPromotionCandidateCache
+@inject IAudiobookPromotionCandidateService AudiobookPromotionCandidateService
+@inject IAudiobookPromotionCandidateCacheService AudiobookPromotionCandidateCache
+@inject IMusicPromotionCandidateService MusicPromotionCandidateService
+@inject IMusicPromotionCandidateCacheService MusicPromotionCandidateCache
+@inject IComicPromotionCandidateService ComicPromotionCandidateService
+@inject IComicPromotionCandidateCacheService ComicPromotionCandidateCache
+@inject IIgnoredItemsService IgnoredItemsService
+@inject IHistoryService HistoryService
+@inject IWasteCandidateCacheService WasteCandidateCache
+@inject IQuarantineService QuarantineService
+
+<PageTitle>Promotion Opportunities</PageTitle>
+
+<h1>Library Hardlink Opportunities</h1>
+
+<p>
+    Find completed downloads that can be promoted into your libraries using hardlinks.
+</p>
+
+<p>
+    <a href="ignored">View Ignored Items</a>
+</p>
+
+@if (_profiles.Count == 0)
+{
+    <div class="alert alert-warning">
+        No enabled drive profiles are configured.
+    </div>
+}
+else
+{
+    <div class="row g-3 mt-2">
+        @foreach (var profile in _profiles)
+        {
+            <div class="col-md-6">
+                <DriveScanCard DriveName="@profile.Name"
+                               DownloadPath="@profile.DownloadPath"
+                               Rows="BuildRows(profile)"
+                               IsScanningDrive="@(_isScanningDrive == profile.Name)"
+                               OnScanDrive="() => ScanDriveAsync(profile.Name)" />
+            </div>
+        }
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert alert-info mt-3">
+        @_statusMessage
+    </div>
+}
+
+@if (_selectedPreview is not null)
+{
+    <div class="card mt-4">
+        <div class="card-header">
+            Promotion Preview
+        </div>
+
+        <div class="card-body">
+            <p>
+                <strong>Source</strong>
+            </p>
+
+            <code>@_selectedPreview.SourcePath</code>
+
+            <p class="mt-3">
+                <strong>Target File</strong>
+            </p>
+
+            <code>@_selectedPreview.TargetFilePath</code>
+
+            <p class="mt-3">
+                <strong>Actions</strong>
+            </p>
+
+            <ul>
+                @foreach (var action in _selectedPreview.PlannedActions)
+                {
+                    <li>@action</li>
+                }
+            </ul>
+
+            <button class="btn btn-success"
+                    disabled="@_isExecuting"
+                    @onclick="ExecuteSelectedAsync">
+                <i class="bi bi-check-lg" aria-hidden="true"></i>
+                @(_isExecuting
+                    ? "Promoting..."
+                    : "Confirm Promotion")
+            </button>
+
+            <button class="btn btn-secondary ms-2"
+                    disabled="@_isExecuting"
+                    @onclick="CancelPreview">
+                <i class="bi bi-x-lg" aria-hidden="true"></i>
+                Cancel
+            </button>
+        </div>
+    </div>
+}
+
+@if (_selectedBookPreview is not null)
+{
+    <div class="card mt-4">
+        <div class="card-header">
+            Book Promotion Preview
+        </div>
+
+        <div class="card-body">
+            <p>
+                <strong>Source</strong>
+            </p>
+
+            <code>@_selectedBookPreview.SourcePath</code>
+
+            <p class="mt-3">
+                <strong>Target File</strong>
+            </p>
+
+            <code>@_selectedBookPreview.TargetFilePath</code>
+
+            <p class="mt-3">
+                <strong>Actions</strong>
+            </p>
+
+            <ul>
+                @foreach (var action in _selectedBookPreview.PlannedActions)
+                {
+                    <li>@action</li>
+                }
+            </ul>
+
+            <button class="btn btn-success"
+                    disabled="@_isExecuting"
+                    @onclick="ExecuteSelectedBookAsync">
+                <i class="bi bi-check-lg" aria-hidden="true"></i>
+                @(_isExecuting
+                    ? "Promoting..."
+                    : "Confirm Promotion")
+            </button>
+
+            <button class="btn btn-secondary ms-2"
+                    disabled="@_isExecuting"
+                    @onclick="CancelBookPreview">
+                <i class="bi bi-x-lg" aria-hidden="true"></i>
+                Cancel
+            </button>
+        </div>
+    </div>
+}
+
+@if (_selectedAudiobookPreview is not null)
+{
+    <div class="card mt-4">
+        <div class="card-header">
+            Audiobook Promotion Preview
+        </div>
+
+        <div class="card-body">
+            <p>
+                <strong>Source</strong>
+            </p>
+
+            <code>@_selectedAudiobookPreview.SourcePath</code>
+
+            <p class="mt-3">
+                <strong>Target File</strong>
+            </p>
+
+            <code>@_selectedAudiobookPreview.TargetFilePath</code>
+
+            <p class="mt-3">
+                <strong>Actions</strong>
+            </p>
+
+            <ul>
+                @foreach (var action in _selectedAudiobookPreview.PlannedActions)
+                {
+                    <li>@action</li>
+                }
+            </ul>
+
+            <button class="btn btn-success"
+                    disabled="@_isExecuting"
+                    @onclick="ExecuteSelectedAudiobookAsync">
+                <i class="bi bi-check-lg" aria-hidden="true"></i>
+                @(_isExecuting
+                    ? "Promoting..."
+                    : "Confirm Promotion")
+            </button>
+
+            <button class="btn btn-secondary ms-2"
+                    disabled="@_isExecuting"
+                    @onclick="CancelAudiobookPreview">
+                <i class="bi bi-x-lg" aria-hidden="true"></i>
+                Cancel
+            </button>
+        </div>
+    </div>
+}
+
+@if (_selectedMusicPreview is not null)
+{
+    <div class="card mt-4">
+        <div class="card-header">
+            Music Promotion Preview
+        </div>
+
+        <div class="card-body">
+            <p>
+                <strong>Source</strong>
+            </p>
+
+            <code>@_selectedMusicPreview.SourcePath</code>
+
+            <p class="mt-3">
+                <strong>Target File</strong>
+            </p>
+
+            <code>@_selectedMusicPreview.TargetFilePath</code>
+
+            <p class="mt-3">
+                <strong>Actions</strong>
+            </p>
+
+            <ul>
+                @foreach (var action in _selectedMusicPreview.PlannedActions)
+                {
+                    <li>@action</li>
+                }
+            </ul>
+
+            <button class="btn btn-success"
+                    disabled="@_isExecuting"
+                    @onclick="ExecuteSelectedMusicAsync">
+                <i class="bi bi-check-lg" aria-hidden="true"></i>
+                @(_isExecuting
+                    ? "Promoting..."
+                    : "Confirm Promotion")
+            </button>
+
+            <button class="btn btn-secondary ms-2"
+                    disabled="@_isExecuting"
+                    @onclick="CancelMusicPreview">
+                <i class="bi bi-x-lg" aria-hidden="true"></i>
+                Cancel
+            </button>
+        </div>
+    </div>
+}
+
+@if (_selectedComicPreview is not null)
+{
+    <div class="card mt-4">
+        <div class="card-header">
+            Comic Promotion Preview
+        </div>
+
+        <div class="card-body">
+            <p>
+                <strong>Source</strong>
+            </p>
+
+            <code>@_selectedComicPreview.SourcePath</code>
+
+            <p class="mt-3">
+                <strong>Target File</strong>
+            </p>
+
+            <code>@_selectedComicPreview.TargetFilePath</code>
+
+            <p class="mt-3">
+                <strong>Actions</strong>
+            </p>
+
+            <ul>
+                @foreach (var action in _selectedComicPreview.PlannedActions)
+                {
+                    <li>@action</li>
+                }
+            </ul>
+
+            <button class="btn btn-success"
+                    disabled="@_isExecuting"
+                    @onclick="ExecuteSelectedComicAsync">
+                <i class="bi bi-check-lg" aria-hidden="true"></i>
+                @(_isExecuting
+                    ? "Promoting..."
+                    : "Confirm Promotion")
+            </button>
+
+            <button class="btn btn-secondary ms-2"
+                    disabled="@_isExecuting"
+                    @onclick="CancelComicPreview">
+                <i class="bi bi-x-lg" aria-hidden="true"></i>
+                Cancel
+            </button>
+        </div>
+    </div>
+}
+
+@if (!_hasScanned)
+{
+    <EmptyState Icon="search" Text="No movie/TV promotion scan has been run yet." />
+}
+else if (_candidates.Count == 0)
+{
+    <EmptyState Icon="check-circle" Text="No movie/TV promotion opportunities were found." />
+}
+else
+{
+    <h2 class="mt-4">
+        Movie Opportunities
+    </h2>
+
+    @if (GetMovieCandidates().Count == 0)
+    {
+        <EmptyState Icon="check-circle" Text="No movie promotion opportunities were found." />
+    }
+    else
+    {
+        <p>
+            <strong>@GetMovieCandidates().Count</strong>
+            promotable movie(s) found.
+        </p>
+
+        @if (_isConfirmingMovieBatch)
+        {
+            <BatchConfirmBanner IsBusy="_isExecuting"
+                                ConfirmLabel="Confirm Promote"
+                                BusyLabel="Promoting..."
+                                OnConfirm="ConfirmMovieBatchAsync"
+                                OnCancel="CancelMovieBatchConfirm">
+                <Message>
+                    Promote @_pendingMovieBatch.Count movie(s)? This creates a hardlink for each.
+                </Message>
+            </BatchConfirmBanner>
+        }
+        else
+        {
+            <div class="mb-2">
+                <button class="btn btn-primary btn-sm"
+                        disabled="@(_isScanning || _isExecuting)"
+                        @onclick="() => RequestMovieBatchConfirm(GetPromotableMovieCandidates())">
+                    <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
+                    Promote All Movies
+                </button>
+
+                <button class="btn btn-primary btn-sm ms-2"
+                        disabled="@(_isScanning || _isExecuting || _movieSelection.Count == 0)"
+                        @onclick="() => RequestMovieBatchConfirm(GetSelectedPromotableMovieCandidates())">
+                    <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
+                    Promote Selected (@_movieSelection.Count)
+                </button>
+            </div>
+        }
+
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Select</th>
+                    <th>Movie</th>
+                    <th>Year</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                @foreach (var candidate in GetMovieCandidates())
+                {
+                    <tr class="@_moviePreviewSelection.RowClass(candidate)">
+                        <SelectableCheckboxCell Checked="_movieSelection.IsSelected(candidate)"
+                                                Disabled="_isScanning || _isExecuting"
+                                                OnChanged="selected => _movieSelection.SetSelected(candidate, selected)" />
+
+                        <td>
+                            <strong>@candidate.Title</strong>
+
+                            @if (candidate.WasPreviouslyPromoted)
+                            {
+                                <div>
+                                    <span class="badge bg-warning text-dark">
+                                        Previously promoted - library copy missing
+                                    </span>
+                                </div>
+                            }
+
+                            <div class="text-muted small">
+                                Found @GetCandidateAgeText(candidate.DiscoveredUtc)
+                            </div>
+
+                            @if (!string.IsNullOrWhiteSpace(candidate.DriveProfileName))
+                            {
+                                <div class="text-muted small">
+                                    Drive: @candidate.DriveProfileName
+                                </div>
+                            }
+                        </td>
+
+                        <td>
+                            @(candidate.Year?.ToString() ?? "Unknown")
+                        </td>
+
+                        <td>
+                            @if (candidate.CanPromote)
+                            {
+                                <i class="bi bi-check-circle text-success" aria-hidden="true"></i> <text>READY</text>
+                            }
+                            else
+                            {
+                                <i class="bi bi-x-circle text-danger" aria-hidden="true"></i> <text>BLOCKED</text>
+                            }
+                        </td>
+
+                        <td>
+                            @if (_confirmingDownloadDelete.Contains(candidate.SourcePath))
+                            {
+                                <div class="alert alert-warning p-2 mb-0">
+                                    Move the download copy to Quarantine? Your
+                                    torrent client may still list this as
+                                    seeding/missing until you remove the
+                                    torrent there too - Simplifiarr doesn't
+                                    touch qBittorrent's torrent list.
+
+                                    <div class="mt-1">
+                                        <button class="btn btn-danger btn-sm"
+                                                disabled="@_isExecuting"
+                                                @onclick="() => DeleteDownloadCopyAsync(candidate)">
+                                            <i class="bi bi-check-lg" aria-hidden="true"></i>
+                                            Confirm
+                                        </button>
+
+                                        <button class="btn btn-secondary btn-sm ms-1"
+                                                disabled="@_isExecuting"
+                                                @onclick="() => _confirmingDownloadDelete.Remove(candidate.SourcePath)">
+                                            <i class="bi bi-x-lg" aria-hidden="true"></i>
+                                            Cancel
+                                        </button>
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                @if (candidate.CanPromote && candidate.Plan is not null)
+                                {
+                                    <button class="@_moviePreviewSelection.ButtonClass(candidate)"
+                                            disabled="@_moviePreviewSelection.IsButtonDisabled(candidate, _isScanning || _isExecuting)"
+                                            @onclick="() => PreviewAsync(candidate)">
+                                        <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
+                                        @(candidate.WasPreviouslyPromoted ? "Re-promote" : _moviePreviewSelection.ButtonText(candidate))
+                                    </button>
+                                }
+                                else if (candidate.CanPromote && candidate.Plan is null)
+                                {
+                                    <span class="text-muted small">No plan available</span>
+                                }
+
+                                @if (candidate.WasPreviouslyPromoted)
+                                {
+                                    <button class="btn btn-sm btn-outline-danger ms-1"
+                                            disabled="@(_isScanning || _isExecuting)"
+                                            @onclick="() => _confirmingDownloadDelete.Add(candidate.SourcePath)">
+                                        <i class="bi bi-trash" aria-hidden="true"></i>
+                                        Delete Download Copy
+                                    </button>
+                                }
+
+                                <button class="btn btn-sm btn-outline-secondary ms-1"
+                                        disabled="@(_isScanning || _isExecuting)"
+                                        @onclick="() => IgnoreMovieCandidate(candidate)">
+                                    <i class="bi bi-eye-slash" aria-hidden="true"></i>
+                                    Ignore
+                                </button>
+                            }
+                        </td>
+
+                        <td>
+                            <details>
+                                <summary>View paths</summary>
+
+                                <div class="mt-2">
+                                    <div>
+                                        <strong>Reason</strong>
+                                    </div>
+
+                                    <p>
+                                        @candidate.Reason
+                                    </p>
+
+                                    <div>
+                                        <strong>Source File</strong>
+                                    </div>
+
+                                    <code>
+                                        @candidate.SourcePath
+                                    </code>
+
+                                    @if (candidate.Plan is not null)
+                                    {
+                                        <div class="mt-2">
+                                            <strong>Target File</strong>
+                                        </div>
+
+                                        <code>
+                                            @candidate.Plan.TargetFilePath
+                                        </code>
+                                    }
+                                </div>
+                            </details>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    <h2 class="mt-4">
+        TV Opportunities
+    </h2>
+
+    @if (GetTvGroups().Count == 0)
+    {
+        <EmptyState Icon="check-circle" Text="No TV promotion opportunities were found." />
+    }
+    else
+    {
+        <p>
+            <strong>@GetTvGroups().Sum(group => group.Count())</strong>
+            promotable episode(s) found across
+            <strong>@GetTvGroups().Count</strong>
+            show/season group(s).
+        </p>
+
+        @foreach (var group in GetTvGroups())
+        {
+            var key = group.Key;
+            var episodes =
+                group
+                    .OrderBy(episode => episode.Episode)
+                    .ToList();
+
+            var episodeList =
+                string.Join(
+                    ", ",
+                    episodes.Select(episode =>
+                        episode.Episode.HasValue
+                            ? $"E{episode.Episode:00}"
+                            : "E?"));
+
+            <div class="card mb-3">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        @key.Title
+                        @(key.Season.HasValue ? $" — Season {key.Season:00}" : " — Season Unknown")
+                    </h5>
+
+                    <p class="card-text">
+                        <strong>@episodes.Count</strong> missing episode(s): @episodeList
+                    </p>
+
+                    @if (_confirmingGroups.Contains(key))
+                    {
+                        <div class="alert alert-warning">
+                            Promote all @episodes.Count episode(s) for @key.Title Season @(key.Season?.ToString("00") ?? "Unknown")?
+                            This creates a hardlink for each missing episode.
+
+                            <div class="mt-2">
+                                <button class="btn btn-success btn-sm"
+                                        disabled="@_isExecuting"
+                                        @onclick="() => PromoteGroupAsync(key, episodes)">
+                                    <i class="bi bi-check-lg" aria-hidden="true"></i>
+                                    @(_isExecuting ? "Promoting..." : "Confirm Promote All")
+                                </button>
+
+                                <button class="btn btn-secondary btn-sm ms-2"
+                                        disabled="@_isExecuting"
+                                        @onclick="() => CancelGroupConfirm(key)">
+                                    <i class="bi bi-x-lg" aria-hidden="true"></i>
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <button class="btn btn-primary btn-sm"
+                                disabled="@_isExecuting"
+                                @onclick="() => RequestGroupConfirm(key)">
+                            <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
+                            Promote All @episodes.Count Episode(s)
+                        </button>
+                    }
+
+                    @{
+                        var showEpisodes =
+                            GetTvGroups()
+                                .Where(otherGroup =>
+                                    string.Equals(otherGroup.Key.Title, key.Title, StringComparison.OrdinalIgnoreCase))
+                                .SelectMany(otherGroup => otherGroup)
+                                .ToList();
+                    }
+
+                    @if (_confirmingIgnoreSeason.Contains(key))
+                    {
+                        <div class="alert alert-secondary mt-2 mb-0">
+                            Ignore all @episodes.Count episode(s) of @key.Title Season @(key.Season?.ToString("00") ?? "Unknown")?
+                            They won't reappear until un-ignored (see Ignored Items) and rescanned.
+
+                            <div class="mt-2">
+                                <button class="btn btn-secondary btn-sm"
+                                        disabled="@_isExecuting"
+                                        @onclick="() => IgnoreEpisodes(episodes, SeasonLabel(key))">
+                                    <i class="bi bi-eye-slash" aria-hidden="true"></i>
+                                    Confirm Ignore Season
+                                </button>
+
+                                <button class="btn btn-outline-secondary btn-sm ms-2"
+                                        @onclick="() => _confirmingIgnoreSeason.Remove(key)">
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    }
+                    else if (_confirmingIgnoreShow.Contains(key.Title))
+                    {
+                        <div class="alert alert-secondary mt-2 mb-0">
+                            Ignore all @showEpisodes.Count episode(s) of @key.Title across every season listed?
+                            They won't reappear until un-ignored (see Ignored Items) and rescanned.
+
+                            <div class="mt-2">
+                                <button class="btn btn-secondary btn-sm"
+                                        disabled="@_isExecuting"
+                                        @onclick="() => IgnoreEpisodes(showEpisodes, key.Title)">
+                                    <i class="bi bi-eye-slash" aria-hidden="true"></i>
+                                    Confirm Ignore Entire Show
+                                </button>
+
+                                <button class="btn btn-outline-secondary btn-sm ms-2"
+                                        @onclick="() => _confirmingIgnoreShow.Remove(key.Title)">
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="mt-2">
+                            <button class="btn btn-outline-secondary btn-sm"
+                                    disabled="@_isExecuting"
+                                    @onclick="() => _confirmingIgnoreSeason.Add(key)">
+                                <i class="bi bi-eye-slash" aria-hidden="true"></i>
+                                Ignore All @episodes.Count Episode(s)
+                            </button>
+
+                            @if (showEpisodes.Count > episodes.Count)
+                            {
+                                <button class="btn btn-outline-secondary btn-sm ms-1"
+                                        disabled="@_isExecuting"
+                                        @onclick="() => _confirmingIgnoreShow.Add(key.Title)">
+                                    <i class="bi bi-eye-slash" aria-hidden="true"></i>
+                                    Ignore Entire Show (@showEpisodes.Count)
+                                </button>
+                            }
+                        </div>
+                    }
+
+                    <details class="mt-3">
+                        <summary>View individual episodes</summary>
+
+                        <table class="table table-sm mt-2">
+                            <thead>
+                                <tr>
+                                    <th>Episode</th>
+                                    <th>Status</th>
+                                    <th>Action</th>
+                                    <th>Details</th>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                                @foreach (var episode in episodes)
+                                {
+                                    <tr class="@_moviePreviewSelection.RowClass(episode)">
+                                        <td>
+                                            @(episode.Episode.HasValue
+                                                ? $"E{episode.Episode:00}"
+                                                : "Unknown")
+                                        </td>
+
+                                        <td>
+                                            @if (episode.CanPromote)
+                                            {
+                                                <i class="bi bi-check-circle text-success" aria-hidden="true"></i> <text>READY</text>
+                                            }
+                                            else
+                                            {
+                                                <i class="bi bi-x-circle text-danger" aria-hidden="true"></i> <text>BLOCKED</text>
+                                            }
+                                        </td>
+
+                                        <td>
+                                            @if (episode.CanPromote && episode.Plan is not null)
+                                            {
+                                                <button class="@_moviePreviewSelection.ButtonClass(episode)"
+                                                        disabled="@_moviePreviewSelection.IsButtonDisabled(episode, _isScanning || _isExecuting)"
+                                                        @onclick="() => PreviewAsync(episode)">
+                                                    <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
+                                                    @_moviePreviewSelection.ButtonText(episode)
+                                                </button>
+                                            }
+
+                                            <button class="btn btn-sm btn-outline-secondary ms-1"
+                                                    disabled="@_isExecuting"
+                                                    @onclick="() => IgnoreMovieCandidate(episode)">
+                                                <i class="bi bi-eye-slash" aria-hidden="true"></i>
+                                                Ignore
+                                            </button>
+                                        </td>
+
+                                        <td>
+                                            <details>
+                                                <summary>View paths</summary>
+
+                                                <div class="mt-2">
+                                                    <code>@episode.SourcePath</code>
+
+                                                    @if (episode.Plan is not null)
+                                                    {
+                                                        <div class="mt-2">
+                                                            <code>@episode.Plan.TargetFilePath</code>
+                                                        </div>
+                                                    }
+                                                </div>
+                                            </details>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </details>
+                </div>
+            </div>
+        }
+    }
+}
+
+<h2 class="mt-4">
+    Book Opportunities
+</h2>
+
+@if (!_hasScannedBooks)
+{
+    <EmptyState Icon="search" Text="No book promotion scan has been run yet." />
+}
+else if (_bookCandidates.Count == 0)
+{
+    <EmptyState Icon="check-circle" Text="No book promotion opportunities were found." />
+}
+else
+{
+    <p>
+        <strong>@_bookCandidates.Count</strong>
+        promotable book(s) found.
+    </p>
+
+    @if (_isConfirmingBookBatch)
+    {
+        <BatchConfirmBanner IsBusy="_isExecuting"
+                            ConfirmLabel="Confirm Promote"
+                            BusyLabel="Promoting..."
+                            OnConfirm="ConfirmBookBatchAsync"
+                            OnCancel="CancelBookBatchConfirm">
+            <Message>
+                Promote @_pendingBookBatch.Count book(s)? This creates a hardlink for each.
+            </Message>
+        </BatchConfirmBanner>
+    }
+    else
+    {
+        <div class="mb-2">
+            <button class="btn btn-primary btn-sm"
+                    disabled="@(_isScanningBooks || _isExecuting)"
+                    @onclick="() => RequestBookBatchConfirm(GetPromotableBookCandidates())">
+                <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
+                Promote All Books
+            </button>
+
+            <button class="btn btn-primary btn-sm ms-2"
+                    disabled="@(_isScanningBooks || _isExecuting || _bookSelection.Count == 0)"
+                    @onclick="() => RequestBookBatchConfirm(GetSelectedPromotableBookCandidates())">
+                <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
+                Promote Selected (@_bookSelection.Count)
+            </button>
+        </div>
+    }
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Select</th>
+                <th>Title</th>
+                <th>Author</th>
+                <th>Format</th>
+                <th>Status</th>
+                <th>Actions</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            @foreach (var candidate in _bookCandidates.OrderBy(candidate => candidate.Title))
+            {
+                <tr class="@_bookPreviewSelection.RowClass(candidate)">
+                    <SelectableCheckboxCell Checked="_bookSelection.IsSelected(candidate)"
+                                            Disabled="_isScanningBooks || _isExecuting"
+                                            OnChanged="selected => _bookSelection.SetSelected(candidate, selected)" />
+
+                    <td>
+                        <strong>@candidate.Title</strong>
+
+                        <div class="text-muted small">
+                            Found @GetCandidateAgeText(candidate.DiscoveredUtc)
+                        </div>
+
+                        @if (!string.IsNullOrWhiteSpace(candidate.DriveProfileName))
+                        {
+                            <div class="text-muted small">
+                                Drive: @candidate.DriveProfileName
+                            </div>
+                        }
+                    </td>
+
+                    <td>
+                        @(candidate.Author ?? "Unknown")
+                    </td>
+
+                    <td>
+                        @candidate.Format.ToUpperInvariant()
+                    </td>
+
+                    <td>
+                        @if (candidate.CanPromote)
+                        {
+                            <i class="bi bi-check-circle text-success" aria-hidden="true"></i> <text>READY</text>
+                        }
+                        else
+                        {
+                            <i class="bi bi-x-circle text-danger" aria-hidden="true"></i> <text>BLOCKED</text>
+                        }
+                    </td>
+
+                    <td>
+                        @if (candidate.CanPromote && candidate.Plan is not null)
+                        {
+                            <button class="@_bookPreviewSelection.ButtonClass(candidate)"
+                                    disabled="@_bookPreviewSelection.IsButtonDisabled(candidate, _isScanningBooks || _isExecuting)"
+                                    @onclick="() => PreviewBookAsync(candidate)">
+                                <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
+                                @_bookPreviewSelection.ButtonText(candidate)
+                            </button>
+                        }
+
+                        <button class="btn btn-sm btn-outline-secondary ms-1"
+                                disabled="@(_isScanningBooks || _isExecuting)"
+                                @onclick="() => IgnoreBookCandidate(candidate)">
+                            <i class="bi bi-eye-slash" aria-hidden="true"></i>
+                            Ignore
+                        </button>
+                    </td>
+
+                    <td>
+                        <details>
+                            <summary>View paths</summary>
+
+                            <div class="mt-2">
+                                <div>
+                                    <strong>Reason</strong>
+                                </div>
+
+                                <p>
+                                    @candidate.Reason
+                                </p>
+
+                                <div>
+                                    <strong>Source File</strong>
+                                </div>
+
+                                <code>
+                                    @candidate.SourcePath
+                                </code>
+
+                                @if (candidate.Plan is not null)
+                                {
+                                    <div class="mt-2">
+                                        <strong>Target File</strong>
+                                    </div>
+
+                                    <code>
+                                        @candidate.Plan.TargetFilePath
+                                    </code>
+                                }
+                            </div>
+                        </details>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<h2 class="mt-4">
+    Audiobook Opportunities
+</h2>
+
+@if (!_hasScannedAudiobooks)
+{
+    <EmptyState Icon="search" Text="No audiobook promotion scan has been run yet." />
+}
+else if (_audiobookCandidates.Count == 0)
+{
+    <EmptyState Icon="check-circle" Text="No audiobook promotion opportunities were found." />
+}
+else
+{
+    <p>
+        <strong>@_audiobookCandidates.Count</strong>
+        promotable audiobook(s) found.
+    </p>
+
+    @if (_isConfirmingAudiobookBatch)
+    {
+        <BatchConfirmBanner IsBusy="_isExecuting"
+                            ConfirmLabel="Confirm Promote"
+                            BusyLabel="Promoting..."
+                            OnConfirm="ConfirmAudiobookBatchAsync"
+                            OnCancel="CancelAudiobookBatchConfirm">
+            <Message>
+                Promote @_pendingAudiobookBatch.Count audiobook(s)? This creates a hardlink for each.
+            </Message>
+        </BatchConfirmBanner>
+    }
+    else
+    {
+        <div class="mb-2">
+            <button class="btn btn-primary btn-sm"
+                    disabled="@(_isScanningAudiobooks || _isExecuting)"
+                    @onclick="() => RequestAudiobookBatchConfirm(GetPromotableAudiobookCandidates())">
+                <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
+                Promote All Audiobooks
+            </button>
+
+            <button class="btn btn-primary btn-sm ms-2"
+                    disabled="@(_isScanningAudiobooks || _isExecuting || _audiobookSelection.Count == 0)"
+                    @onclick="() => RequestAudiobookBatchConfirm(GetSelectedPromotableAudiobookCandidates())">
+                <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
+                Promote Selected (@_audiobookSelection.Count)
+            </button>
+        </div>
+    }
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Select</th>
+                <th>Title</th>
+                <th>Author</th>
+                <th>Narrator</th>
+                <th>Format</th>
+                <th>Status</th>
+                <th>Actions</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            @foreach (var candidate in _audiobookCandidates.OrderBy(candidate => candidate.Title))
+            {
+                <tr class="@_audiobookPreviewSelection.RowClass(candidate)">
+                    <SelectableCheckboxCell Checked="_audiobookSelection.IsSelected(candidate)"
+                                            Disabled="_isScanningAudiobooks || _isExecuting"
+                                            OnChanged="selected => _audiobookSelection.SetSelected(candidate, selected)" />
+
+                    <td>
+                        <strong>@candidate.Title</strong>
+
+                        <div class="text-muted small">
+                            Found @GetCandidateAgeText(candidate.DiscoveredUtc)
+                        </div>
+
+                        @if (!string.IsNullOrWhiteSpace(candidate.DriveProfileName))
+                        {
+                            <div class="text-muted small">
+                                Drive: @candidate.DriveProfileName
+                            </div>
+                        }
+                    </td>
+
+                    <td>
+                        @(candidate.Author ?? "Unknown")
+                    </td>
+
+                    <td>
+                        @(candidate.Narrator ?? "Unknown")
+                    </td>
+
+                    <td>
+                        @candidate.Format.ToUpperInvariant()
+                    </td>
+
+                    <td>
+                        @if (candidate.CanPromote)
+                        {
+                            <i class="bi bi-check-circle text-success" aria-hidden="true"></i> <text>READY</text>
+                        }
+                        else
+                        {
+                            <i class="bi bi-x-circle text-danger" aria-hidden="true"></i> <text>BLOCKED</text>
+                        }
+                    </td>
+
+                    <td>
+                        @if (candidate.CanPromote && candidate.Plan is not null)
+                        {
+                            <button class="@_audiobookPreviewSelection.ButtonClass(candidate)"
+                                    disabled="@_audiobookPreviewSelection.IsButtonDisabled(candidate, _isScanningAudiobooks || _isExecuting)"
+                                    @onclick="() => PreviewAudiobookAsync(candidate)">
+                                <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
+                                @_audiobookPreviewSelection.ButtonText(candidate)
+                            </button>
+                        }
+
+                        <button class="btn btn-sm btn-outline-secondary ms-1"
+                                disabled="@(_isScanningAudiobooks || _isExecuting)"
+                                @onclick="() => IgnoreAudiobookCandidate(candidate)">
+                            <i class="bi bi-eye-slash" aria-hidden="true"></i>
+                            Ignore
+                        </button>
+                    </td>
+
+                    <td>
+                        <details>
+                            <summary>View paths</summary>
+
+                            <div class="mt-2">
+                                <div>
+                                    <strong>Reason</strong>
+                                </div>
+
+                                <p>
+                                    @candidate.Reason
+                                </p>
+
+                                <div>
+                                    <strong>Source File</strong>
+                                </div>
+
+                                <code>
+                                    @candidate.SourcePath
+                                </code>
+
+                                @if (candidate.Plan is not null)
+                                {
+                                    <div class="mt-2">
+                                        <strong>Target File</strong>
+                                    </div>
+
+                                    <code>
+                                        @candidate.Plan.TargetFilePath
+                                    </code>
+                                }
+                            </div>
+                        </details>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<h2 class="mt-4">
+    Music Opportunities
+</h2>
+
+@if (!_hasScannedMusic)
+{
+    <EmptyState Icon="search" Text="No music promotion scan has been run yet." />
+}
+else if (_musicCandidates.Count == 0)
+{
+    <EmptyState Icon="check-circle" Text="No music promotion opportunities were found." />
+}
+else
+{
+    <p>
+        <strong>@_musicCandidates.Count</strong>
+        promotable track(s) found.
+    </p>
+
+    @if (_isConfirmingMusicBatch)
+    {
+        <BatchConfirmBanner IsBusy="_isExecuting"
+                            ConfirmLabel="Confirm Promote"
+                            BusyLabel="Promoting..."
+                            OnConfirm="ConfirmMusicBatchAsync"
+                            OnCancel="CancelMusicBatchConfirm">
+            <Message>
+                Promote @_pendingMusicBatch.Count track(s)? This creates a hardlink for each.
+            </Message>
+        </BatchConfirmBanner>
+    }
+    else
+    {
+        <div class="mb-2">
+            <button class="btn btn-primary btn-sm"
+                    disabled="@(_isScanningMusic || _isExecuting)"
+                    @onclick="() => RequestMusicBatchConfirm(GetPromotableMusicCandidates())">
+                <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
+                Promote All Music
+            </button>
+
+            <button class="btn btn-primary btn-sm ms-2"
+                    disabled="@(_isScanningMusic || _isExecuting || _musicSelection.Count == 0)"
+                    @onclick="() => RequestMusicBatchConfirm(GetSelectedPromotableMusicCandidates())">
+                <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
+                Promote Selected (@_musicSelection.Count)
+            </button>
+        </div>
+    }
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Select</th>
+                <th>Title</th>
+                <th>Artist</th>
+                <th>Album</th>
+                <th>Track</th>
+                <th>Format</th>
+                <th>Status</th>
+                <th>Actions</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            @foreach (var candidate in _musicCandidates.OrderBy(candidate => candidate.Title))
+            {
+                <tr class="@_musicPreviewSelection.RowClass(candidate)">
+                    <SelectableCheckboxCell Checked="_musicSelection.IsSelected(candidate)"
+                                            Disabled="_isScanningMusic || _isExecuting"
+                                            OnChanged="selected => _musicSelection.SetSelected(candidate, selected)" />
+
+                    <td>
+                        <strong>@candidate.Title</strong>
+
+                        <div class="text-muted small">
+                            Found @GetCandidateAgeText(candidate.DiscoveredUtc)
+                        </div>
+
+                        @if (!string.IsNullOrWhiteSpace(candidate.DriveProfileName))
+                        {
+                            <div class="text-muted small">
+                                Drive: @candidate.DriveProfileName
+                            </div>
+                        }
+                    </td>
+
+                    <td>
+                        @(candidate.Artist ?? "Unknown")
+                    </td>
+
+                    <td>
+                        @(candidate.Album ?? "Unknown")
+                    </td>
+
+                    <td>
+                        @(candidate.TrackNumber?.ToString() ?? "-")
+                    </td>
+
+                    <td>
+                        @candidate.Format.ToUpperInvariant()
+                    </td>
+
+                    <td>
+                        @if (candidate.CanPromote)
+                        {
+                            <i class="bi bi-check-circle text-success" aria-hidden="true"></i> <text>READY</text>
+                        }
+                        else
+                        {
+                            <i class="bi bi-x-circle text-danger" aria-hidden="true"></i> <text>BLOCKED</text>
+                        }
+                    </td>
+
+                    <td>
+                        @if (candidate.CanPromote && candidate.Plan is not null)
+                        {
+                            <button class="@_musicPreviewSelection.ButtonClass(candidate)"
+                                    disabled="@_musicPreviewSelection.IsButtonDisabled(candidate, _isScanningMusic || _isExecuting)"
+                                    @onclick="() => PreviewMusicAsync(candidate)">
+                                <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
+                                @_musicPreviewSelection.ButtonText(candidate)
+                            </button>
+                        }
+
+                        <button class="btn btn-sm btn-outline-secondary ms-1"
+                                disabled="@(_isScanningMusic || _isExecuting)"
+                                @onclick="() => IgnoreMusicCandidate(candidate)">
+                            <i class="bi bi-eye-slash" aria-hidden="true"></i>
+                            Ignore
+                        </button>
+                    </td>
+
+                    <td>
+                        <details>
+                            <summary>View paths</summary>
+
+                            <div class="mt-2">
+                                <div>
+                                    <strong>Reason</strong>
+                                </div>
+
+                                <p>
+                                    @candidate.Reason
+                                </p>
+
+                                <div>
+                                    <strong>Source File</strong>
+                                </div>
+
+                                <code>
+                                    @candidate.SourcePath
+                                </code>
+
+                                @if (candidate.Plan is not null)
+                                {
+                                    <div class="mt-2">
+                                        <strong>Target File</strong>
+                                    </div>
+
+                                    <code>
+                                        @candidate.Plan.TargetFilePath
+                                    </code>
+                                }
+                            </div>
+                        </details>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<h2 class="mt-4">
+    Comic Opportunities
+</h2>
+
+@if (!_hasScannedComic)
+{
+    <EmptyState Icon="search" Text="No comic promotion scan has been run yet." />
+}
+else if (_comicCandidates.Count == 0)
+{
+    <EmptyState Icon="check-circle" Text="No comic promotion opportunities were found." />
+}
+else
+{
+    <p>
+        <strong>@_comicCandidates.Count</strong>
+        promotable comic(s) found.
+    </p>
+
+    @if (_isConfirmingComicBatch)
+    {
+        <BatchConfirmBanner IsBusy="_isExecuting"
+                            ConfirmLabel="Confirm Promote"
+                            BusyLabel="Promoting..."
+                            OnConfirm="ConfirmComicBatchAsync"
+                            OnCancel="CancelComicBatchConfirm">
+            <Message>
+                Promote @_pendingComicBatch.Count comic(s)? This creates a hardlink for each.
+            </Message>
+        </BatchConfirmBanner>
+    }
+    else
+    {
+        <div class="mb-2">
+            <button class="btn btn-primary btn-sm"
+                    disabled="@(_isScanningComic || _isExecuting)"
+                    @onclick="() => RequestComicBatchConfirm(GetPromotableComicCandidates())">
+                <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
+                Promote All Comics
+            </button>
+
+            <button class="btn btn-primary btn-sm ms-2"
+                    disabled="@(_isScanningComic || _isExecuting || _comicSelection.Count == 0)"
+                    @onclick="() => RequestComicBatchConfirm(GetSelectedPromotableComicCandidates())">
+                <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
+                Promote Selected (@_comicSelection.Count)
+            </button>
+        </div>
+    }
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Select</th>
+                <th>Title</th>
+                <th>Series</th>
+                <th>Issue</th>
+                <th>Format</th>
+                <th>Status</th>
+                <th>Actions</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            @foreach (var candidate in _comicCandidates.OrderBy(candidate => candidate.Title))
+            {
+                <tr class="@_comicPreviewSelection.RowClass(candidate)">
+                    <SelectableCheckboxCell Checked="_comicSelection.IsSelected(candidate)"
+                                            Disabled="_isScanningComic || _isExecuting"
+                                            OnChanged="selected => _comicSelection.SetSelected(candidate, selected)" />
+
+                    <td>
+                        <strong>@candidate.Title</strong>
+
+                        <div class="text-muted small">
+                            Found @GetCandidateAgeText(candidate.DiscoveredUtc)
+                        </div>
+
+                        @if (!string.IsNullOrWhiteSpace(candidate.DriveProfileName))
+                        {
+                            <div class="text-muted small">
+                                Drive: @candidate.DriveProfileName
+                            </div>
+                        }
+                    </td>
+
+                    <td>
+                        @(candidate.Series ?? "Unknown")
+                    </td>
+
+                    <td>
+                        @(candidate.Issue?.ToString("0.#") ?? "-")
+                    </td>
+
+                    <td>
+                        @candidate.Format.ToUpperInvariant()
+                    </td>
+
+                    <td>
+                        @if (candidate.CanPromote)
+                        {
+                            <i class="bi bi-check-circle text-success" aria-hidden="true"></i> <text>READY</text>
+                        }
+                        else
+                        {
+                            <i class="bi bi-x-circle text-danger" aria-hidden="true"></i> <text>BLOCKED</text>
+                        }
+                    </td>
+
+                    <td>
+                        @if (candidate.CanPromote && candidate.Plan is not null)
+                        {
+                            <button class="@_comicPreviewSelection.ButtonClass(candidate)"
+                                    disabled="@_comicPreviewSelection.IsButtonDisabled(candidate, _isScanningComic || _isExecuting)"
+                                    @onclick="() => PreviewComicAsync(candidate)">
+                                <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
+                                @_comicPreviewSelection.ButtonText(candidate)
+                            </button>
+                        }
+
+                        <button class="btn btn-sm btn-outline-secondary ms-1"
+                                disabled="@(_isScanningComic || _isExecuting)"
+                                @onclick="() => IgnoreComicCandidate(candidate)">
+                            <i class="bi bi-eye-slash" aria-hidden="true"></i>
+                            Ignore
+                        </button>
+                    </td>
+
+                    <td>
+                        <details>
+                            <summary>View paths</summary>
+
+                            <div class="mt-2">
+                                <div>
+                                    <strong>Reason</strong>
+                                </div>
+
+                                <p>
+                                    @candidate.Reason
+                                </p>
+
+                                <div>
+                                    <strong>Source File</strong>
+                                </div>
+
+                                <code>
+                                    @candidate.SourcePath
+                                </code>
+
+                                @if (candidate.Plan is not null)
+                                {
+                                    <div class="mt-2">
+                                        <strong>Target File</strong>
+                                    </div>
+
+                                    <code>
+                                        @candidate.Plan.TargetFilePath
+                                    </code>
+                                }
+                            </div>
+                        </details>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code
+{
+    private List<DriveProfile> _profiles = [];
+
+    private List<MoviePromotionCandidate> _candidates = [];
+
+    private readonly HashSet<(string Title, int? Season)>
+        _confirmingGroups = [];
+
+    private readonly HashSet<(string Title, int? Season)>
+        _confirmingIgnoreSeason = [];
+
+    private readonly HashSet<string> _confirmingIgnoreShow =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly HashSet<string> _confirmingDownloadDelete =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly CandidateSelection<MoviePromotionCandidate> _movieSelection =
+        new(candidate => candidate.SourcePath);
+
+    private readonly PreviewSelection<MoviePromotionCandidate> _moviePreviewSelection =
+        new();
+
+    private bool _isConfirmingMovieBatch;
+
+    private List<MoviePromotionCandidate> _pendingMovieBatch = [];
+
+    private PromotionPreview? _selectedPreview;
+
+    private bool _isScanning;
+    private bool _isExecuting;
+
+    private bool _hasScanned;
+
+    private string? _activeDriveName;
+    private MediaKind? _activeKind;
+
+    private string? _isScanningDrive;
+
+    private string _statusMessage =
+        string.Empty;
+
+    private List<BookPromotionCandidate> _bookCandidates = [];
+
+    private readonly CandidateSelection<BookPromotionCandidate> _bookSelection =
+        new(candidate => candidate.SourcePath);
+
+    private readonly PreviewSelection<BookPromotionCandidate> _bookPreviewSelection =
+        new();
+
+    private bool _isConfirmingBookBatch;
+
+    private List<BookPromotionCandidate> _pendingBookBatch = [];
+
+    private PromotionPreview? _selectedBookPreview;
+
+    private bool _isScanningBooks;
+
+    private bool _hasScannedBooks;
+
+    private string? _activeBookDriveName;
+
+    private List<AudiobookPromotionCandidate> _audiobookCandidates = [];
+
+    private readonly CandidateSelection<AudiobookPromotionCandidate> _audiobookSelection =
+        new(candidate => candidate.SourcePath);
+
+    private readonly PreviewSelection<AudiobookPromotionCandidate> _audiobookPreviewSelection =
+        new();
+
+    private bool _isConfirmingAudiobookBatch;
+
+    private List<AudiobookPromotionCandidate> _pendingAudiobookBatch = [];
+
+    private PromotionPreview? _selectedAudiobookPreview;
+
+    private bool _isScanningAudiobooks;
+
+    private bool _hasScannedAudiobooks;
+
+    private string? _activeAudiobookDriveName;
+
+    private List<MusicPromotionCandidate> _musicCandidates = [];
+
+    private readonly CandidateSelection<MusicPromotionCandidate> _musicSelection =
+        new(candidate => candidate.SourcePath);
+
+    private readonly PreviewSelection<MusicPromotionCandidate> _musicPreviewSelection =
+        new();
+
+    private bool _isConfirmingMusicBatch;
+
+    private List<MusicPromotionCandidate> _pendingMusicBatch = [];
+
+    private PromotionPreview? _selectedMusicPreview;
+
+    private bool _isScanningMusic;
+
+    private bool _hasScannedMusic;
+
+    private string? _activeMusicDriveName;
+
+    private List<ComicPromotionCandidate> _comicCandidates = [];
+
+    private readonly CandidateSelection<ComicPromotionCandidate> _comicSelection =
+        new(candidate => candidate.SourcePath);
+
+    private readonly PreviewSelection<ComicPromotionCandidate> _comicPreviewSelection =
+        new();
+
+    private bool _isConfirmingComicBatch;
+
+    private List<ComicPromotionCandidate> _pendingComicBatch = [];
+
+    private PromotionPreview? _selectedComicPreview;
+
+    private bool _isScanningComic;
+
+    private bool _hasScannedComic;
+
+    private string? _activeComicDriveName;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _profiles =
+            (await SettingsService.GetEnabledDriveProfilesAsync())
+                .OrderBy(profile => profile.Name)
+                .ToList();
+
+        LoadCachedCandidates();
+        LoadCachedBookCandidates();
+        LoadCachedAudiobookCandidates();
+        LoadCachedMusicCandidates();
+        LoadCachedComicCandidates();
+    }
+
+    private List<DriveScanCardRow> BuildRows(
+        DriveProfile profile)
+    {
+        var profileCandidates =
+            PromotionCandidateCache.GetCandidates(profile.Name);
+
+        var movieCount =
+            profileCandidates.Count(candidate => !candidate.IsTv);
+
+        var tvCount =
+            profileCandidates.Count(candidate => candidate.IsTv);
+
+        var bookCount =
+            BookPromotionCandidateCache.GetCandidates(profile.Name).Count;
+
+        var audiobookCount =
+            AudiobookPromotionCandidateCache.GetCandidates(profile.Name).Count;
+
+        var musicCount =
+            MusicPromotionCandidateCache.GetCandidates(profile.Name).Count;
+
+        var comicCount =
+            ComicPromotionCandidateCache.GetCandidates(profile.Name).Count;
+
+        var anyMovieTvScanning =
+            _isScanning || _isScanningDrive == profile.Name;
+
+        var anyBookScanning =
+            _isScanningBooks || _isScanningDrive == profile.Name;
+
+        var anyAudiobookScanning =
+            _isScanningAudiobooks || _isScanningDrive == profile.Name;
+
+        var anyMusicScanning =
+            _isScanningMusic || _isScanningDrive == profile.Name;
+
+        var anyComicScanning =
+            _isScanningComic || _isScanningDrive == profile.Name;
+
+        var anyScanning =
+            anyMovieTvScanning || anyBookScanning || anyAudiobookScanning || anyMusicScanning || anyComicScanning;
+
+        return
+        [
+            new DriveScanCardRow
+            {
+                Label = "Movies",
+                Count = movieCount,
+                LastScanText = FormatScanTime(
+                    PromotionCandidateCache.GetLastScanUtc(profile.Name, MediaKind.Movies)),
+                IsScanning =
+                    _isScanning &&
+                    _activeDriveName == profile.Name &&
+                    _activeKind == MediaKind.Movies,
+                IsDisabled = anyScanning,
+                OnScanClick = () => ScanAsync(profile.Name, MediaKind.Movies)
+            },
+            new DriveScanCardRow
+            {
+                Label = "TV",
+                Count = tvCount,
+                LastScanText = FormatScanTime(
+                    PromotionCandidateCache.GetLastScanUtc(profile.Name, MediaKind.Tv)),
+                IsScanning =
+                    _isScanning &&
+                    _activeDriveName == profile.Name &&
+                    _activeKind == MediaKind.Tv,
+                IsDisabled = anyScanning,
+                OnScanClick = () => ScanAsync(profile.Name, MediaKind.Tv)
+            },
+            new DriveScanCardRow
+            {
+                Label = "Books",
+                Count = bookCount,
+                LastScanText = FormatScanTime(
+                    BookPromotionCandidateCache.GetLastScanUtc(profile.Name)),
+                IsScanning =
+                    _isScanningBooks &&
+                    _activeBookDriveName == profile.Name,
+                IsDisabled = anyScanning,
+                OnScanClick = () => ScanBooksAsync(profile.Name)
+            },
+            new DriveScanCardRow
+            {
+                Label = "Audiobooks",
+                Count = audiobookCount,
+                LastScanText = FormatScanTime(
+                    AudiobookPromotionCandidateCache.GetLastScanUtc(profile.Name)),
+                IsScanning =
+                    _isScanningAudiobooks &&
+                    _activeAudiobookDriveName == profile.Name,
+                IsDisabled = anyScanning,
+                OnScanClick = () => ScanAudiobooksAsync(profile.Name)
+            },
+            new DriveScanCardRow
+            {
+                Label = "Music",
+                Count = musicCount,
+                LastScanText = FormatScanTime(
+                    MusicPromotionCandidateCache.GetLastScanUtc(profile.Name)),
+                IsScanning =
+                    _isScanningMusic &&
+                    _activeMusicDriveName == profile.Name,
+                IsDisabled = anyScanning,
+                OnScanClick = () => ScanMusicAsync(profile.Name)
+            },
+            new DriveScanCardRow
+            {
+                Label = "Comics",
+                Count = comicCount,
+                LastScanText = FormatScanTime(
+                    ComicPromotionCandidateCache.GetLastScanUtc(profile.Name)),
+                IsScanning =
+                    _isScanningComic &&
+                    _activeComicDriveName == profile.Name,
+                IsDisabled = anyScanning,
+                OnScanClick = () => ScanComicAsync(profile.Name)
+            }
+        ];
+    }
+
+    private static string FormatScanTime(
+        DateTime? scanUtc)
+    {
+        if (!scanUtc.HasValue)
+        {
+            return "Never";
+        }
+
+        return new DateTimeOffset(
+                DateTime.SpecifyKind(scanUtc.Value, DateTimeKind.Utc))
+            .LocalDateTime
+            .ToString("g");
+    }
+
+    private List<MoviePromotionCandidate> GetMovieCandidates()
+    {
+        return _candidates
+            .Where(candidate => !candidate.IsTv)
+            .OrderBy(candidate => candidate.Title)
+            .ThenBy(candidate => candidate.Year)
+            .ToList();
+    }
+
+    private List<MoviePromotionCandidate> GetPromotableMovieCandidates()
+    {
+        return GetMovieCandidates()
+            .Where(candidate => candidate.CanPromote && candidate.Plan is not null)
+            .ToList();
+    }
+
+    private List<MoviePromotionCandidate> GetSelectedPromotableMovieCandidates()
+    {
+        return GetPromotableMovieCandidates()
+            .Where(candidate => _movieSelection.IsSelected(candidate))
+            .ToList();
+    }
+
+    private List<BookPromotionCandidate> GetPromotableBookCandidates()
+    {
+        return _bookCandidates
+            .Where(candidate => candidate.CanPromote && candidate.Plan is not null)
+            .ToList();
+    }
+
+    private List<BookPromotionCandidate> GetSelectedPromotableBookCandidates()
+    {
+        return GetPromotableBookCandidates()
+            .Where(candidate => _bookSelection.IsSelected(candidate))
+            .ToList();
+    }
+
+    private List<AudiobookPromotionCandidate> GetPromotableAudiobookCandidates()
+    {
+        return _audiobookCandidates
+            .Where(candidate => candidate.CanPromote && candidate.Plan is not null)
+            .ToList();
+    }
+
+    private List<AudiobookPromotionCandidate> GetSelectedPromotableAudiobookCandidates()
+    {
+        return GetPromotableAudiobookCandidates()
+            .Where(candidate => _audiobookSelection.IsSelected(candidate))
+            .ToList();
+    }
+
+    private List<MusicPromotionCandidate> GetPromotableMusicCandidates()
+    {
+        return _musicCandidates
+            .Where(candidate => candidate.CanPromote && candidate.Plan is not null)
+            .ToList();
+    }
+
+    private List<MusicPromotionCandidate> GetSelectedPromotableMusicCandidates()
+    {
+        return GetPromotableMusicCandidates()
+            .Where(candidate => _musicSelection.IsSelected(candidate))
+            .ToList();
+    }
+
+    private List<ComicPromotionCandidate> GetPromotableComicCandidates()
+    {
+        return _comicCandidates
+            .Where(candidate => candidate.CanPromote && candidate.Plan is not null)
+            .ToList();
+    }
+
+    private List<ComicPromotionCandidate> GetSelectedPromotableComicCandidates()
+    {
+        return GetPromotableComicCandidates()
+            .Where(candidate => _comicSelection.IsSelected(candidate))
+            .ToList();
+    }
+
+    private List<IGrouping<(string Title, int? Season), MoviePromotionCandidate>> GetTvGroups()
+    {
+        return _candidates
+            .Where(candidate => candidate.IsTv)
+            .GroupBy(candidate => (candidate.Title, candidate.Season))
+            .OrderBy(group => group.Key.Title)
+            .ThenBy(group => group.Key.Season)
+            .ToList();
+    }
+
+    private void LoadCachedCandidates()
+    {
+        _candidates =
+            _profiles
+                .SelectMany(profile =>
+                    PromotionCandidateCache.GetCandidates(profile.Name))
+                .GroupBy(
+                    candidate => candidate.SourcePath,
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+
+        _hasScanned =
+            _profiles.Any(profile =>
+                PromotionCandidateCache.GetLastScanUtc(profile.Name).HasValue);
+
+        if (_hasScanned)
+        {
+            _statusMessage =
+                $"Loaded {_candidates.Count} cached promotion opportunity(s).";
+        }
+    }
+
+    private void LoadCachedBookCandidates()
+    {
+        _bookCandidates =
+            _profiles
+                .SelectMany(profile =>
+                    BookPromotionCandidateCache.GetCandidates(profile.Name))
+                .GroupBy(
+                    candidate => candidate.SourcePath,
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+
+        _hasScannedBooks =
+            _profiles.Any(profile =>
+                BookPromotionCandidateCache.GetLastScanUtc(profile.Name).HasValue);
+    }
+
+    private void LoadCachedAudiobookCandidates()
+    {
+        _audiobookCandidates =
+            _profiles
+                .SelectMany(profile =>
+                    AudiobookPromotionCandidateCache.GetCandidates(profile.Name))
+                .GroupBy(
+                    candidate => candidate.SourcePath,
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+
+        _hasScannedAudiobooks =
+            _profiles.Any(profile =>
+                AudiobookPromotionCandidateCache.GetLastScanUtc(profile.Name).HasValue);
+    }
+
+    private void LoadCachedMusicCandidates()
+    {
+        _musicCandidates =
+            _profiles
+                .SelectMany(profile =>
+                    MusicPromotionCandidateCache.GetCandidates(profile.Name))
+                .GroupBy(
+                    candidate => candidate.SourcePath,
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+
+        _hasScannedMusic =
+            _profiles.Any(profile =>
+                MusicPromotionCandidateCache.GetLastScanUtc(profile.Name).HasValue);
+    }
+
+    private void LoadCachedComicCandidates()
+    {
+        _comicCandidates =
+            _profiles
+                .SelectMany(profile =>
+                    ComicPromotionCandidateCache.GetCandidates(profile.Name))
+                .GroupBy(
+                    candidate => candidate.SourcePath,
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+
+        _hasScannedComic =
+            _profiles.Any(profile =>
+                ComicPromotionCandidateCache.GetLastScanUtc(profile.Name).HasValue);
+    }
+
+    private async Task ScanDriveAsync(
+        string driveName)
+    {
+        if (_isScanning || _isScanningBooks || _isScanningAudiobooks || _isScanningMusic || _isScanningComic || _isScanningDrive is not null)
+        {
+            return;
+        }
+
+        _isScanningDrive = driveName;
+
+        try
+        {
+            await ScanAsync(driveName, MediaKind.Movies);
+            await ScanAsync(driveName, MediaKind.Tv);
+            await ScanBooksAsync(driveName);
+            await ScanAudiobooksAsync(driveName);
+            await ScanMusicAsync(driveName);
+            await ScanComicAsync(driveName);
+        }
+        finally
+        {
+            _isScanningDrive = null;
+        }
+    }
+
+    private async Task ScanAsync(
+        string? driveName,
+        MediaKind mediaKind)
+    {
+        if (_isScanning || _isExecuting)
+        {
+            return;
+        }
+
+        _isScanning = true;
+        _activeDriveName = driveName;
+        _activeKind = mediaKind;
+
+        // A rescan invalidates any preview based on the old candidate list -
+        // otherwise the preview card could keep showing a plan for a candidate
+        // that no longer exists (or whose state changed) after this scan.
+        _moviePreviewSelection.Clear();
+        _selectedPreview = null;
+        _confirmingGroups.Clear();
+        _confirmingIgnoreSeason.Clear();
+        _confirmingIgnoreShow.Clear();
+
+        try
+        {
+            var kindLabel =
+                mediaKind switch
+                {
+                    MediaKind.Movies => "Movies",
+                    MediaKind.Tv => "TV",
+                    _ => "Movies/TV"
+                };
+
+            var scanLabel =
+                string.IsNullOrWhiteSpace(driveName)
+                    ? $"all enabled drives ({kindLabel})"
+                    : $"{driveName} ({kindLabel})";
+
+            _statusMessage =
+                $"Scanning {scanLabel}...";
+
+            await PromotionCandidateService.GetCandidatesAsync(
+                driveName,
+                forceRefresh: true,
+                mediaKind);
+
+            LoadCachedCandidates();
+
+            _statusMessage =
+                $"Scan complete. {_candidates.Count} opportunity(s) found.";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Scan failed: {ex.Message}";
+        }
+        finally
+        {
+            _isScanning = false;
+            _activeDriveName = null;
+            _activeKind = null;
+        }
+    }
+
+    private async Task ScanBooksAsync(
+        string? driveName)
+    {
+        if (_isScanningBooks || _isExecuting)
+        {
+            return;
+        }
+
+        _isScanningBooks = true;
+        _activeBookDriveName = driveName;
+
+        _bookPreviewSelection.Clear();
+        _selectedBookPreview = null;
+
+        try
+        {
+            var scanLabel =
+                string.IsNullOrWhiteSpace(driveName)
+                    ? "all enabled drives"
+                    : driveName;
+
+            _statusMessage =
+                $"Scanning {scanLabel} for book promotion opportunities...";
+
+            await BookPromotionCandidateService.GetCandidatesAsync(
+                driveName,
+                forceRefresh: true);
+
+            LoadCachedBookCandidates();
+
+            _statusMessage =
+                $"Scan complete. {_bookCandidates.Count} book opportunity(s) found.";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Book scan failed: {ex.Message}";
+        }
+        finally
+        {
+            _isScanningBooks = false;
+            _activeBookDriveName = null;
+        }
+    }
+
+    private async Task ScanAudiobooksAsync(
+        string? driveName)
+    {
+        if (_isScanningAudiobooks || _isExecuting)
+        {
+            return;
+        }
+
+        _isScanningAudiobooks = true;
+        _activeAudiobookDriveName = driveName;
+
+        _audiobookPreviewSelection.Clear();
+        _selectedAudiobookPreview = null;
+
+        try
+        {
+            var scanLabel =
+                string.IsNullOrWhiteSpace(driveName)
+                    ? "all enabled drives"
+                    : driveName;
+
+            _statusMessage =
+                $"Scanning {scanLabel} for audiobook promotion opportunities...";
+
+            await AudiobookPromotionCandidateService.GetCandidatesAsync(
+                driveName,
+                forceRefresh: true);
+
+            LoadCachedAudiobookCandidates();
+
+            _statusMessage =
+                $"Scan complete. {_audiobookCandidates.Count} audiobook opportunity(s) found.";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Audiobook scan failed: {ex.Message}";
+        }
+        finally
+        {
+            _isScanningAudiobooks = false;
+            _activeAudiobookDriveName = null;
+        }
+    }
+
+    private async Task ScanMusicAsync(
+        string? driveName)
+    {
+        if (_isScanningMusic || _isExecuting)
+        {
+            return;
+        }
+
+        _isScanningMusic = true;
+        _activeMusicDriveName = driveName;
+
+        _musicPreviewSelection.Clear();
+        _selectedMusicPreview = null;
+
+        try
+        {
+            var scanLabel =
+                string.IsNullOrWhiteSpace(driveName)
+                    ? "all enabled drives"
+                    : driveName;
+
+            _statusMessage =
+                $"Scanning {scanLabel} for music promotion opportunities...";
+
+            await MusicPromotionCandidateService.GetCandidatesAsync(
+                driveName,
+                forceRefresh: true);
+
+            LoadCachedMusicCandidates();
+
+            _statusMessage =
+                $"Scan complete. {_musicCandidates.Count} music opportunity(s) found.";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Music scan failed: {ex.Message}";
+        }
+        finally
+        {
+            _isScanningMusic = false;
+            _activeMusicDriveName = null;
+        }
+    }
+
+    private async Task ScanComicAsync(
+        string? driveName)
+    {
+        if (_isScanningComic || _isExecuting)
+        {
+            return;
+        }
+
+        _isScanningComic = true;
+        _activeComicDriveName = driveName;
+
+        _comicPreviewSelection.Clear();
+        _selectedComicPreview = null;
+
+        try
+        {
+            var scanLabel =
+                string.IsNullOrWhiteSpace(driveName)
+                    ? "all enabled drives"
+                    : driveName;
+
+            _statusMessage =
+                $"Scanning {scanLabel} for comic promotion opportunities...";
+
+            await ComicPromotionCandidateService.GetCandidatesAsync(
+                driveName,
+                forceRefresh: true);
+
+            LoadCachedComicCandidates();
+
+            _statusMessage =
+                $"Scan complete. {_comicCandidates.Count} comic opportunity(s) found.";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Comic scan failed: {ex.Message}";
+        }
+        finally
+        {
+            _isScanningComic = false;
+            _activeComicDriveName = null;
+        }
+    }
+
+    private static string GetCandidateAgeText(
+        DateTime discoveredUtc)
+    {
+        if (discoveredUtc == default)
+        {
+            return "at an unknown time";
+        }
+
+        var age =
+            DateTime.UtcNow - discoveredUtc;
+
+        if (age < TimeSpan.Zero)
+        {
+            return "just now";
+        }
+
+        if (age.TotalMinutes < 1)
+        {
+            return "just now";
+        }
+
+        if (age.TotalHours < 1)
+        {
+            var minutes = Math.Max(1, (int)age.TotalMinutes);
+
+            return $"{minutes} minute{(minutes == 1 ? string.Empty : "s")} ago";
+        }
+
+        if (age.TotalDays < 1)
+        {
+            var hours = Math.Max(1, (int)age.TotalHours);
+
+            return $"{hours} hour{(hours == 1 ? string.Empty : "s")} ago";
+        }
+
+        var days = Math.Max(1, (int)age.TotalDays);
+
+        return $"{days} day{(days == 1 ? string.Empty : "s")} ago";
+    }
+
+    private async Task PreviewAsync(
+        MoviePromotionCandidate candidate)
+    {
+        if (_isScanning || _isExecuting || candidate.Plan is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var preview =
+                await PromotionPreviewService
+                    .CreateAsync(candidate.Plan);
+
+            _moviePreviewSelection.Select(candidate);
+            _selectedPreview = preview;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Preview failed: {ex.Message}";
+        }
+    }
+
+    private async Task PreviewBookAsync(
+        BookPromotionCandidate candidate)
+    {
+        if (_isScanningBooks || _isExecuting || candidate.Plan is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var preview =
+                await PromotionPreviewService
+                    .CreateAsync(candidate.Plan);
+
+            _bookPreviewSelection.Select(candidate);
+            _selectedBookPreview = preview;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Preview failed: {ex.Message}";
+        }
+    }
+
+    private void CancelPreview()
+    {
+        _moviePreviewSelection.Clear();
+
+        _selectedPreview = null;
+    }
+
+    private void CancelBookPreview()
+    {
+        _bookPreviewSelection.Clear();
+
+        _selectedBookPreview = null;
+    }
+
+    private async Task PreviewAudiobookAsync(
+        AudiobookPromotionCandidate candidate)
+    {
+        if (_isScanningAudiobooks || _isExecuting || candidate.Plan is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var preview =
+                await PromotionPreviewService
+                    .CreateAsync(candidate.Plan);
+
+            _audiobookPreviewSelection.Select(candidate);
+            _selectedAudiobookPreview = preview;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Preview failed: {ex.Message}";
+        }
+    }
+
+    private void CancelAudiobookPreview()
+    {
+        _audiobookPreviewSelection.Clear();
+
+        _selectedAudiobookPreview = null;
+    }
+
+    private async Task PreviewMusicAsync(
+        MusicPromotionCandidate candidate)
+    {
+        if (_isScanningMusic || _isExecuting || candidate.Plan is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var preview =
+                await PromotionPreviewService
+                    .CreateAsync(candidate.Plan);
+
+            _musicPreviewSelection.Select(candidate);
+            _selectedMusicPreview = preview;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Preview failed: {ex.Message}";
+        }
+    }
+
+    private void CancelMusicPreview()
+    {
+        _musicPreviewSelection.Clear();
+
+        _selectedMusicPreview = null;
+    }
+
+    private async Task PreviewComicAsync(
+        ComicPromotionCandidate candidate)
+    {
+        if (_isScanningComic || _isExecuting || candidate.Plan is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var preview =
+                await PromotionPreviewService
+                    .CreateAsync(candidate.Plan);
+
+            _comicPreviewSelection.Select(candidate);
+            _selectedComicPreview = preview;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Preview failed: {ex.Message}";
+        }
+    }
+
+    private void CancelComicPreview()
+    {
+        _comicPreviewSelection.Clear();
+
+        _selectedComicPreview = null;
+    }
+
+    private async Task LogPromotionHistoryAsync(
+        string title,
+        PromotionPlan? plan,
+        bool success,
+        string message)
+    {
+        var sizeBytes =
+            plan is not null && File.Exists(plan.SourcePath)
+                ? new FileInfo(plan.SourcePath).Length
+                : 0;
+
+        await HistoryService.AddRecordAsync(
+            new HistoryRecord
+            {
+                ActionType =
+                    success
+                        ? HistoryActionType.PromotionSucceeded
+                        : HistoryActionType.PromotionFailed,
+                FileName = title,
+                LibraryPath = plan?.TargetFilePath ?? string.Empty,
+                DownloadPath = plan?.SourcePath ?? string.Empty,
+                SizeBytes = sizeBytes,
+                Success = success,
+                Message = message
+            });
+    }
+
+    private void BumpHealthyHardlinkCount(
+        string driveProfileName,
+        bool isTv)
+    {
+        if (string.IsNullOrWhiteSpace(driveProfileName))
+        {
+            return;
+        }
+
+        WasteCandidateCache.IncrementHealthyHardlinkCount(
+            driveProfileName,
+            isTv ? MediaKind.Tv : MediaKind.Movies);
+    }
+
+    private async Task ExecuteSelectedAsync()
+    {
+        var promotedCandidate =
+            _moviePreviewSelection.Selected;
+
+        if (_isExecuting || promotedCandidate?.Plan is null)
+        {
+            return;
+        }
+
+        _isExecuting = true;
+
+        try
+        {
+            var result =
+                await PromotionExecuteService
+                    .ExecuteAsync(
+                        promotedCandidate.Plan);
+
+            _statusMessage =
+                result.Reason;
+
+            await LogPromotionHistoryAsync(
+                promotedCandidate.Title,
+                promotedCandidate.Plan,
+                result.Success,
+                result.Reason);
+
+            if (result.Success)
+            {
+                BumpHealthyHardlinkCount(
+                    promotedCandidate.DriveProfileName,
+                    promotedCandidate.IsTv);
+
+                PromotionCandidateCache.RemoveCandidate(
+                    promotedCandidate.SourcePath);
+
+                LoadCachedCandidates();
+
+                _moviePreviewSelection.Clear();
+                _selectedPreview = null;
+
+                _statusMessage =
+                    $"{result.Reason} Remaining opportunities: {_candidates.Count}.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Promotion failed: {ex.Message}";
+        }
+        finally
+        {
+            _isExecuting = false;
+        }
+    }
+
+    private async Task ExecuteSelectedBookAsync()
+    {
+        var promotedCandidate =
+            _bookPreviewSelection.Selected;
+
+        if (_isExecuting || promotedCandidate?.Plan is null)
+        {
+            return;
+        }
+
+        _isExecuting = true;
+
+        try
+        {
+            var result =
+                await PromotionExecuteService
+                    .ExecuteAsync(
+                        promotedCandidate.Plan);
+
+            _statusMessage =
+                result.Reason;
+
+            await LogPromotionHistoryAsync(
+                promotedCandidate.Title,
+                promotedCandidate.Plan,
+                result.Success,
+                result.Reason);
+
+            if (result.Success)
+            {
+                BookPromotionCandidateCache.RemoveCandidate(
+                    promotedCandidate.SourcePath);
+
+                LoadCachedBookCandidates();
+
+                _bookPreviewSelection.Clear();
+                _selectedBookPreview = null;
+
+                _statusMessage =
+                    $"{result.Reason} Remaining book opportunities: {_bookCandidates.Count}.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Promotion failed: {ex.Message}";
+        }
+        finally
+        {
+            _isExecuting = false;
+        }
+    }
+
+    private async Task ExecuteSelectedAudiobookAsync()
+    {
+        var promotedCandidate =
+            _audiobookPreviewSelection.Selected;
+
+        if (_isExecuting || promotedCandidate?.Plan is null)
+        {
+            return;
+        }
+
+        _isExecuting = true;
+
+        try
+        {
+            var result =
+                await PromotionExecuteService
+                    .ExecuteAsync(
+                        promotedCandidate.Plan);
+
+            _statusMessage =
+                result.Reason;
+
+            await LogPromotionHistoryAsync(
+                promotedCandidate.Title,
+                promotedCandidate.Plan,
+                result.Success,
+                result.Reason);
+
+            if (result.Success)
+            {
+                AudiobookPromotionCandidateCache.RemoveCandidate(
+                    promotedCandidate.SourcePath);
+
+                LoadCachedAudiobookCandidates();
+
+                _audiobookPreviewSelection.Clear();
+                _selectedAudiobookPreview = null;
+
+                _statusMessage =
+                    $"{result.Reason} Remaining audiobook opportunities: {_audiobookCandidates.Count}.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Promotion failed: {ex.Message}";
+        }
+        finally
+        {
+            _isExecuting = false;
+        }
+    }
+
+    private async Task ExecuteSelectedMusicAsync()
+    {
+        var promotedCandidate =
+            _musicPreviewSelection.Selected;
+
+        if (_isExecuting || promotedCandidate?.Plan is null)
+        {
+            return;
+        }
+
+        _isExecuting = true;
+
+        try
+        {
+            var result =
+                await PromotionExecuteService
+                    .ExecuteAsync(
+                        promotedCandidate.Plan);
+
+            _statusMessage =
+                result.Reason;
+
+            await LogPromotionHistoryAsync(
+                promotedCandidate.Title,
+                promotedCandidate.Plan,
+                result.Success,
+                result.Reason);
+
+            if (result.Success)
+            {
+                MusicPromotionCandidateCache.RemoveCandidate(
+                    promotedCandidate.SourcePath);
+
+                LoadCachedMusicCandidates();
+
+                _musicPreviewSelection.Clear();
+                _selectedMusicPreview = null;
+
+                _statusMessage =
+                    $"{result.Reason} Remaining music opportunities: {_musicCandidates.Count}.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Promotion failed: {ex.Message}";
+        }
+        finally
+        {
+            _isExecuting = false;
+        }
+    }
+
+    private async Task ExecuteSelectedComicAsync()
+    {
+        var promotedCandidate =
+            _comicPreviewSelection.Selected;
+
+        if (_isExecuting || promotedCandidate?.Plan is null)
+        {
+            return;
+        }
+
+        _isExecuting = true;
+
+        try
+        {
+            var result =
+                await PromotionExecuteService
+                    .ExecuteAsync(
+                        promotedCandidate.Plan);
+
+            _statusMessage =
+                result.Reason;
+
+            await LogPromotionHistoryAsync(
+                promotedCandidate.Title,
+                promotedCandidate.Plan,
+                result.Success,
+                result.Reason);
+
+            if (result.Success)
+            {
+                ComicPromotionCandidateCache.RemoveCandidate(
+                    promotedCandidate.SourcePath);
+
+                LoadCachedComicCandidates();
+
+                _comicPreviewSelection.Clear();
+                _selectedComicPreview = null;
+
+                _statusMessage =
+                    $"{result.Reason} Remaining comic opportunities: {_comicCandidates.Count}.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Promotion failed: {ex.Message}";
+        }
+        finally
+        {
+            _isExecuting = false;
+        }
+    }
+
+    private void RequestGroupConfirm(
+        (string Title, int? Season) key)
+    {
+        _confirmingGroups.Add(key);
+    }
+
+    private void CancelGroupConfirm(
+        (string Title, int? Season) key)
+    {
+        _confirmingGroups.Remove(key);
+    }
+
+    private async Task PromoteGroupAsync(
+        (string Title, int? Season) key,
+        List<MoviePromotionCandidate> episodes)
+    {
+        if (_isExecuting)
+        {
+            return;
+        }
+
+        _isExecuting = true;
+
+        var succeeded = 0;
+        var failed = 0;
+
+        try
+        {
+            foreach (var episode in
+                episodes
+                    .Where(episode =>
+                        episode.CanPromote &&
+                        episode.Plan is not null)
+                    .ToList())
+            {
+                var result =
+                    await PromotionExecuteService
+                        .ExecuteAsync(episode.Plan!);
+
+                await LogPromotionHistoryAsync(
+                    episode.Title,
+                    episode.Plan,
+                    result.Success,
+                    result.Reason);
+
+                if (result.Success)
+                {
+                    succeeded++;
+
+                    BumpHealthyHardlinkCount(
+                        episode.DriveProfileName,
+                        episode.IsTv);
+
+                    PromotionCandidateCache.RemoveCandidate(
+                        episode.SourcePath);
+                }
+                else
+                {
+                    failed++;
+                }
+            }
+
+            LoadCachedCandidates();
+
+            _confirmingGroups.Remove(key);
+
+            _statusMessage =
+                failed == 0
+                    ? $"{key.Title} Season {key.Season?.ToString("00") ?? "Unknown"}: promoted {succeeded} episode(s)."
+                    : $"{key.Title} Season {key.Season?.ToString("00") ?? "Unknown"}: promoted {succeeded} episode(s), {failed} failed.";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Batch promotion failed: {ex.Message}";
+        }
+        finally
+        {
+            _isExecuting = false;
+        }
+    }
+
+    private void RequestMovieBatchConfirm(
+        List<MoviePromotionCandidate> candidates)
+    {
+        if (_isExecuting || candidates.Count == 0)
+        {
+            return;
+        }
+
+        _pendingMovieBatch = candidates;
+        _isConfirmingMovieBatch = true;
+    }
+
+    private void CancelMovieBatchConfirm()
+    {
+        _isConfirmingMovieBatch = false;
+        _pendingMovieBatch = [];
+    }
+
+    private async Task ConfirmMovieBatchAsync()
+    {
+        if (_isExecuting)
+        {
+            return;
+        }
+
+        _isExecuting = true;
+
+        var succeeded = 0;
+        var failed = 0;
+
+        try
+        {
+            foreach (var candidate in _pendingMovieBatch.ToList())
+            {
+                var result =
+                    await PromotionExecuteService
+                        .ExecuteAsync(candidate.Plan!);
+
+                await LogPromotionHistoryAsync(
+                    candidate.Title,
+                    candidate.Plan,
+                    result.Success,
+                    result.Reason);
+
+                if (result.Success)
+                {
+                    succeeded++;
+
+                    BumpHealthyHardlinkCount(
+                        candidate.DriveProfileName,
+                        candidate.IsTv);
+
+                    PromotionCandidateCache.RemoveCandidate(
+                        candidate.SourcePath);
+
+                    _movieSelection.Remove(candidate);
+                }
+                else
+                {
+                    failed++;
+                }
+            }
+
+            LoadCachedCandidates();
+
+            _isConfirmingMovieBatch = false;
+            _pendingMovieBatch = [];
+
+            _statusMessage =
+                failed == 0
+                    ? $"Promoted {succeeded} movie(s)."
+                    : $"Promoted {succeeded} movie(s), {failed} failed.";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Batch promotion failed: {ex.Message}";
+        }
+        finally
+        {
+            _isExecuting = false;
+        }
+    }
+
+    private void RequestBookBatchConfirm(
+        List<BookPromotionCandidate> candidates)
+    {
+        if (_isExecuting || candidates.Count == 0)
+        {
+            return;
+        }
+
+        _pendingBookBatch = candidates;
+        _isConfirmingBookBatch = true;
+    }
+
+    private void CancelBookBatchConfirm()
+    {
+        _isConfirmingBookBatch = false;
+        _pendingBookBatch = [];
+    }
+
+    private async Task ConfirmBookBatchAsync()
+    {
+        if (_isExecuting)
+        {
+            return;
+        }
+
+        _isExecuting = true;
+
+        var succeeded = 0;
+        var failed = 0;
+
+        try
+        {
+            foreach (var candidate in _pendingBookBatch.ToList())
+            {
+                var result =
+                    await PromotionExecuteService
+                        .ExecuteAsync(candidate.Plan!);
+
+                await LogPromotionHistoryAsync(
+                    candidate.Title,
+                    candidate.Plan,
+                    result.Success,
+                    result.Reason);
+
+                if (result.Success)
+                {
+                    succeeded++;
+
+                    BookPromotionCandidateCache.RemoveCandidate(
+                        candidate.SourcePath);
+
+                    _bookSelection.Remove(candidate);
+                }
+                else
+                {
+                    failed++;
+                }
+            }
+
+            LoadCachedBookCandidates();
+
+            _isConfirmingBookBatch = false;
+            _pendingBookBatch = [];
+
+            _statusMessage =
+                failed == 0
+                    ? $"Promoted {succeeded} book(s)."
+                    : $"Promoted {succeeded} book(s), {failed} failed.";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Batch promotion failed: {ex.Message}";
+        }
+        finally
+        {
+            _isExecuting = false;
+        }
+    }
+
+    private void RequestAudiobookBatchConfirm(
+        List<AudiobookPromotionCandidate> candidates)
+    {
+        if (_isExecuting || candidates.Count == 0)
+        {
+            return;
+        }
+
+        _pendingAudiobookBatch = candidates;
+        _isConfirmingAudiobookBatch = true;
+    }
+
+    private void CancelAudiobookBatchConfirm()
+    {
+        _isConfirmingAudiobookBatch = false;
+        _pendingAudiobookBatch = [];
+    }
+
+    private async Task ConfirmAudiobookBatchAsync()
+    {
+        if (_isExecuting)
+        {
+            return;
+        }
+
+        _isExecuting = true;
+
+        var succeeded = 0;
+        var failed = 0;
+
+        try
+        {
+            foreach (var candidate in _pendingAudiobookBatch.ToList())
+            {
+                var result =
+                    await PromotionExecuteService
+                        .ExecuteAsync(candidate.Plan!);
+
+                await LogPromotionHistoryAsync(
+                    candidate.Title,
+                    candidate.Plan,
+                    result.Success,
+                    result.Reason);
+
+                if (result.Success)
+                {
+                    succeeded++;
+
+                    AudiobookPromotionCandidateCache.RemoveCandidate(
+                        candidate.SourcePath);
+
+                    _audiobookSelection.Remove(candidate);
+                }
+                else
+                {
+                    failed++;
+                }
+            }
+
+            LoadCachedAudiobookCandidates();
+
+            _isConfirmingAudiobookBatch = false;
+            _pendingAudiobookBatch = [];
+
+            _statusMessage =
+                failed == 0
+                    ? $"Promoted {succeeded} audiobook(s)."
+                    : $"Promoted {succeeded} audiobook(s), {failed} failed.";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Batch promotion failed: {ex.Message}";
+        }
+        finally
+        {
+            _isExecuting = false;
+        }
+    }
+
+    private void RequestMusicBatchConfirm(
+        List<MusicPromotionCandidate> candidates)
+    {
+        if (_isExecuting || candidates.Count == 0)
+        {
+            return;
+        }
+
+        _pendingMusicBatch = candidates;
+        _isConfirmingMusicBatch = true;
+    }
+
+    private void CancelMusicBatchConfirm()
+    {
+        _isConfirmingMusicBatch = false;
+        _pendingMusicBatch = [];
+    }
+
+    private async Task ConfirmMusicBatchAsync()
+    {
+        if (_isExecuting)
+        {
+            return;
+        }
+
+        _isExecuting = true;
+
+        var succeeded = 0;
+        var failed = 0;
+
+        try
+        {
+            foreach (var candidate in _pendingMusicBatch.ToList())
+            {
+                var result =
+                    await PromotionExecuteService
+                        .ExecuteAsync(candidate.Plan!);
+
+                await LogPromotionHistoryAsync(
+                    candidate.Title,
+                    candidate.Plan,
+                    result.Success,
+                    result.Reason);
+
+                if (result.Success)
+                {
+                    succeeded++;
+
+                    MusicPromotionCandidateCache.RemoveCandidate(
+                        candidate.SourcePath);
+
+                    _musicSelection.Remove(candidate);
+                }
+                else
+                {
+                    failed++;
+                }
+            }
+
+            LoadCachedMusicCandidates();
+
+            _isConfirmingMusicBatch = false;
+            _pendingMusicBatch = [];
+
+            _statusMessage =
+                failed == 0
+                    ? $"Promoted {succeeded} track(s)."
+                    : $"Promoted {succeeded} track(s), {failed} failed.";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Batch promotion failed: {ex.Message}";
+        }
+        finally
+        {
+            _isExecuting = false;
+        }
+    }
+
+    private void RequestComicBatchConfirm(
+        List<ComicPromotionCandidate> candidates)
+    {
+        if (_isExecuting || candidates.Count == 0)
+        {
+            return;
+        }
+
+        _pendingComicBatch = candidates;
+        _isConfirmingComicBatch = true;
+    }
+
+    private void CancelComicBatchConfirm()
+    {
+        _isConfirmingComicBatch = false;
+        _pendingComicBatch = [];
+    }
+
+    private async Task ConfirmComicBatchAsync()
+    {
+        if (_isExecuting)
+        {
+            return;
+        }
+
+        _isExecuting = true;
+
+        var succeeded = 0;
+        var failed = 0;
+
+        try
+        {
+            foreach (var candidate in _pendingComicBatch.ToList())
+            {
+                var result =
+                    await PromotionExecuteService
+                        .ExecuteAsync(candidate.Plan!);
+
+                await LogPromotionHistoryAsync(
+                    candidate.Title,
+                    candidate.Plan,
+                    result.Success,
+                    result.Reason);
+
+                if (result.Success)
+                {
+                    succeeded++;
+
+                    ComicPromotionCandidateCache.RemoveCandidate(
+                        candidate.SourcePath);
+
+                    _comicSelection.Remove(candidate);
+                }
+                else
+                {
+                    failed++;
+                }
+            }
+
+            LoadCachedComicCandidates();
+
+            _isConfirmingComicBatch = false;
+            _pendingComicBatch = [];
+
+            _statusMessage =
+                failed == 0
+                    ? $"Promoted {succeeded} comic(s)."
+                    : $"Promoted {succeeded} comic(s), {failed} failed.";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Batch promotion failed: {ex.Message}";
+        }
+        finally
+        {
+            _isExecuting = false;
+        }
+    }
+
+    private async Task DeleteDownloadCopyAsync(
+        MoviePromotionCandidate candidate)
+    {
+        if (_isExecuting)
+        {
+            return;
+        }
+
+        _isExecuting = true;
+
+        try
+        {
+            var sizeBytes =
+                File.Exists(candidate.SourcePath)
+                    ? new FileInfo(candidate.SourcePath).Length
+                    : 0;
+
+            var quarantinePath =
+                await QuarantineService.QuarantineFileAsync(
+                    candidate.SourcePath);
+
+            var success =
+                !string.IsNullOrWhiteSpace(quarantinePath);
+
+            await HistoryService.AddRecordAsync(
+                new HistoryRecord
+                {
+                    ActionType = HistoryActionType.DownloadCopyRemoved,
+                    FileName = candidate.Title,
+                    LibraryPath = candidate.PreviousLibraryPath ?? string.Empty,
+                    DownloadPath = candidate.SourcePath,
+                    QuarantinePath = quarantinePath ?? string.Empty,
+                    SizeBytes = sizeBytes,
+                    Success = success,
+                    Message =
+                        success
+                            ? "Download copy moved to Quarantine after its library copy was removed."
+                            : "Failed to move download copy to Quarantine."
+                });
+
+            if (success)
+            {
+                PromotionCandidateCache.RemoveCandidate(candidate.SourcePath);
+
+                LoadCachedCandidates();
+
+                _statusMessage =
+                    $"Moved \"{candidate.Title}\"'s download copy to Quarantine.";
+            }
+            else
+            {
+                _statusMessage =
+                    $"Couldn't move \"{candidate.Title}\"'s download copy to Quarantine.";
+            }
+        }
+        finally
+        {
+            _confirmingDownloadDelete.Remove(candidate.SourcePath);
+            _isExecuting = false;
+        }
+    }
+
+    private void IgnoreMovieCandidate(
+        MoviePromotionCandidate candidate)
+    {
+        IgnoredItemsService.Add(
+            new IgnoredItem
+            {
+                SourcePath = candidate.SourcePath,
+                Title = candidate.Title,
+                Category =
+                    candidate.IsTv
+                        ? IgnoredCategory.Tv
+                        : IgnoredCategory.Movie,
+                Year = candidate.Year,
+                Season = candidate.Season,
+                Episode = candidate.Episode,
+                DriveProfileName = candidate.DriveProfileName,
+                IgnoredUtc = DateTime.UtcNow,
+                Reason = candidate.Reason
+            });
+
+        PromotionCandidateCache.RemoveCandidate(candidate.SourcePath);
+        _movieSelection.Remove(candidate);
+
+        LoadCachedCandidates();
+
+        _statusMessage =
+            $"Ignored \"{candidate.Title}\". It won't reappear until un-ignored and rescanned.";
+    }
+
+    private static string SeasonLabel(
+        (string Title, int? Season) key) =>
+        $"{key.Title} Season {key.Season?.ToString("00") ?? "Unknown"}";
+
+    // Bulk version of IgnoreMovieCandidate for a season or a whole show.
+    private void IgnoreEpisodes(
+        List<MoviePromotionCandidate> episodes,
+        string label)
+    {
+        var now = DateTime.UtcNow;
+
+        IgnoredItemsService.AddRange(
+            episodes.Select(candidate =>
+                new IgnoredItem
+                {
+                    SourcePath = candidate.SourcePath,
+                    Title = candidate.Title,
+                    Category = IgnoredCategory.Tv,
+                    Year = candidate.Year,
+                    Season = candidate.Season,
+                    Episode = candidate.Episode,
+                    DriveProfileName = candidate.DriveProfileName,
+                    IgnoredUtc = now,
+                    Reason = candidate.Reason
+                }));
+
+        foreach (var candidate in episodes)
+        {
+            PromotionCandidateCache.RemoveCandidate(candidate.SourcePath);
+            _movieSelection.Remove(candidate);
+        }
+
+        _confirmingIgnoreSeason.Clear();
+        _confirmingIgnoreShow.Clear();
+
+        LoadCachedCandidates();
+
+        _statusMessage =
+            $"Ignored {episodes.Count} episode(s) of {label}. They won't reappear until un-ignored and rescanned.";
+    }
+
+    private void IgnoreBookCandidate(
+        BookPromotionCandidate candidate)
+    {
+        IgnoredItemsService.Add(
+            new IgnoredItem
+            {
+                SourcePath = candidate.SourcePath,
+                Title = candidate.Title,
+                Category = IgnoredCategory.Book,
+                Author = candidate.Author,
+                DriveProfileName = candidate.DriveProfileName,
+                IgnoredUtc = DateTime.UtcNow,
+                Reason = candidate.Reason
+            });
+
+        BookPromotionCandidateCache.RemoveCandidate(candidate.SourcePath);
+        _bookSelection.Remove(candidate);
+
+        LoadCachedBookCandidates();
+
+        _statusMessage =
+            $"Ignored \"{candidate.Title}\". It won't reappear until un-ignored and rescanned.";
+    }
+
+    private void IgnoreAudiobookCandidate(
+        AudiobookPromotionCandidate candidate)
+    {
+        IgnoredItemsService.Add(
+            new IgnoredItem
+            {
+                SourcePath = candidate.SourcePath,
+                Title = candidate.Title,
+                Category = IgnoredCategory.Audiobook,
+                Author = candidate.Author,
+                DriveProfileName = candidate.DriveProfileName,
+                IgnoredUtc = DateTime.UtcNow,
+                Reason = candidate.Reason
+            });
+
+        AudiobookPromotionCandidateCache.RemoveCandidate(candidate.SourcePath);
+        _audiobookSelection.Remove(candidate);
+
+        LoadCachedAudiobookCandidates();
+
+        _statusMessage =
+            $"Ignored \"{candidate.Title}\". It won't reappear until un-ignored and rescanned.";
+    }
+
+    private void IgnoreMusicCandidate(
+        MusicPromotionCandidate candidate)
+    {
+        IgnoredItemsService.Add(
+            new IgnoredItem
+            {
+                SourcePath = candidate.SourcePath,
+                Title = candidate.Title,
+                Category = IgnoredCategory.Music,
+                Author = candidate.Artist,
+                DriveProfileName = candidate.DriveProfileName,
+                IgnoredUtc = DateTime.UtcNow,
+                Reason = candidate.Reason
+            });
+
+        MusicPromotionCandidateCache.RemoveCandidate(candidate.SourcePath);
+        _musicSelection.Remove(candidate);
+
+        LoadCachedMusicCandidates();
+
+        _statusMessage =
+            $"Ignored \"{candidate.Title}\". It won't reappear until un-ignored and rescanned.";
+    }
+
+    private void IgnoreComicCandidate(
+        ComicPromotionCandidate candidate)
+    {
+        IgnoredItemsService.Add(
+            new IgnoredItem
+            {
+                SourcePath = candidate.SourcePath,
+                Title = candidate.Title,
+                Category = IgnoredCategory.Comic,
+                Author = candidate.Author,
+                DriveProfileName = candidate.DriveProfileName,
+                IgnoredUtc = DateTime.UtcNow,
+                Reason = candidate.Reason
+            });
+
+        ComicPromotionCandidateCache.RemoveCandidate(candidate.SourcePath);
+        _comicSelection.Remove(candidate);
+
+        LoadCachedComicCandidates();
+
+        _statusMessage =
+            $"Ignored \"{candidate.Title}\". It won't reappear until un-ignored and rescanned.";
+    }
+}

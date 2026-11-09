@@ -1,0 +1,76 @@
+@using Simplifiarr.Core.Models
+
+<p class="text-muted">
+    Tick the file(s) inside this torrent you're trying to cross-seed. A
+    torrent's piece hashes cover <em>all</em> its files concatenated
+    together - picking a file here doesn't mean "verify this piece," it
+    means "prove this specific file is byte-identical to what this torrent
+    expects," which this tool does by checking every piece that falls
+    entirely inside that file. Pieces that straddle into a neighboring
+    file can't be checked from one file alone, and are reported separately
+    below as "boundary" pieces - that's an expected limit, not a failure.
+</p>
+
+@{
+    var visibleEntries =
+        Entries
+            .Where(e => e.LengthBytes > 0)
+            .OrderByDescending(e => e.LengthBytes)
+            .ToList();
+
+    var allSelected =
+        visibleEntries.Count > 0 &&
+        visibleEntries.All(Selected.Contains);
+}
+
+<div class="table-responsive">
+    <table class="table table-sm">
+        <thead>
+            <tr>
+                <th style="width: 2rem;">
+                    <input type="checkbox"
+                           title="Select all / none"
+                           checked="@allSelected"
+                           @onchange="() => OnToggleAll.InvokeAsync()" />
+                </th>
+                <th>File</th>
+                <th>Size</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var entry in visibleEntries)
+            {
+                var isSelected = Selected.Contains(entry);
+
+                <tr class="@(isSelected ? "table-active" : "")">
+                    <td>
+                        <input type="checkbox"
+                               checked="@isSelected"
+                               @onchange="() => OnToggled.InvokeAsync(entry)" />
+                    </td>
+                    <td>@entry.RelativePath</td>
+                    <td>@entry.LengthBytes bytes</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+<p class="mb-0">
+    <strong>Selected:</strong> @Selected.Count of @visibleEntries.Count file(s)
+</p>
+
+@code
+{
+    [Parameter, EditorRequired]
+    public IReadOnlyList<TorrentFileEntry> Entries { get; set; } = [];
+
+    [Parameter]
+    public IReadOnlyCollection<TorrentFileEntry> Selected { get; set; } = [];
+
+    [Parameter]
+    public EventCallback<TorrentFileEntry> OnToggled { get; set; }
+
+    [Parameter]
+    public EventCallback OnToggleAll { get; set; }
+}

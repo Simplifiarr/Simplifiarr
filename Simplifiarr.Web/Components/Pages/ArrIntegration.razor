@@ -1,0 +1,239 @@
+@page "/arr"
+@rendermode InteractiveServer
+
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+
+@inject IArrEnrichmentService ArrEnrichmentService
+@inject ISettingsService SettingsService
+
+<PageTitle>Arr Integration</PageTitle>
+
+<h1>Arr Integration</h1>
+
+<p>
+    Enriches your cataloged Movies and TV episodes with metadata from Radarr
+    and Sonarr - TMDB/TVDB ID, genres, quality profile, and monitored state.
+    This doesn't change anything in Radarr, Sonarr, or your library; it's a
+    one-way, on-demand sync used to build alternate collections later.
+    Rescan Movies/TV on Hardlinks or Potential Waste first so there's a
+    catalog to match against.
+</p>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <h5>Radarr</h5>
+
+        @if (string.IsNullOrWhiteSpace(_radarrUrl))
+        {
+            <div class="alert alert-warning">
+                Radarr isn't configured yet. Set a Radarr URL and API key on
+                the <a href="settings">Settings</a> page first.
+            </div>
+        }
+
+        <button type="button"
+                class="btn btn-primary"
+                disabled="@_isSyncingRadarr"
+                @onclick="SyncRadarrAsync">
+            <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
+            @(_isSyncingRadarr ? "Syncing..." : "Sync Radarr Metadata")
+        </button>
+
+        <StatusMessage Message="@_radarrSyncError" Severity="StatusSeverity.Danger" />
+
+        @if (_radarrResult is not null)
+        {
+            <p class="mt-3">
+                <strong>@_radarrResult.TotalFetched</strong> movie(s) fetched from Radarr |
+                <strong>@_radarrResult.Matched</strong> matched to your catalog |
+                <strong>@_radarrResult.Unmatched</strong> unmatched
+            </p>
+
+            @if (_radarrResult.MatchedAssets.Count > 0)
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Title</th>
+                                <th>Year</th>
+                                <th>TMDB ID</th>
+                                <th>Genres</th>
+                                <th>Quality Profile ID</th>
+                                <th>Monitored</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var asset in _radarrResult.MatchedAssets)
+                            {
+                                <tr>
+                                    <td>@asset.Title</td>
+                                    <td>@asset.Year</td>
+                                    <td>@asset.TmdbId</td>
+                                    <td>@string.Join(", ", asset.Genres)</td>
+                                    <td>@asset.QualityProfileId</td>
+                                    <td>@asset.Monitored</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        }
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <h5>Sonarr</h5>
+
+        @if (string.IsNullOrWhiteSpace(_sonarrUrl))
+        {
+            <div class="alert alert-warning">
+                Sonarr isn't configured yet. Set a Sonarr URL and API key on
+                the <a href="settings">Settings</a> page first.
+            </div>
+        }
+
+        <button type="button"
+                class="btn btn-primary"
+                disabled="@_isSyncingSonarr"
+                @onclick="SyncSonarrAsync">
+            <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
+            @(_isSyncingSonarr ? "Syncing..." : "Sync Sonarr Metadata")
+        </button>
+
+        <StatusMessage Message="@_sonarrSyncError" Severity="StatusSeverity.Danger" />
+
+        @if (_sonarrResult is not null)
+        {
+            <p class="mt-3">
+                <strong>@_sonarrResult.TotalFetched</strong> episode file(s) fetched from Sonarr |
+                <strong>@_sonarrResult.Matched</strong> matched to your catalog |
+                <strong>@_sonarrResult.Unmatched</strong> unmatched
+            </p>
+
+            @if (_sonarrResult.MatchedAssets.Count > 0)
+            {
+                @foreach (var show in ShowGroup.GroupByShow(_sonarrResult.MatchedAssets))
+                {
+                    <details class="mt-3">
+                        <summary>
+                            <strong>@show.Title</strong> - @show.EpisodeCount episode(s)
+                        </summary>
+
+                        <div class="mt-2">
+                            @foreach (var season in show.Seasons)
+                            {
+                                <h6 class="mt-3">
+                                    @(season.Season.HasValue ? $"Season {season.Season:00}" : "Season Unknown")
+                                    - @season.Episodes.Count episode(s)
+                                </h6>
+
+                                <div class="table-responsive">
+                                    <table class="table table-sm">
+                                        <thead>
+                                            <tr>
+                                                <th>Episode</th>
+                                                <th>Title</th>
+                                                <th>TVDB ID</th>
+                                                <th>Genres</th>
+                                                <th>Quality Profile ID</th>
+                                                <th>Monitored</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var asset in season.Episodes)
+                                            {
+                                                <tr>
+                                                    <td>@(asset.Episode.HasValue ? $"E{asset.Episode:00}" : "Unknown")</td>
+                                                    <td>@asset.EpisodeTitle</td>
+                                                    <td>@asset.TvdbId</td>
+                                                    <td>@string.Join(", ", asset.Genres)</td>
+                                                    <td>@asset.QualityProfileId</td>
+                                                    <td>@asset.Monitored</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        </div>
+                    </details>
+                }
+            }
+        }
+    </div>
+</div>
+
+@code
+{
+    private ArrEnrichmentResult? _radarrResult;
+    private ArrEnrichmentResult? _sonarrResult;
+    private bool _isSyncingRadarr;
+    private bool _isSyncingSonarr;
+    private string? _radarrSyncError;
+    private string? _sonarrSyncError;
+    private string _radarrUrl = string.Empty;
+    private string _sonarrUrl = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var settings =
+            await SettingsService.GetSettingsAsync();
+
+        _radarrUrl = settings.RadarrUrl;
+        _sonarrUrl = settings.SonarrUrl;
+    }
+
+    private async Task SyncRadarrAsync()
+    {
+        if (_isSyncingRadarr)
+        {
+            return;
+        }
+
+        _isSyncingRadarr = true;
+        _radarrSyncError = null;
+
+        try
+        {
+            _radarrResult =
+                await ArrEnrichmentService.EnrichFromRadarrAsync();
+        }
+        catch (Exception ex)
+        {
+            _radarrSyncError = $"Radarr sync failed: {ex.Message}";
+        }
+        finally
+        {
+            _isSyncingRadarr = false;
+        }
+    }
+
+    private async Task SyncSonarrAsync()
+    {
+        if (_isSyncingSonarr)
+        {
+            return;
+        }
+
+        _isSyncingSonarr = true;
+        _sonarrSyncError = null;
+
+        try
+        {
+            _sonarrResult =
+                await ArrEnrichmentService.EnrichFromSonarrAsync();
+        }
+        catch (Exception ex)
+        {
+            _sonarrSyncError = $"Sonarr sync failed: {ex.Message}";
+        }
+        finally
+        {
+            _isSyncingSonarr = false;
+        }
+    }
+}

@@ -1,0 +1,243 @@
+/*
+  App-wide theme tokens. Deliberately NOT a Blazor-scoped .razor.css file -
+  scoping caused several classes (section-header, waste-queue-table, etc.)
+  to silently render unstyled everywhere except the one page they were
+  accidentally scoped to. This file overrides Bootstrap 5.3's own --bs-*
+  custom properties, so every existing btn/alert/card/table class picks up
+  the theme automatically with no markup changes.
+*/
+
+:root {
+    --bs-primary: #7c3aed;
+    --bs-primary-rgb: 124, 58, 237;
+    --bs-primary-bg-subtle: #ede9fe;
+    --bs-primary-border-subtle: #ddd6fe;
+    --bs-primary-text-emphasis: #5b21b6;
+
+    --bs-body-bg: #f8f7fb;
+    --bs-body-bg-rgb: 248, 247, 251;
+    --bs-body-color: #1e1b2e;
+    --bs-body-color-rgb: 30, 27, 46;
+    --bs-emphasis-color: #100e19;
+    --bs-secondary-color: #6b7280;
+    --bs-secondary-bg: #efedf5;
+    --bs-tertiary-bg: #f1eff8;
+    --bs-border-color: #e5e7eb;
+
+    --bs-link-color: #7c3aed;
+    --bs-link-color-rgb: 124, 58, 237;
+    --bs-link-hover-color: #6d28d9;
+    --bs-link-hover-color-rgb: 109, 40, 217;
+
+    --app-accent-strong: #7b2cbf;
+    --app-accent-light: #c77dff;
+    --app-btn-primary-color: #ffffff;
+}
+
+[data-bs-theme="dark"] {
+    --bs-primary: #a78bfa;
+    --bs-primary-rgb: 167, 139, 250;
+    --bs-primary-bg-subtle: #3b2564;
+    --bs-primary-border-subtle: #4c2f7c;
+    --bs-primary-text-emphasis: #c4b5fd;
+
+    --bs-body-bg: #17141f;
+    --bs-body-bg-rgb: 23, 20, 31;
+    --bs-body-color: #f3f1f9;
+    --bs-body-color-rgb: 243, 241, 249;
+    --bs-emphasis-color: #ffffff;
+    --bs-secondary-color: #a5a0b8;
+    --bs-secondary-bg: #231e30;
+    --bs-tertiary-bg: #2a2438;
+    --bs-border-color: #332c47;
+
+    --bs-link-color: #a78bfa;
+    --bs-link-color-rgb: 167, 139, 250;
+    --bs-link-hover-color: #c4b5fd;
+    --bs-link-hover-color-rgb: 196, 181, 253;
+
+    --app-accent-strong: #a78bfa;
+    --app-accent-light: #7c3aed;
+    --app-btn-primary-color: #1e1130;
+}
+
+/* Cards/tables/dropdowns key off body-bg by default in stock Bootstrap;
+   nudge them to the slightly-offset surface tone so they read as a
+   distinct layer instead of blending into the page background. */
+.card,
+.table,
+.dropdown-menu {
+    --bs-card-bg: var(--bs-secondary-bg);
+    --bs-table-bg: var(--bs-secondary-bg);
+    background-color: var(--bs-secondary-bg);
+}
+
+code {
+    color: var(--bs-primary-text-emphasis);
+}
+
+.empty-state {
+    text-align: center;
+    padding: 2.5rem 1rem;
+    color: var(--bs-secondary-color);
+}
+
+.empty-state .bi {
+    font-size: 2.5rem;
+    display: block;
+    margin-bottom: .75rem;
+    opacity: .6;
+}
+
+/*
+  Bootstrap's compiled CSS bakes several component colors in as static hex
+  values at build time rather than referencing --bs-primary reactively
+  (only simple utilities like .text-primary/.bg-primary/.border-primary
+  do that) - these need explicit overrides to pick up the theme.
+*/
+.btn-primary {
+    --bs-btn-bg: var(--bs-primary);
+    --bs-btn-border-color: var(--bs-primary);
+    --bs-btn-color: var(--app-btn-primary-color);
+    --bs-btn-hover-bg: color-mix(in srgb, var(--bs-primary) 85%, black);
+    --bs-btn-hover-border-color: color-mix(in srgb, var(--bs-primary) 80%, black);
+    --bs-btn-hover-color: var(--app-btn-primary-color);
+    --bs-btn-active-bg: color-mix(in srgb, var(--bs-primary) 75%, black);
+    --bs-btn-active-border-color: color-mix(in srgb, var(--bs-primary) 70%, black);
+    --bs-btn-active-color: var(--app-btn-primary-color);
+    --bs-btn-disabled-bg: var(--bs-primary);
+    --bs-btn-disabled-border-color: var(--bs-primary);
+    --bs-btn-disabled-color: var(--app-btn-primary-color);
+    --bs-btn-focus-shadow-rgb: var(--bs-primary-rgb);
+}
+
+.btn-outline-primary {
+    --bs-btn-color: var(--bs-primary);
+    --bs-btn-border-color: var(--bs-primary);
+    --bs-btn-hover-bg: var(--bs-primary);
+    --bs-btn-hover-border-color: var(--bs-primary);
+    --bs-btn-hover-color: var(--app-btn-primary-color);
+    --bs-btn-active-bg: var(--bs-primary);
+    --bs-btn-active-border-color: var(--bs-primary);
+    --bs-btn-active-color: var(--app-btn-primary-color);
+    --bs-btn-disabled-color: var(--bs-primary);
+    --bs-btn-disabled-border-color: var(--bs-primary);
+    --bs-btn-focus-shadow-rgb: var(--bs-primary-rgb);
+}
+
+.form-check-input:checked {
+    background-color: var(--bs-primary);
+    border-color: var(--bs-primary);
+}
+
+.form-control:focus,
+.form-select:focus {
+    border-color: var(--bs-primary);
+    box-shadow: 0 0 0 .25rem rgba(var(--bs-primary-rgb), .25);
+}
+
+/*
+  Shared page/table patterns used by several pages (PotentialWaste,
+  JunkCleanup, and others) - previously defined inside Home.razor.css,
+  where Blazor's CSS isolation silently scoped them to Home.razor only,
+  so they rendered completely unstyled everywhere else.
+*/
+.section-header {
+    margin-top: 2rem;
+    margin-bottom: 1rem;
+    color: var(--bs-emphasis-color);
+}
+
+.path-column {
+    max-width: 250px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: block;
+}
+
+.waste-section-title {
+    font-weight: bold;
+    margin-top: .75rem;
+    margin-bottom: .25rem;
+    color: var(--bs-secondary-color);
+}
+
+.queue-details {
+    margin-top: .5rem;
+}
+
+.queue-details p,
+.queue-details ul,
+.queue-details ol {
+    margin-bottom: .5rem;
+}
+
+.waste-queue-table {
+    font-size: .9rem;
+    table-layout: fixed;
+    width: 100%;
+}
+
+.waste-queue-table th,
+.waste-queue-table td {
+    padding: .35rem .5rem;
+    vertical-align: top;
+}
+
+.waste-queue-table details {
+    margin: 0;
+}
+
+.waste-queue-table summary {
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.waste-queue-table th:nth-child(1),
+.waste-queue-table td:nth-child(1) {
+    width: 55px;
+    max-width: 55px;
+}
+
+.waste-queue-table th:nth-child(2),
+.waste-queue-table td:nth-child(2) {
+    width: 85px;
+    max-width: 85px;
+}
+
+.waste-queue-table th:nth-child(3),
+.waste-queue-table td:nth-child(3) {
+    width: 115px;
+    max-width: 115px;
+}
+
+.waste-queue-table th:nth-child(4),
+.waste-queue-table td:nth-child(4) {
+    width: auto;
+}
+
+.waste-queue-table th:nth-child(5),
+.waste-queue-table td:nth-child(5) {
+    width: 90px;
+    max-width: 90px;
+}
+
+.waste-queue-table th:nth-child(6),
+.waste-queue-table td:nth-child(6) {
+    width: 170px;
+    max-width: 170px;
+}
+
+.waste-queue-table th:nth-child(1),
+.waste-queue-table th:nth-child(2),
+.waste-queue-table th:nth-child(3),
+.waste-queue-table th:nth-child(5),
+.waste-queue-table th:nth-child(6),
+.waste-queue-table td:nth-child(1),
+.waste-queue-table td:nth-child(2),
+.waste-queue-table td:nth-child(3),
+.waste-queue-table td:nth-child(5),
+.waste-queue-table td:nth-child(6) {
+    white-space: nowrap;
+}

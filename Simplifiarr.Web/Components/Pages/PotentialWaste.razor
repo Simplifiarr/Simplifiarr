@@ -1,0 +1,641 @@
+@page "/potential-waste"
+@rendermode InteractiveServer
+
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+@using Simplifiarr.Core.Utilities
+
+@inject ISettingsService SettingsService
+@inject IWasteCandidateService WasteCandidateService
+@inject IWasteCandidateCacheService WasteCandidateCache
+@inject IHardlinkRemediationService HardlinkRemediationService
+@inject IHistoryService HistoryService
+
+<PageTitle>Potential Waste Queue</PageTitle>
+
+<h1>Potential Waste Queue</h1>
+
+<p>
+    Find duplicate library copies that can be converted into hardlinks to reclaim storage.
+</p>
+
+@if (_profiles.Count == 0)
+{
+    <div class="alert alert-warning">
+        No enabled drive profiles are configured.
+    </div>
+}
+else
+{
+    <div class="row g-3 mt-2">
+        @foreach (var profile in _profiles)
+        {
+            <div class="col-md-6">
+                <DriveScanCard DriveName="@profile.Name"
+                               DownloadPath="@profile.DownloadPath"
+                               Rows="BuildRows(profile)"
+                               IsScanningDrive="@(_isScanningDrive == profile.Name)"
+                               OnScanDrive="() => ScanDriveAsync(profile.Name)" />
+            </div>
+        }
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert alert-info mt-3">
+        @_statusMessage
+    </div>
+}
+
+@if (!_hasScanned)
+{
+    <EmptyState Icon="search" Text="No potential waste scan has been run yet." />
+}
+else if (_candidates.Count == 0)
+{
+    <EmptyState Icon="check-circle" Text="No potential waste files were found." />
+}
+else
+{
+    <h2 class="section-header">Potential Waste Queue</h2>
+
+    <p>
+        <strong>@_candidates.Count</strong> files |
+        <strong>@SizeFormatter.FormatBytes(_candidates.Sum(candidate => candidate.SizeBytes))</strong> reclaimable
+    </p>
+
+    <p>
+        <strong>Selected:</strong>
+        @_selection.Count
+    </p>
+
+    @if (_isBatchConfirming)
+    {
+        <BatchConfirmBanner CssClass="batch-convert-confirmation"
+                            IsBusy="_isConverting"
+                            CanConfirm="_selection.Count > 0"
+                            ConfirmLabel="Confirm Convert Selected"
+                            OnConfirm="ConfirmBatchConvertSelectedAsync"
+                            OnCancel="CancelBatchConvertConfirmation">
+            <Message>
+                <p>
+                    <strong>Convert @_selection.Count selected item(s)?</strong>
+                </p>
+
+                <p>
+                    Each selected item will be converted one at a time. Existing library files will be moved to Quarantine before hardlinks are created.
+                </p>
+            </Message>
+        </BatchConfirmBanner>
+    }
+    else
+    {
+        <button type="button"
+                class="btn btn-primary"
+                disabled="@(_isConverting || _selection.Count == 0)"
+                @onclick="RequestBatchConvertConfirmation">
+            <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
+            Convert Selected
+        </button>
+    }
+
+    <table class="table waste-queue-table">
+        <thead>
+            <tr>
+                <th>Select</th>
+                <th>Status</th>
+                <th>Savings</th>
+                <th>File</th>
+                <th>Details</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+
+        <tbody>
+        @foreach (var candidate in _candidates)
+        {
+            var libraryFolder =
+                Path.GetDirectoryName(candidate.LibraryPath) ?? candidate.LibraryPath;
+
+            var downloadFolder =
+                Path.GetDirectoryName(candidate.DownloadPath) ?? candidate.DownloadPath;
+
+            var isThisFileConverting =
+                _convertingLibraryPath is not null &&
+                _convertingLibraryPath.Equals(
+                    candidate.LibraryPath,
+                    StringComparison.OrdinalIgnoreCase);
+
+            var isConfirmingThisFile =
+                _confirmLibraryPath is not null &&
+                _confirmLibraryPath.Equals(
+                    candidate.LibraryPath,
+                    StringComparison.OrdinalIgnoreCase);
+
+            <tr>
+                <SelectableCheckboxCell Checked="_selection.IsSelected(candidate)"
+                                        Disabled="_isConverting"
+                                        OnChanged="selected => _selection.SetSelected(candidate, selected)" />
+
+                <td>
+                    @if (isThisFileConverting)
+                    {
+                        <span><i class="bi bi-arrow-repeat" aria-hidden="true"></i> PROCESSING</span>
+                    }
+                    else if (candidate.CanConvert)
+                    {
+                        <span><i class="bi bi-check-circle text-success" aria-hidden="true"></i> READY</span>
+                    }
+                    else
+                    {
+                        <span><i class="bi bi-x-circle text-danger" aria-hidden="true"></i> BLOCKED</span>
+                    }
+                </td>
+
+                <td>
+                    @SizeFormatter.FormatBytes(candidate.SizeBytes)
+                </td>
+
+                <td>
+                    <strong>@candidate.LibraryFileName</strong>
+
+                    @if (!string.IsNullOrWhiteSpace(candidate.DriveProfileName))
+                    {
+                        <div class="text-muted small">
+                            Drive: @candidate.DriveProfileName
+                        </div>
+                    }
+                </td>
+
+                <td>
+                    <details>
+                        <summary>Details</summary>
+
+                        <div class="queue-details">
+
+                            <div class="waste-section-title">Library Folder</div>
+                            <code class="path-column">@libraryFolder</code>
+
+                            <div class="waste-section-title">Download Folder</div>
+                            <code class="path-column">@downloadFolder</code>
+
+                            <p>
+                                <strong>Reason:</strong>
+                                @candidate.Reason
+                            </p>
+
+                        </div>
+                    </details>
+                </td>
+
+                <td>
+                    @if (isConfirmingThisFile)
+                    {
+                        <div class="convert-confirmation">
+                            <div>
+                                <strong>Confirm conversion?</strong>
+                            </div>
+
+                            <div>
+                                Move the existing library file to Quarantine and create an NTFS hardlink.
+                            </div>
+
+                            <div class="convert-confirmation-actions">
+                                <button type="button"
+                                        class="btn btn-primary btn-sm"
+                                        disabled="@(_isConverting || !candidate.CanConvert || candidate.Plan is null)"
+                                        @onclick="async () => await ConfirmConvertAsync(candidate)">
+                                    <i class="bi bi-check-lg" aria-hidden="true"></i>
+                                    Confirm
+                                </button>
+
+                                <button type="button"
+                                        class="btn btn-secondary btn-sm"
+                                        disabled="@_isConverting"
+                                        @onclick="CancelConvertConfirmation">
+                                    <i class="bi bi-x-lg" aria-hidden="true"></i>
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <button type="button"
+                                class="btn btn-primary btn-sm"
+                                disabled="@(_isConverting || !candidate.CanConvert || candidate.Plan is null)"
+                                @onclick="() => RequestConvertConfirmation(candidate.LibraryPath)">
+                            <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
+                            @(isThisFileConverting ? "Processing..." : "Convert")
+                        </button>
+                    }
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+
+@code
+{
+    private List<DriveProfile> _profiles = [];
+
+    private List<WasteCandidate> _candidates = [];
+
+    private bool _isScanning;
+    private bool _isConverting;
+
+    private bool _hasScanned;
+
+    private string? _activeDriveName;
+    private MediaKind? _activeKind;
+
+    private string? _isScanningDrive;
+
+    private string? _convertingLibraryPath;
+    private string? _confirmLibraryPath;
+
+    private bool _isBatchConfirming;
+
+    private readonly CandidateSelection<WasteCandidate> _selection =
+        new(candidate => candidate.LibraryPath);
+
+    private string _statusMessage =
+        string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _profiles =
+            (await SettingsService.GetEnabledDriveProfilesAsync())
+                .OrderBy(profile => profile.Name)
+                .ToList();
+
+        LoadCachedCandidates();
+    }
+
+    private List<DriveScanCardRow> BuildRows(
+        DriveProfile profile)
+    {
+        var profileCandidates =
+            WasteCandidateCache.GetCandidates(profile.Name);
+
+        var movieCount =
+            profileCandidates.Count(candidate => candidate.Kind == MediaKind.Movies);
+
+        var tvCount =
+            profileCandidates.Count(candidate => candidate.Kind == MediaKind.Tv);
+
+        var anyScanning =
+            _isScanning || _isScanningDrive == profile.Name;
+
+        return
+        [
+            new DriveScanCardRow
+            {
+                Label = "Movies",
+                Count = movieCount,
+                LastScanText = FormatScanTime(
+                    WasteCandidateCache.GetLastScanUtc(profile.Name, MediaKind.Movies)),
+                IsScanning =
+                    _isScanning &&
+                    _activeDriveName == profile.Name &&
+                    _activeKind == MediaKind.Movies,
+                IsDisabled = anyScanning,
+                OnScanClick = () => ScanAsync(profile.Name, MediaKind.Movies)
+            },
+            new DriveScanCardRow
+            {
+                Label = "TV",
+                Count = tvCount,
+                LastScanText = FormatScanTime(
+                    WasteCandidateCache.GetLastScanUtc(profile.Name, MediaKind.Tv)),
+                IsScanning =
+                    _isScanning &&
+                    _activeDriveName == profile.Name &&
+                    _activeKind == MediaKind.Tv,
+                IsDisabled = anyScanning,
+                OnScanClick = () => ScanAsync(profile.Name, MediaKind.Tv)
+            }
+        ];
+    }
+
+    private static string FormatScanTime(
+        DateTime? scanUtc)
+    {
+        if (!scanUtc.HasValue)
+        {
+            return "Never";
+        }
+
+        return new DateTimeOffset(
+                DateTime.SpecifyKind(scanUtc.Value, DateTimeKind.Utc))
+            .LocalDateTime
+            .ToString("g");
+    }
+
+    private void LoadCachedCandidates()
+    {
+        _candidates =
+            _profiles
+                .SelectMany(profile =>
+                    WasteCandidateCache.GetCandidates(profile.Name))
+                .GroupBy(
+                    candidate => candidate.LibraryPath,
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .OrderByDescending(candidate => candidate.SizeBytes)
+                .ToList();
+
+        _hasScanned =
+            _profiles.Any(profile =>
+                WasteCandidateCache.GetLastScanUtc(profile.Name).HasValue);
+
+        if (_hasScanned)
+        {
+            _statusMessage =
+                $"Loaded {_candidates.Count} cached potential waste file(s).";
+        }
+    }
+
+    private async Task ScanDriveAsync(
+        string driveName)
+    {
+        if (_isScanning || _isConverting || _isScanningDrive is not null)
+        {
+            return;
+        }
+
+        _isScanningDrive = driveName;
+
+        try
+        {
+            await ScanAsync(driveName, MediaKind.Movies);
+            await ScanAsync(driveName, MediaKind.Tv);
+        }
+        finally
+        {
+            _isScanningDrive = null;
+        }
+    }
+
+    private async Task ScanAsync(
+        string? driveName,
+        MediaKind mediaKind)
+    {
+        if (_isScanning || _isConverting)
+        {
+            return;
+        }
+
+        _isScanning = true;
+        _activeDriveName = driveName;
+        _activeKind = mediaKind;
+
+        _selection.Clear();
+        _confirmLibraryPath = null;
+        _isBatchConfirming = false;
+
+        try
+        {
+            var kindLabel =
+                mediaKind switch
+                {
+                    MediaKind.Movies => "Movies",
+                    MediaKind.Tv => "TV",
+                    _ => "Movies/TV"
+                };
+
+            var scanLabel =
+                string.IsNullOrWhiteSpace(driveName)
+                    ? $"all enabled drives ({kindLabel})"
+                    : $"{driveName} ({kindLabel})";
+
+            _statusMessage =
+                $"Scanning {scanLabel} for potential waste...";
+
+            await WasteCandidateService.GetCandidatesAsync(
+                driveName,
+                forceRefresh: true,
+                mediaKind);
+
+            _hasScanned = true;
+
+            LoadCachedCandidates();
+
+            _statusMessage =
+                $"Scan complete. {_candidates.Count} potential waste file(s) found.";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Scan failed: {ex.Message}";
+        }
+        finally
+        {
+            _isScanning = false;
+            _activeDriveName = null;
+            _activeKind = null;
+        }
+    }
+
+    private void RequestBatchConvertConfirmation()
+    {
+        if (_isConverting || _selection.Count == 0)
+        {
+            return;
+        }
+
+        _confirmLibraryPath = null;
+        _isBatchConfirming = true;
+
+        _statusMessage =
+            $"Review the confirmation prompt before converting {_selection.Count} selected item(s).";
+    }
+
+    private void CancelBatchConvertConfirmation()
+    {
+        if (_isConverting)
+        {
+            return;
+        }
+
+        _isBatchConfirming = false;
+        _statusMessage = string.Empty;
+    }
+
+    private async Task ConfirmBatchConvertSelectedAsync()
+    {
+        if (_isConverting || _selection.Count == 0)
+        {
+            return;
+        }
+
+        var selectedPaths =
+            _selection.SelectedKeys.ToList();
+
+        var batchItems =
+            _candidates
+                .Where(candidate => selectedPaths.Contains(candidate.LibraryPath))
+                .ToList();
+
+        _isConverting = true;
+        _isBatchConfirming = false;
+
+        var converted = 0;
+        var failed = 0;
+        var skipped = 0;
+        var convertedBytes = 0L;
+
+        try
+        {
+            foreach (var candidate in batchItems)
+            {
+                if (!candidate.CanConvert || candidate.Plan is null)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                _convertingLibraryPath = candidate.LibraryPath;
+
+                _statusMessage =
+                    $"Converting {candidate.LibraryFileName}...";
+
+                await InvokeAsync(StateHasChanged);
+
+                var success =
+                    await HardlinkRemediationService.ExecuteAsync(
+                        candidate.Plan);
+
+                if (success)
+                {
+                    converted++;
+                    convertedBytes += candidate.SizeBytes;
+
+                    _selection.Remove(candidate);
+
+                    WasteCandidateCache.RemoveCandidate(
+                        candidate.LibraryPath);
+                }
+                else
+                {
+                    failed++;
+                }
+            }
+
+            _statusMessage =
+                $"Batch complete. Converted: {converted}. Failed: {failed}. Skipped: {skipped}.";
+
+            await HistoryService.AddRecordAsync(
+                new HistoryRecord
+                {
+                    ActionType = HistoryActionType.BatchCompleted,
+                    FileName = "Batch conversion",
+                    SizeBytes = convertedBytes,
+                    Success = failed == 0,
+                    Message = _statusMessage
+                });
+
+            LoadCachedCandidates();
+        }
+        finally
+        {
+            _isConverting = false;
+            _convertingLibraryPath = null;
+
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void RequestConvertConfirmation(
+        string libraryPath)
+    {
+        if (_isConverting)
+        {
+            return;
+        }
+
+        _confirmLibraryPath = libraryPath;
+
+        _statusMessage =
+            "Review the confirmation prompt before converting.";
+    }
+
+    private void CancelConvertConfirmation()
+    {
+        if (_isConverting)
+        {
+            return;
+        }
+
+        _confirmLibraryPath = null;
+        _statusMessage = string.Empty;
+    }
+
+    private async Task ConfirmConvertAsync(
+        WasteCandidate candidate)
+    {
+        _confirmLibraryPath = null;
+
+        await ConvertAsync(candidate);
+    }
+
+    private async Task ConvertAsync(
+        WasteCandidate candidate)
+    {
+        if (candidate.Plan is null)
+        {
+            _statusMessage =
+                $"No conversion plan found for {candidate.LibraryFileName}.";
+
+            return;
+        }
+
+        if (_isConverting)
+        {
+            return;
+        }
+
+        _isConverting = true;
+        _convertingLibraryPath = candidate.LibraryPath;
+
+        _statusMessage =
+            $"Converting {candidate.LibraryFileName}...";
+
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var success =
+                await HardlinkRemediationService.ExecuteAsync(
+                    candidate.Plan);
+
+            if (success)
+            {
+                _statusMessage =
+                    $"Converted {candidate.LibraryFileName}. Original duplicate moved to Quarantine. Review Quarantine to delete and reclaim space.";
+
+                WasteCandidateCache.RemoveCandidate(
+                    candidate.LibraryPath);
+
+                _isConverting = false;
+                _convertingLibraryPath = null;
+
+                LoadCachedCandidates();
+            }
+            else
+            {
+                _statusMessage =
+                    $"Failed to convert {candidate.LibraryFileName}.";
+            }
+        }
+        finally
+        {
+            _isConverting = false;
+            _convertingLibraryPath = null;
+
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+}

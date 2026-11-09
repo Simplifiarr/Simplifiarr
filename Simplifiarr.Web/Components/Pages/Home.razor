@@ -1,0 +1,77 @@
+@page "/"
+@rendermode InteractiveServer
+
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+
+@inject IDashboardSummaryService DashboardSummaryService
+@inject NavigationManager Navigation
+
+<PageTitle>Simplifiarr</PageTitle>
+
+<h1>Dashboard</h1>
+
+<p class="text-muted">
+    These numbers reflect whatever Hardlinks and Potential Waste last
+    scanned - visit those pages to refresh a specific drive or library.
+</p>
+
+@if (_dashboard is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <div class="dashboard-cards">
+
+        <div class="dashboard-card dashboard-card-clickable" @onclick='() => Navigate("/hardlinks")'>
+            <h3>Promotion Opportunities</h3>
+            <p class="dashboard-value">@_dashboard.PromotionOpportunityCount</p>
+        </div>
+
+        <div class="dashboard-card dashboard-card-clickable" @onclick='() => Navigate("/potential-waste")'>
+            <h3>Potential Waste</h3>
+            <p class="dashboard-value">@_dashboard.PossibleDuplicateCopySizeFormatted</p>
+        </div>
+
+        <div class="dashboard-card dashboard-card-clickable" @onclick='() => Navigate("/potential-waste")'>
+            <h3>Healthy Hardlinks</h3>
+            <p class="dashboard-value">@_dashboard.HealthyHardlinkCount</p>
+        </div>
+
+        <div class="dashboard-card dashboard-card-clickable" @onclick='() => Navigate("/quarantine")'>
+            <h3>Quarantine Items</h3>
+            <p class="dashboard-value">@_dashboard.QuarantinedFileCount</p>
+            <p class="dashboard-subvalue">
+                @_dashboard.QuarantinedSizeFormatted held in Quarantine
+            </p>
+        </div>
+
+        <div class="dashboard-card dashboard-card-clickable" @onclick='() => Navigate("/history")'>
+            <h3>Storage Saved</h3>
+            <p class="dashboard-value">@_dashboard.StorageSavedFormatted</p>
+        </div>
+
+        <div class="dashboard-card dashboard-card-clickable" @onclick='() => Navigate("/settings")'>
+            <h3>Configured Drive Profiles</h3>
+            <p class="dashboard-value">@_dashboard.EnabledDriveProfileCount</p>
+        </div>
+
+    </div>
+}
+
+@code
+{
+    private DashboardSummary? _dashboard;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _dashboard =
+            await DashboardSummaryService.GetDashboardSummaryAsync();
+    }
+
+    private void Navigate(string url)
+    {
+        Navigation.NavigateTo(url);
+    }
+}

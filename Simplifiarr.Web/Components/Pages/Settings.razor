@@ -1,0 +1,936 @@
+@page "/settings"
+@rendermode InteractiveServer
+
+@using System.IO
+@using System.Net.Http
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+
+@inject ISettingsService SettingsService
+@inject IJellyfinClient JellyfinClient
+
+<PageTitle>Settings</PageTitle>
+
+<h1>Settings</h1>
+
+@if (_settings is null)
+{
+    <p>Loading settings...</p>
+}
+else
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5>qBittorrent</h5>
+
+            <label class="form-label">qBittorrent URL</label>
+            <input class="form-control"
+                   @bind="_settings.QbittorrentUrl" />
+
+            <button type="button"
+                    class="btn btn-secondary mt-2"
+                    disabled="@_isTestingQbittorrent"
+                    @onclick="TestQbittorrentAsync">
+                <i class="bi bi-plug" aria-hidden="true"></i>
+                @(_isTestingQbittorrent ? "Testing..." : "Test Connection")
+            </button>
+
+            @if (!string.IsNullOrWhiteSpace(_qbittorrentTestResult))
+            {
+                <p class="mt-2">
+                    <strong>Connection Test:</strong>
+                    @_qbittorrentTestResult
+                </p>
+            }
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5>Radarr</h5>
+
+            <label class="form-label">Radarr URL</label>
+            <input class="form-control"
+                   @bind="_settings.RadarrUrl" />
+
+            <label class="form-label mt-2">Radarr API Key</label>
+            <input class="form-control"
+                   type="password"
+                   @bind="_settings.RadarrApiKey" />
+
+            <button type="button"
+                    class="btn btn-secondary mt-2"
+                    disabled="@_isTestingRadarr"
+                    @onclick="TestRadarrAsync">
+                <i class="bi bi-plug" aria-hidden="true"></i>
+                @(_isTestingRadarr ? "Testing..." : "Test Connection")
+            </button>
+
+            @if (!string.IsNullOrWhiteSpace(_radarrTestResult))
+            {
+                <p class="mt-2">
+                    <strong>Connection Test:</strong>
+                    @_radarrTestResult
+                </p>
+            }
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5>Sonarr</h5>
+
+            <label class="form-label">Sonarr URL</label>
+            <input class="form-control"
+                   @bind="_settings.SonarrUrl" />
+
+            <label class="form-label mt-2">Sonarr API Key</label>
+            <input class="form-control"
+                   type="password"
+                   @bind="_settings.SonarrApiKey" />
+
+            <button type="button"
+                    class="btn btn-secondary mt-2"
+                    disabled="@_isTestingSonarr"
+                    @onclick="TestSonarrAsync">
+                <i class="bi bi-plug" aria-hidden="true"></i>
+                @(_isTestingSonarr ? "Testing..." : "Test Connection")
+            </button>
+
+            @if (!string.IsNullOrWhiteSpace(_sonarrTestResult))
+            {
+                <p class="mt-2">
+                    <strong>Connection Test:</strong>
+                    @_sonarrTestResult
+                </p>
+            }
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5>Prowlarr</h5>
+
+            <label class="form-label">Prowlarr URL</label>
+            <input class="form-control"
+                   @bind="_settings.ProwlarrUrl" />
+
+            <label class="form-label mt-2">Prowlarr API Key</label>
+            <input class="form-control"
+                   type="password"
+                   @bind="_settings.ProwlarrApiKey" />
+
+            <button type="button"
+                    class="btn btn-secondary mt-2"
+                    disabled="@_isTestingProwlarr"
+                    @onclick="TestProwlarrAsync">
+                <i class="bi bi-plug" aria-hidden="true"></i>
+                @(_isTestingProwlarr ? "Testing..." : "Test Connection")
+            </button>
+
+            @if (!string.IsNullOrWhiteSpace(_prowlarrTestResult))
+            {
+                <p class="mt-2">
+                    <strong>Connection Test:</strong>
+                    @_prowlarrTestResult
+                </p>
+            }
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5>Jellyfin</h5>
+
+            <p class="text-muted">
+                Connection details for a future Jellyfin integration.
+                Collections' Jellyfin sync is currently disabled after both
+                its API and its collection.xml file convention were
+                confirmed broken/unreliable during testing - this just
+                lets you verify the connection ahead of that being fixed.
+            </p>
+
+            <label class="form-label">Jellyfin URL</label>
+            <input class="form-control"
+                   @bind="_settings.JellyfinUrl" />
+
+            <label class="form-label mt-2">Jellyfin API Key</label>
+            <input class="form-control"
+                   type="password"
+                   @bind="_settings.JellyfinApiKey" />
+
+            <button type="button"
+                    class="btn btn-secondary mt-2"
+                    disabled="@_isTestingJellyfin"
+                    @onclick="TestJellyfinAsync">
+                <i class="bi bi-plug" aria-hidden="true"></i>
+                @(_isTestingJellyfin ? "Testing..." : "Test Connection")
+            </button>
+
+            @if (!string.IsNullOrWhiteSpace(_jellyfinTestResult))
+            {
+                <p class="mt-2">
+                    <strong>Connection Test:</strong>
+                    @_jellyfinTestResult
+                </p>
+            }
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5>Application Data</h5>
+
+            <p>
+                <strong>Settings:</strong><br />
+                <code>C:\ProgramData\Simplifiarr\settings.json</code>
+            </p>
+
+            <div class="mb-3">
+                <label class="form-label">History Path</label>
+
+                <input class="form-control"
+                       @bind="_settings.HistoryPath" />
+
+                <button type="button"
+                        class="btn btn-secondary btn-sm mt-2"
+                        @onclick="TestHistoryPath">
+                    <i class="bi bi-folder-check" aria-hidden="true"></i>
+                    Test History Path
+                </button>
+
+                @if (!string.IsNullOrWhiteSpace(_historyPathTestResult))
+                {
+                    <div class="mt-1">
+                        <small>@_historyPathTestResult</small>
+                    </div>
+                }
+
+                <div class="mt-1">
+                    @if (!string.IsNullOrWhiteSpace(_settings.HistoryPath)
+                         && File.Exists(_settings.HistoryPath))
+                    {
+                        <span style="color:green">Exists</span>
+                    }
+                    else
+                    {
+                        <span style="color:red">Missing</span>
+                    }
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Quarantine Path</label>
+
+                <input class="form-control"
+                       @bind="_settings.QuarantinePath" />
+
+                <button type="button"
+                        class="btn btn-secondary btn-sm mt-2"
+                        @onclick="TestQuarantinePath">
+                    <i class="bi bi-folder-check" aria-hidden="true"></i>
+                    Test Quarantine Path
+                </button>
+
+                @if (!string.IsNullOrWhiteSpace(_quarantinePathTestResult))
+                {
+                    <div class="mt-1">
+                        <small>@_quarantinePathTestResult</small>
+                    </div>
+                }
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Cross-Seed Torrent Storage Path</label>
+
+                <input class="form-control"
+                       @bind="_settings.CrossSeedTorrentStoragePath" />
+
+                <div class="form-text">
+                    Where matched cross-seed torrents get hardlinked and their
+                    <code>.torrent</code> files saved - point your download
+                    client's watch-folder at this same path to add them
+                    yourself, or use Cross-Seed's own "Add" actions. Hardlinks
+                    can't cross drives, so for files on a different drive than
+                    this path, a folder with the same name is created at that
+                    drive's root instead (e.g. <code>D:\CrossSeedTorrents</code>).
+                </div>
+
+                <button type="button"
+                        class="btn btn-secondary btn-sm mt-2"
+                        @onclick="TestCrossSeedTorrentStoragePath">
+                    <i class="bi bi-folder-check" aria-hidden="true"></i>
+                    Test Path
+                </button>
+
+                @if (!string.IsNullOrWhiteSpace(_crossSeedTorrentStoragePathTestResult))
+                {
+                    <div class="mt-1">
+                        <small>@_crossSeedTorrentStoragePathTestResult</small>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-4 border-primary">
+        <div class="card-body">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+                <div>
+                    <h3 class="mb-1">Drive Profiles</h3>
+                    <span class="badge bg-primary">Preview</span>
+                </div>
+
+                <button type="button"
+                        class="btn btn-primary"
+                        @onclick="AddDriveProfile">
+                    <i class="bi bi-plus-lg" aria-hidden="true"></i>
+                    Add Drive Profile
+                </button>
+            </div>
+
+            <div class="alert alert-info">
+                <strong>Hardlinks can only be created on the same drive.</strong>
+                Simplifiarr never copies files between drives. A torrent downloaded
+                on one drive can only be promoted to a library configured on that
+                same drive.
+            </div>
+
+            @if (_settings.DriveProfiles.Count == 0)
+            {
+                <div class="text-muted">
+                    No Drive Profiles are configured. Add one to begin grouping
+                    download and library paths by drive.
+                </div>
+            }
+            else
+            {
+                @foreach (var profile in _settings.DriveProfiles)
+                {
+                    <div class="card mb-3">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <strong>
+                                @(string.IsNullOrWhiteSpace(profile.Name)
+                                    ? "New Drive Profile"
+                                    : profile.Name)
+                            </strong>
+
+                            <div>
+                                <label class="me-3">
+                                    <input type="checkbox"
+                                           @bind="profile.Enabled" />
+                                    Enabled
+                                </label>
+
+                                <button type="button"
+                                        class="btn btn-danger btn-sm"
+                                        @onclick="() => RemoveDriveProfile(profile)">
+                                    Remove
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="card-body">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Profile Name</label>
+                                    <input class="form-control"
+                                           @bind="profile.Name" />
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label class="form-label">Drive Root</label>
+                                    <input class="form-control"
+                                           placeholder="C:\"
+                                           @bind="profile.DriveRoot" />
+                                    <small class="text-muted">
+                                        All configured paths should be located on this drive.
+                                    </small>
+                                </div>
+
+                                <div class="col-12">
+                                    <label class="form-label">Download Path</label>
+                                    <input class="form-control"
+                                           placeholder="C:\Media\Torrents"
+                                           @bind="profile.DownloadPath" />
+                                    @PathStatus(profile.DownloadPath)
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label class="form-label">Movie Library</label>
+                                    <input class="form-control"
+                                           placeholder="C:\Media\Movies"
+                                           @bind="profile.MovieLibraryPath" />
+                                    @PathStatus(profile.MovieLibraryPath)
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label class="form-label">TV Library</label>
+                                    <input class="form-control"
+                                           placeholder="C:\Media\TV"
+                                           @bind="profile.TvLibraryPath" />
+                                    @PathStatus(profile.TvLibraryPath)
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label class="form-label">Book Library</label>
+                                    <input class="form-control"
+                                           placeholder="C:\Media\Books"
+                                           @bind="profile.BookLibraryPath" />
+                                    @PathStatus(profile.BookLibraryPath)
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label class="form-label">Audiobook Library</label>
+                                    <input class="form-control"
+                                           placeholder="C:\Media\Audiobooks"
+                                           @bind="profile.AudiobookLibraryPath" />
+                                    @PathStatus(profile.AudiobookLibraryPath)
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label class="form-label">Audiobook Download Path</label>
+                                    <input class="form-control"
+                                           placeholder="C:\Torrents\Audiobooks"
+                                           @bind="profile.AudiobookDownloadPath" />
+                                    @PathStatus(profile.AudiobookDownloadPath)
+                                    <div class="form-text">
+                                        Dedicated folder for audiobook downloads - kept separate
+                                        from the general Download Path above, since audiobook and
+                                        music files use the same formats and can't be told apart
+                                        otherwise. Leave blank to disable audiobook download
+                                        scanning.
+                                    </div>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label class="form-label">Music Library</label>
+                                    <input class="form-control"
+                                           placeholder="C:\Media\Music"
+                                           @bind="profile.MusicLibraryPath" />
+                                    @PathStatus(profile.MusicLibraryPath)
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label class="form-label">Music Download Path</label>
+                                    <input class="form-control"
+                                           placeholder="C:\Torrents\Music"
+                                           @bind="profile.MusicDownloadPath" />
+                                    @PathStatus(profile.MusicDownloadPath)
+                                    <div class="form-text">
+                                        Dedicated folder for music downloads - same reasoning as
+                                        Audiobook Download Path above.
+                                    </div>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label class="form-label">Comic Library</label>
+                                    <input class="form-control"
+                                           placeholder="C:\Media\Comics"
+                                           @bind="profile.ComicLibraryPath" />
+                                    @PathStatus(profile.ComicLibraryPath)
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label class="form-label">Comic Download Path</label>
+                                    <input class="form-control"
+                                           placeholder="C:\Torrents\Comics"
+                                           @bind="profile.ComicDownloadPath" />
+                                    @PathStatus(profile.ComicDownloadPath)
+                                    <div class="form-text">
+                                        Dedicated folder for comic downloads - same reasoning as
+                                        Audiobook Download Path above.
+                                    </div>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label class="form-label">Seed Only Path</label>
+                                    <input class="form-control"
+                                           placeholder="C:\SeedOnly"
+                                           @bind="profile.SeedOnlyPath" />
+                                    @PathStatus(profile.SeedOnlyPath)
+                                </div>
+
+                                <div class="col-12">
+                                    <div class="form-check">
+                                        <input class="form-check-input"
+                                               type="checkbox"
+                                               id="@($"preserve-name-{profile.Name}")"
+                                               @bind="profile.PreserveOriginalFileName" />
+                                        <label class="form-check-label" for="@($"preserve-name-{profile.Name}")">
+                                            Preserve original file name when promoting
+                                        </label>
+                                        <div class="form-text">
+                                            Keeps the downloaded file's original name instead of
+                                            renaming it to "Title (Year)" / "Title - SxxExx" when
+                                            creating the library hardlink. Folder structure is
+                                            unaffected either way.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+
+    <button type="button"
+            class="btn btn-primary"
+            disabled="@_isSaving"
+            @onclick="SaveAsync">
+        <i class="bi bi-save2" aria-hidden="true"></i>
+        @(_isSaving ? "Saving..." : "Save Settings")
+    </button>
+
+    @if (!string.IsNullOrWhiteSpace(_statusMessage))
+    {
+        <div class="alert @(_saveFailed ? "alert-danger" : "alert-success") mt-3">
+            <strong>@(_saveFailed ? "Save Failed" : "Status")</strong>
+            @_statusMessage
+        </div>
+    }
+}
+
+@code
+{
+    private SimplifiarrSettings? _settings;
+
+    private bool _isSaving;
+
+    private bool _isTestingQbittorrent;
+
+    private string _qbittorrentTestResult =
+        string.Empty;
+
+    private bool _isTestingRadarr;
+
+    private string _radarrTestResult =
+        string.Empty;
+
+    private bool _isTestingSonarr;
+
+    private string _sonarrTestResult =
+        string.Empty;
+
+    private bool _isTestingProwlarr;
+
+    private string _prowlarrTestResult =
+        string.Empty;
+
+    private bool _isTestingJellyfin;
+
+    private string _jellyfinTestResult =
+        string.Empty;
+
+    private string _statusMessage =
+        string.Empty;
+
+    private bool _saveFailed;
+
+    private string _historyPathTestResult =
+        string.Empty;
+
+    private string _quarantinePathTestResult =
+        string.Empty;
+
+    private string _crossSeedTorrentStoragePathTestResult =
+        string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _settings =
+            await SettingsService.GetSettingsAsync();
+
+        _settings.DriveProfiles ??=
+            [];
+    }
+
+    private void AddDriveProfile()
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        _settings.DriveProfiles.Add(
+            new DriveProfile
+            {
+                Name = "New Drive Profile",
+                Enabled = true
+            });
+
+        _statusMessage =
+            "New Drive Profile added. Save settings to persist changes.";
+    }
+
+    private void RemoveDriveProfile(
+        DriveProfile profile)
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        _settings.DriveProfiles.Remove(profile);
+
+        _statusMessage =
+            "Drive Profile removed. Save settings to persist changes.";
+    }
+
+    private RenderFragment PathStatus(
+        string path) =>
+        builder =>
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                builder.AddMarkupContent(
+                    0,
+                    "<small class=\"text-muted\">Not configured</small>");
+
+                return;
+            }
+
+            if (Directory.Exists(path))
+            {
+                builder.AddMarkupContent(
+                    1,
+                    "<small style=\"color:green\">Exists</small>");
+            }
+            else
+            {
+                builder.AddMarkupContent(
+                    2,
+                    "<small style=\"color:red\">Missing</small>");
+            }
+        };
+
+    private async Task TestQbittorrentAsync()
+    {
+        if (_settings is null ||
+            _isTestingQbittorrent)
+        {
+            return;
+        }
+
+        _isTestingQbittorrent = true;
+        _qbittorrentTestResult =
+            "Testing connection...";
+
+        try
+        {
+            if (!Uri.TryCreate(
+                    _settings.QbittorrentUrl,
+                    UriKind.Absolute,
+                    out var baseUri))
+            {
+                _qbittorrentTestResult =
+                    "Invalid URL";
+
+                return;
+            }
+
+            using var client =
+                new HttpClient
+                {
+                    BaseAddress = baseUri,
+                    Timeout = TimeSpan.FromSeconds(5)
+                };
+
+            using var response =
+                await client.GetAsync(
+                    "/api/v2/torrents/info");
+
+            _qbittorrentTestResult =
+                response.IsSuccessStatusCode
+                    ? "Connected"
+                    : $"Connection returned HTTP {(int)response.StatusCode} {response.ReasonPhrase}";
+        }
+        catch (TaskCanceledException)
+        {
+            _qbittorrentTestResult =
+                "Connection timed out";
+        }
+        catch (HttpRequestException ex)
+        {
+            _qbittorrentTestResult =
+                $"Connection failed: {ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            _qbittorrentTestResult =
+                $"Connection test failed: {ex.Message}";
+        }
+        finally
+        {
+            _isTestingQbittorrent = false;
+        }
+    }
+
+    private static async Task<string> TestArrConnectionAsync(
+        string url,
+        string apiKey,
+        string statusPath = "/api/v3/system/status")
+    {
+        if (!Uri.TryCreate(
+                url.TrimEnd('/') + statusPath,
+                UriKind.Absolute,
+                out var uri))
+        {
+            return "Invalid URL";
+        }
+
+        try
+        {
+            using var client =
+                new HttpClient
+                {
+                    Timeout = TimeSpan.FromSeconds(5)
+                };
+
+            using var request =
+                new HttpRequestMessage(HttpMethod.Get, uri);
+
+            request.Headers.Add("X-Api-Key", apiKey);
+
+            using var response =
+                await client.SendAsync(request);
+
+            return response.IsSuccessStatusCode
+                ? "Connected"
+                : $"Connection returned HTTP {(int)response.StatusCode} {response.ReasonPhrase}";
+        }
+        catch (TaskCanceledException)
+        {
+            return "Connection timed out";
+        }
+        catch (HttpRequestException ex)
+        {
+            return $"Connection failed: {ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            return $"Connection test failed: {ex.Message}";
+        }
+    }
+
+    private async Task TestRadarrAsync()
+    {
+        if (_settings is null ||
+            _isTestingRadarr)
+        {
+            return;
+        }
+
+        _isTestingRadarr = true;
+        _radarrTestResult =
+            "Testing connection...";
+
+        _radarrTestResult =
+            await TestArrConnectionAsync(
+                _settings.RadarrUrl,
+                _settings.RadarrApiKey);
+
+        _isTestingRadarr = false;
+    }
+
+    private async Task TestSonarrAsync()
+    {
+        if (_settings is null ||
+            _isTestingSonarr)
+        {
+            return;
+        }
+
+        _isTestingSonarr = true;
+        _sonarrTestResult =
+            "Testing connection...";
+
+        _sonarrTestResult =
+            await TestArrConnectionAsync(
+                _settings.SonarrUrl,
+                _settings.SonarrApiKey);
+
+        _isTestingSonarr = false;
+    }
+
+    private async Task TestProwlarrAsync()
+    {
+        if (_settings is null ||
+            _isTestingProwlarr)
+        {
+            return;
+        }
+
+        _isTestingProwlarr = true;
+        _prowlarrTestResult =
+            "Testing connection...";
+
+        _prowlarrTestResult =
+            await TestArrConnectionAsync(
+                _settings.ProwlarrUrl,
+                _settings.ProwlarrApiKey,
+                "/api/v1/system/status");
+
+        _isTestingProwlarr = false;
+    }
+
+    private async Task TestJellyfinAsync()
+    {
+        if (_settings is null ||
+            _isTestingJellyfin)
+        {
+            return;
+        }
+
+        _isTestingJellyfin = true;
+        _jellyfinTestResult =
+            "Testing connection...";
+
+        var connected =
+            await JellyfinClient.TestConnectionAsync(
+                _settings.JellyfinUrl,
+                _settings.JellyfinApiKey);
+
+        _jellyfinTestResult =
+            connected
+                ? "Connected"
+                : "Connection failed - check the Jellyfin URL and API key.";
+
+        _isTestingJellyfin = false;
+    }
+
+    private void TestHistoryPath()
+    {
+        _historyPathTestResult =
+            TestWritablePath(
+                _settings?.HistoryPath,
+                true);
+    }
+
+    private void TestQuarantinePath()
+    {
+        _quarantinePathTestResult =
+            TestWritablePath(
+                _settings?.QuarantinePath,
+                false);
+    }
+
+    private void TestCrossSeedTorrentStoragePath()
+    {
+        _crossSeedTorrentStoragePathTestResult =
+            TestWritablePath(
+                _settings?.CrossSeedTorrentStoragePath,
+                false);
+    }
+
+    private static string TestWritablePath(
+        string? configuredPath,
+        bool isFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(configuredPath))
+        {
+            return "Missing";
+        }
+
+        try
+        {
+            var directoryPath =
+                isFilePath
+                    ? Path.GetDirectoryName(configuredPath)
+                    : configuredPath;
+
+            if (string.IsNullOrWhiteSpace(directoryPath) ||
+                !Directory.Exists(directoryPath))
+            {
+                return "Missing";
+            }
+
+            var testFile =
+                Path.Combine(
+                    directoryPath,
+                    $".simplifiarr-test-{Guid.NewGuid():N}.tmp");
+
+            File.WriteAllText(
+                testFile,
+                "Simplifiarr");
+
+            File.Delete(testFile);
+
+            return "Writable";
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return "Access Denied";
+        }
+        catch
+        {
+            return "Write Failed";
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_settings is null ||
+            _isSaving)
+        {
+            return;
+        }
+
+        _isSaving = true;
+        _saveFailed = false;
+        _statusMessage =
+            "Saving settings...";
+
+        try
+        {
+            await SettingsService.SaveSettingsAsync(
+                _settings);
+
+            var invalidDriveProfilePathCount =
+                _settings.DriveProfiles
+                    .Where(profile => profile.Enabled)
+                    .SelectMany(GetConfiguredDriveProfilePaths)
+                    .Count(path => !Directory.Exists(path));
+
+            _statusMessage =
+                invalidDriveProfilePathCount == 0
+                    ? "Settings saved. All configured paths are valid."
+                    : $"Settings saved with {invalidDriveProfilePathCount} invalid configured path(s).";
+        }
+        catch (Exception ex)
+        {
+            _saveFailed = true;
+
+            _statusMessage =
+                $"Settings were NOT saved. {ex.Message}";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private static IEnumerable<string> GetConfiguredDriveProfilePaths(
+        DriveProfile profile)
+    {
+        return new[]
+            {
+                profile.DriveRoot,
+                profile.DownloadPath,
+                profile.MovieLibraryPath,
+                profile.TvLibraryPath,
+                profile.BookLibraryPath,
+                profile.AudiobookLibraryPath,
+                profile.AudiobookDownloadPath,
+                profile.MusicLibraryPath,
+                profile.MusicDownloadPath,
+                profile.ComicLibraryPath,
+                profile.ComicDownloadPath,
+                profile.SeedOnlyPath
+            }
+            .Where(path =>
+                !string.IsNullOrWhiteSpace(path));
+    }
+}

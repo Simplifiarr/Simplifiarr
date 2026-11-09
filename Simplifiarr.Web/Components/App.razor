@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <ResourcePreloader />
+    <script>
+        (function () {
+            function resolveTheme(pref) {
+                if (pref === "light" || pref === "dark") {
+                    return pref;
+                }
+
+                return window.matchMedia("(prefers-color-scheme: dark)").matches
+                    ? "dark"
+                    : "light";
+            }
+
+            var toggleIcons = {
+                system: "bi-circle-half",
+                light: "bi-sun",
+                dark: "bi-moon-stars"
+            };
+
+            window.simplifiarrTheme = {
+                storageKey: "simplifiarr-theme-pref",
+
+                getPreference: function () {
+                    return localStorage.getItem(this.storageKey) || "system";
+                },
+
+                apply: function (pref) {
+                    document.documentElement.setAttribute(
+                        "data-bs-theme",
+                        resolveTheme(pref));
+                },
+
+                setPreference: function (pref) {
+                    localStorage.setItem(this.storageKey, pref);
+                    this.apply(pref);
+                    this.renderToggleButton(pref);
+                },
+
+                cycle: function () {
+                    var order = ["system", "light", "dark"];
+                    var current = this.getPreference();
+                    var next = order[(order.indexOf(current) + 1) % order.length];
+                    this.setPreference(next);
+                    return next;
+                },
+
+                // Blazor's enhanced navigation re-renders the layout markup
+                // from scratch on every internal nav (a fresh, blank button
+                // each time) without re-running any inline <script> that
+                // used to be embedded alongside it - so this has to be
+                // re-run after every navigation, not just once at startup.
+                // A dataset "already wired" flag isn't reliable here: the
+                // attribute can survive onto a replacement node even though
+                // its actual JS listener doesn't, silently leaving clicks
+                // dead - so always remove-then-add the same named handler
+                // instead, which is a safe no-op either way.
+                _onToggleClick: function () {
+                    window.simplifiarrTheme.cycle();
+                },
+
+                renderToggleButton: function (pref) {
+                    var btn = document.getElementById("theme-toggle-btn");
+
+                    if (!btn) {
+                        return;
+                    }
+
+                    var label = pref.charAt(0).toUpperCase() + pref.slice(1);
+                    btn.innerHTML =
+                        '<i class="bi ' + toggleIcons[pref] + '" aria-hidden="true"></i> Theme: ' + label;
+
+                    btn.removeEventListener("click", this._onToggleClick);
+                    btn.addEventListener("click", this._onToggleClick);
+                },
+
+                init: function () {
+                    var pref = this.getPreference();
+                    this.apply(pref);
+                    this.renderToggleButton(pref);
+                }
+            };
+
+            window.simplifiarrTheme.apply(
+                window.simplifiarrTheme.getPreference());
+        })();
+    </script>
+    <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]" />
+    <link rel="stylesheet" href="@Assets["lib/bootstrap-icons/font/bootstrap-icons.min.css"]" />
+    <link rel="stylesheet" href="@Assets["css/theme.css"]" />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <link rel="stylesheet" href="@Assets["Simplifiarr.Web.styles.css"]" />
+    <ImportMap />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <HeadOutlet />
+</head>
+
+<body>
+    <Routes />
+    <ReconnectModal />
+    <script src="@Assets["_framework/blazor.web.js"]"></script>
+    <script>
+        // Initial render of the toggle button - the button element didn't
+        // exist yet when the <head> script ran, so it couldn't be set up
+        // there.
+        window.simplifiarrTheme.renderToggleButton(
+            window.simplifiarrTheme.getPreference());
+
+        // Blazor's enhanced navigation swaps the page's DOM against
+        // freshly-fetched HTML instead of doing a full reload - that fetched
+        // HTML never has data-bs-theme set, and the toggle button comes back
+        // blank each time (its label is only ever set by our own script,
+        // never server-rendered) - both need to be reapplied after every
+        // internal nav, not just once at startup.
+        Blazor.addEventListener("enhancedload", function () {
+            window.simplifiarrTheme.init();
+        });
+    </script>
+</body>
+
+</html>
+

@@ -1,0 +1,97 @@
+<div class="card h-100">
+    <div class="card-body">
+        <h5 class="card-title">@DriveName</h5>
+
+        @if (Paths is { Count: > 0 })
+        {
+            @foreach (var path in Paths)
+            {
+                <p class="card-text mb-1">
+                    <strong>@path.Label</strong><br />
+                    <code>@path.Path</code>
+                </p>
+            }
+        }
+        else
+        {
+            <p class="card-text">
+                <strong>Downloads</strong><br />
+                <code>@DownloadPath</code>
+            </p>
+        }
+
+        <button type="button"
+                class="btn btn-warning mb-2"
+                disabled="@IsAnyRowScanning"
+                @onclick="HandleScanDriveClick">
+            <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
+            @(IsScanningDrive ? "Scanning Drive..." : "Scan Drive")
+        </button>
+
+        @foreach (var row in Rows)
+        {
+            <div class="d-flex justify-content-between align-items-center border-top pt-2 mt-2">
+                <div>
+                    <strong>@row.Label</strong>
+
+                    <div class="text-muted small">
+                        Candidates: @row.Count &middot; Last Scan: @row.LastScanText
+                    </div>
+                </div>
+
+                <button type="button"
+                        class="btn btn-primary btn-sm"
+                        disabled="@(row.IsDisabled || IsAnyRowScanning)"
+                        @onclick="() => HandleRowScanClick(row)">
+                    <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
+                    @(row.IsScanning ? "Scanning..." : $"Scan {row.Label}")
+                </button>
+            </div>
+        }
+    </div>
+</div>
+
+@code
+{
+    [Parameter, EditorRequired]
+    public string DriveName { get; set; } = string.Empty;
+
+    [Parameter]
+    public string DownloadPath { get; set; } = string.Empty;
+
+    [Parameter]
+    public List<DriveScanCardPath>? Paths { get; set; }
+
+    [Parameter, EditorRequired]
+    public List<DriveScanCardRow> Rows { get; set; } = [];
+
+    [Parameter]
+    public bool IsScanningDrive { get; set; }
+
+    [Parameter]
+    public EventCallback OnScanDrive { get; set; }
+
+    private bool IsAnyRowScanning =>
+        IsScanningDrive || Rows.Any(row => row.IsScanning);
+
+    private async Task HandleScanDriveClick()
+    {
+        if (IsAnyRowScanning)
+        {
+            return;
+        }
+
+        await OnScanDrive.InvokeAsync();
+    }
+
+    private async Task HandleRowScanClick(
+        DriveScanCardRow row)
+    {
+        if (IsAnyRowScanning || row.OnScanClick is null)
+        {
+            return;
+        }
+
+        await row.OnScanClick();
+    }
+}

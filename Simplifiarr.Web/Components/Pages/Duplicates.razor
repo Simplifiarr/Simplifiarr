@@ -1,0 +1,289 @@
+@page "/duplicates"
+@rendermode InteractiveServer
+
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+@using Simplifiarr.Core.Utilities
+
+@inject IMediaCatalogService MediaCatalogService
+@inject ISettingsService SettingsService
+@inject IDuplicateAssetAnalysisService DuplicateAssetAnalysisService
+@inject IQuarantineService QuarantineService
+@inject IHistoryService HistoryService
+@inject IIgnoredItemsService IgnoredItemsService
+
+<PageTitle>Duplicates</PageTitle>
+
+<h1>Potential Duplicates</h1>
+
+<p>
+    Movies, TV episodes, books, audiobooks, music, and comics that appear more than once
+    across your libraries, based on titles already discovered by Hardlinks
+    and Potential
+    Waste scans. This page doesn't scan anything on its own - rescan a
+    library on those pages to refresh what shows up here. Copies that turn
+    out to be hardlinks of each other (the same underlying file, e.g. one
+    also linked into a Collection) are automatically excluded - they aren't
+    wasted space.
+</p>
+
+<StatusMessage Message="@_statusMessage" Severity="StatusSeverity.Info" />
+
+@if (!_loaded)
+{
+    <p class="mt-3">Loading...</p>
+}
+else if (_totalAssetsScanned == 0)
+{
+    <EmptyState Icon="search">
+        <Message>
+            No scanned library data yet. Visit Hardlinks or Potential Waste
+            and scan a drive first, then come back here.
+        </Message>
+    </EmptyState>
+}
+else if (_groups.Count == 0)
+{
+    <EmptyState Icon="check-circle" Text="No potential duplicates found in the currently scanned data." />
+}
+else
+{
+    <p>
+        <strong>@_groups.Count</strong> potential duplicate group(s) |
+        <strong>@SizeFormatter.FormatBytes(_groups.Sum(g => g.ReclaimableSizeBytes))</strong>
+        potentially reclaimable if the smaller copy(ies) were removed
+    </p>
+
+    @foreach (var group in _groups)
+    {
+        <div class="card mb-3">
+            <div class="card-body">
+                <h5 class="card-title">
+                    @GroupTitle(group)
+                    <span class="badge bg-secondary ms-2">@group.MediaType</span>
+                </h5>
+
+                <p class="text-muted mb-2">
+                    @group.Entries.Count copies |
+                    @SizeFormatter.FormatBytes(group.TotalSizeBytes) total |
+                    @SizeFormatter.FormatBytes(group.ReclaimableSizeBytes) potentially reclaimable
+                </p>
+
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0">
+                        <thead>
+                            <tr>
+                                <th>File</th>
+                                <th>Drive</th>
+                                <th>Size</th>
+                                <th>Resolution</th>
+                                <th>Codec</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @for (var i = 0; i < group.Entries.Count; i++)
+                            {
+                                var entry = group.Entries[i];
+                                var isConfirming =
+                                    _confirmDeletePath is not null &&
+                                    _confirmDeletePath.Equals(entry.CanonicalPath, StringComparison.OrdinalIgnoreCase);
+
+                                <tr>
+                                    <td>
+                                        @if (i == 0)
+                                        {
+                                            <span class="badge bg-success me-1">Largest</span>
+                                        }
+                                        <code>@entry.CanonicalPath</code>
+                                    </td>
+                                    <td>@entry.DriveProfileName</td>
+                                    <td>@SizeFormatter.FormatBytes(entry.SizeBytes)</td>
+                                    <td>@(string.IsNullOrWhiteSpace(entry.Resolution) ? "-" : entry.Resolution)</td>
+                                    <td>@(string.IsNullOrWhiteSpace(entry.VideoCodec) ? "-" : entry.VideoCodec)</td>
+                                    <td>
+                                        @if (isConfirming)
+                                        {
+                                            <BatchConfirmBanner CssClass="alert alert-danger p-2 mb-0"
+                                                                IsBusy="_isDeleting"
+                                                                ConfirmLabel="Confirm"
+                                                                BusyLabel="Moving..."
+                                                                OnConfirm="() => DeleteDuplicateAsync(group, entry)"
+                                                                OnCancel="() => _confirmDeletePath = null">
+                                                <Message>
+                                                    Move to Quarantine?
+                                                </Message>
+                                            </BatchConfirmBanner>
+                                        }
+                                        else
+                                        {
+                                            <button type="button"
+                                                    class="btn btn-outline-danger btn-sm"
+                                                    disabled="@_isDeleting"
+                                                    @onclick="() => _confirmDeletePath = entry.CanonicalPath">
+                                                <i class="bi bi-trash" aria-hidden="true"></i>
+                                                Delete
+                                            </button>
+
+                                            <button type="button"
+                                                    class="btn btn-outline-secondary btn-sm ms-1"
+                                                    title="Not a duplicate - hide this file from this page"
+                                                    disabled="@_isDeleting"
+                                                    @onclick="() => IgnoreDuplicate(group, entry)">
+                                                <i class="bi bi-eye-slash" aria-hidden="true"></i>
+                                                Ignore
+                                            </button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+@code
+{
+    private List<DuplicateAssetGroup> _groups = [];
+    private int _totalAssetsScanned;
+    private bool _loaded;
+    private string? _confirmDeletePath;
+    private bool _isDeleting;
+    private string _statusMessage = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var enabledProfiles =
+            await SettingsService.GetEnabledDriveProfilesAsync();
+
+        var assets =
+            MediaCatalogService.GetAssets();
+
+        _totalAssetsScanned = assets.Count;
+
+        _groups =
+            await DuplicateAssetAnalysisService.FindDuplicatesAsync(
+                assets,
+                enabledProfiles);
+
+        // Files marked "not a duplicate" are dropped; a group left with a
+        // single copy is no longer a duplicate group.
+        foreach (var group in _groups)
+        {
+            group.Entries.RemoveAll(entry =>
+                IgnoredItemsService.IsIgnored(entry.CanonicalPath));
+        }
+
+        _groups.RemoveAll(group => group.Entries.Count <= 1);
+
+        _loaded = true;
+    }
+
+    private void IgnoreDuplicate(
+        DuplicateAssetGroup group,
+        DuplicateAssetEntry entry)
+    {
+        IgnoredItemsService.Add(
+            new IgnoredItem
+            {
+                SourcePath = entry.CanonicalPath,
+                Title = group.Title,
+                Category =
+                    group.MediaType switch
+                    {
+                        MediaType.TvEpisode or MediaType.TvSeason => IgnoredCategory.Tv,
+                        MediaType.Book => IgnoredCategory.Book,
+                        MediaType.Audiobook => IgnoredCategory.Audiobook,
+                        MediaType.Music => IgnoredCategory.Music,
+                        MediaType.Comic => IgnoredCategory.Comic,
+                        _ => IgnoredCategory.Movie
+                    },
+                Author = group.Author,
+                Year = group.Year,
+                Season = group.Season,
+                Episode = group.Episode,
+                DriveProfileName = entry.DriveProfileName,
+                IgnoredUtc = DateTime.UtcNow,
+                Reason = "Marked not a duplicate"
+            });
+
+        group.Entries.Remove(entry);
+
+        if (group.Entries.Count <= 1)
+        {
+            _groups.Remove(group);
+        }
+
+        _statusMessage =
+            $"Ignored \"{Path.GetFileName(entry.CanonicalPath)}\" - it won't be listed as a duplicate. Un-ignore it on the Ignored Items page.";
+    }
+
+    private async Task DeleteDuplicateAsync(
+        DuplicateAssetGroup group,
+        DuplicateAssetEntry entry)
+    {
+        _isDeleting = true;
+
+        var quarantinePath =
+            await QuarantineService.QuarantineFileAsync(entry.CanonicalPath);
+
+        var success =
+            !string.IsNullOrWhiteSpace(quarantinePath);
+
+        await HistoryService.AddRecordAsync(
+            new HistoryRecord
+            {
+                ActionType = HistoryActionType.DuplicateQuarantined,
+                FileName = Path.GetFileName(entry.CanonicalPath),
+                LibraryPath = entry.CanonicalPath,
+                QuarantinePath = quarantinePath ?? string.Empty,
+                SizeBytes = entry.SizeBytes,
+                Success = success,
+                Message =
+                    success
+                        ? "Duplicate quarantined."
+                        : "Failed to quarantine duplicate."
+            });
+
+        _statusMessage =
+            success
+                ? $"Moved \"{Path.GetFileName(entry.CanonicalPath)}\" to Quarantine."
+                : $"Failed to quarantine \"{Path.GetFileName(entry.CanonicalPath)}\".";
+
+        if (success)
+        {
+            group.Entries.Remove(entry);
+
+            if (group.Entries.Count <= 1)
+            {
+                _groups.Remove(group);
+            }
+        }
+
+        _confirmDeletePath = null;
+        _isDeleting = false;
+    }
+
+    private static string GroupTitle(
+        DuplicateAssetGroup group)
+    {
+        return group.MediaType switch
+        {
+            MediaType.TvEpisode =>
+                $"{group.Title} - S{group.Season ?? 0:00}E{group.Episode ?? 0:00}",
+
+            MediaType.Book or MediaType.Audiobook or MediaType.Music or MediaType.Comic =>
+                string.IsNullOrWhiteSpace(group.Author)
+                    ? group.Title
+                    : $"{group.Title} ({group.Author})",
+
+            _ =>
+                group.Year.HasValue
+                    ? $"{group.Title} ({group.Year})"
+                    : group.Title
+        };
+    }
+}

@@ -1,0 +1,302 @@
+@page "/junk-cleanup"
+@rendermode InteractiveServer
+
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+@using Simplifiarr.Core.Utilities
+@using Simplifiarr.Web.Components.Shared
+
+@inject ISettingsService SettingsService
+@inject IJunkFileScannerService JunkFileScannerService
+@inject IQuarantineService QuarantineService
+@inject IHistoryService HistoryService
+
+<PageTitle>Junk Cleanup</PageTitle>
+
+<h1>Junk Cleanup</h1>
+
+<p>
+    Scans your library folders (not Downloads - an actively-seeding torrent
+    is never touched) for leftover release junk: sample video files and
+    anything left in a <code>Sample</code> folder, checksum/tracker files,
+    and images that don't match standard
+    Jellyfin/Plex/Kodi artwork naming (folder.jpg, poster.jpg, backdrop.jpg,
+    etc. are always left alone). <code>.nfo</code> files are never flagged -
+    media servers use them for real metadata. Nothing is deleted directly -
+    selected items go to Quarantine, same as everywhere else in Simplifiarr.
+</p>
+
+@if (_profiles.Count == 0)
+{
+    <div class="alert alert-warning">
+        No enabled drive profiles are configured.
+    </div>
+}
+else
+{
+    <div class="row g-3 mt-2">
+        @foreach (var profile in _profiles)
+        {
+            <div class="col-md-6">
+                <DriveScanCard DriveName="@profile.Name"
+                               Paths="GetLibraryPaths(profile)"
+                               Rows="BuildRows(profile)"
+                               IsScanningDrive="false"
+                               OnScanDrive="() => ScanDriveAsync(profile.Name)" />
+            </div>
+        }
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert alert-info mt-3">
+        @_statusMessage
+    </div>
+}
+
+@if (_candidates.Count == 0)
+{
+    <EmptyState Icon="check-circle" Text="No junk found yet - scan a drive above." />
+}
+else
+{
+    <h2 class="section-header mt-4">Flagged Files</h2>
+
+    <p>
+        <strong>@_candidates.Count</strong> file(s) |
+        <strong>@SizeFormatter.FormatBytes(_candidates.Sum(c => c.SizeBytes))</strong>
+    </p>
+
+    <p>
+        <strong>Selected:</strong> @_selection.Count
+    </p>
+
+    @if (_isConfirming)
+    {
+        <BatchConfirmBanner IsBusy="_isProcessing"
+                            ConfirmLabel="Confirm Quarantine Selected"
+                            OnConfirm="ConfirmQuarantineSelectedAsync"
+                            OnCancel="() => _isConfirming = false">
+            <Message>
+                <strong>Move @_selection.Count selected file(s) to Quarantine?</strong>
+                This doesn't affect any video/book file, only the flagged junk
+                items themselves.
+            </Message>
+        </BatchConfirmBanner>
+    }
+    else
+    {
+        <button type="button"
+                class="btn btn-secondary"
+                disabled="@_isProcessing"
+                @onclick="ToggleSelectAll">
+            @(_selection.Count == _candidates.Count ? "Deselect All" : "Select All")
+        </button>
+
+        <button type="button"
+                class="btn btn-primary ms-2"
+                disabled="@(_isProcessing || _selection.Count == 0)"
+                @onclick="() => _isConfirming = true">
+            Quarantine Selected
+        </button>
+    }
+
+    <table class="table mt-3">
+        <thead>
+            <tr>
+                <th>Select</th>
+                <th>File</th>
+                <th>Reason</th>
+                <th>Size</th>
+                <th>Drive</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var candidate in _candidates)
+            {
+                <tr>
+                    <SelectableCheckboxCell Checked="_selection.IsSelected(candidate)"
+                                            Disabled="_isProcessing"
+                                            OnChanged="selected => _selection.SetSelected(candidate, selected)" />
+                    <td>
+                        <code>@candidate.FilePath</code>
+                    </td>
+                    <td>@candidate.Reason</td>
+                    <td>@SizeFormatter.FormatBytes(candidate.SizeBytes)</td>
+                    <td>@candidate.DriveProfileName</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code
+{
+    private List<DriveProfile> _profiles = [];
+    private List<JunkFileCandidate> _candidates = [];
+    private readonly CandidateSelection<JunkFileCandidate> _selection =
+        new(candidate => candidate.FilePath);
+
+    private string _statusMessage = string.Empty;
+    private bool _isConfirming;
+    private bool _isProcessing;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _profiles =
+            await SettingsService.GetEnabledDriveProfilesAsync();
+
+        LoadCachedCandidates();
+    }
+
+    private void LoadCachedCandidates()
+    {
+        _candidates =
+            _profiles
+                .SelectMany(profile =>
+                    JunkFileScannerService.GetCandidates(profile.Name))
+                .OrderBy(candidate => candidate.DriveProfileName)
+                .ThenBy(candidate => candidate.FileName)
+                .ToList();
+    }
+
+    private static List<DriveScanCardPath> GetLibraryPaths(
+        DriveProfile profile)
+    {
+        var entries =
+            new (string Label, string Path)[]
+            {
+                ("Movie Library", profile.MovieLibraryPath),
+                ("TV Library", profile.TvLibraryPath),
+                ("Book Library", profile.BookLibraryPath),
+                ("Audiobook Library", profile.AudiobookLibraryPath),
+                ("Music Library", profile.MusicLibraryPath),
+                ("Comic Library", profile.ComicLibraryPath)
+            };
+
+        return entries
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Path))
+            .Select(entry =>
+                new DriveScanCardPath
+                {
+                    Label = entry.Label,
+                    Path = entry.Path
+                })
+            .ToList();
+    }
+
+    private List<DriveScanCardRow> BuildRows(
+        DriveProfile profile)
+    {
+        var count =
+            JunkFileScannerService.GetCandidates(profile.Name).Count;
+
+        var lastScan =
+            JunkFileScannerService.GetLastScanUtc(profile.Name);
+
+        return
+        [
+            new DriveScanCardRow
+            {
+                Label = "Junk Files",
+                Count = count,
+                LastScanText =
+                    lastScan.HasValue
+                        ? lastScan.Value.ToLocalTime().ToString("g")
+                        : "Never",
+                OnScanClick = () => ScanDriveAsync(profile.Name)
+            }
+        ];
+    }
+
+    private void ToggleSelectAll() =>
+        _selection.ToggleSelectAll(_candidates);
+
+    private async Task ScanDriveAsync(
+        string driveName)
+    {
+        _statusMessage = $"Scanning {driveName}...";
+
+        await InvokeAsync(StateHasChanged);
+
+        var found =
+            await JunkFileScannerService.ScanAsync(driveName);
+
+        LoadCachedCandidates();
+
+        _statusMessage =
+            $"Scan complete for {driveName}. {found.Count} junk file(s) found.";
+    }
+
+    private async Task ConfirmQuarantineSelectedAsync()
+    {
+        if (_isProcessing || _selection.Count == 0)
+        {
+            return;
+        }
+
+        _isProcessing = true;
+
+        var selectedPaths = _selection.SelectedKeys.ToList();
+        var quarantined = 0;
+        var failed = 0;
+
+        try
+        {
+            foreach (var path in selectedPaths)
+            {
+                var candidate =
+                    _candidates.FirstOrDefault(c =>
+                        string.Equals(c.FilePath, path, StringComparison.OrdinalIgnoreCase));
+
+                if (candidate is null)
+                {
+                    continue;
+                }
+
+                var quarantinePath =
+                    await QuarantineService.QuarantineFileAsync(candidate.FilePath);
+
+                var success = !string.IsNullOrWhiteSpace(quarantinePath);
+
+                await HistoryService.AddRecordAsync(
+                    new HistoryRecord
+                    {
+                        ActionType = HistoryActionType.JunkFileQuarantined,
+                        FileName = candidate.FileName,
+                        LibraryPath = candidate.FilePath,
+                        QuarantinePath = quarantinePath ?? string.Empty,
+                        SizeBytes = candidate.SizeBytes,
+                        Success = success,
+                        Message =
+                            success
+                                ? $"Junk file quarantined ({candidate.Reason})."
+                                : "Failed to quarantine junk file."
+                    });
+
+                if (success)
+                {
+                    quarantined++;
+                    JunkFileScannerService.RemoveCandidate(candidate.FilePath);
+                    _selection.Remove(candidate);
+                }
+                else
+                {
+                    failed++;
+                }
+            }
+
+            _statusMessage =
+                $"Quarantined {quarantined} file(s). Failed: {failed}.";
+
+            _isConfirming = false;
+
+            LoadCachedCandidates();
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+}

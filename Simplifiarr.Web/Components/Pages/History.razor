@@ -1,0 +1,198 @@
+﻿@page "/history"
+@rendermode InteractiveServer
+
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+
+@inject IHistoryService HistoryService
+
+<PageTitle>History</PageTitle>
+
+<h1>History</h1>
+
+@if (_loaded && Records.Count > 0)
+{
+    @if (_confirmingClear)
+    {
+        <BatchConfirmBanner CssClass="alert alert-danger"
+                            IsBusy="_isClearing"
+                            ConfirmLabel="Confirm Clear History"
+                            BusyLabel="Clearing..."
+                            OnConfirm="ClearHistoryAsync"
+                            OnCancel="() => _confirmingClear = false">
+            <Message>
+                <strong>Permanently delete all @Records.Count history record(s)?</strong>
+                This cannot be undone.
+            </Message>
+        </BatchConfirmBanner>
+    }
+    else
+    {
+        <button class="btn btn-outline-danger mb-3"
+                @onclick="() => _confirmingClear = true">
+            <i class="bi bi-trash" aria-hidden="true"></i>
+            Clear History
+        </button>
+    }
+}
+
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert alert-info">
+        @_statusMessage
+    </div>
+}
+
+@if (!_loaded)
+{
+    <p>Loading history...</p>
+}
+else
+{
+    <div class="row mb-4">
+        <div class="col-md-3 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h6 class="card-title text-muted">Total Records</h6>
+                    <div class="fs-3 fw-bold">@TotalRecords</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h6 class="card-title text-muted">Total Conversions</h6>
+                    <div class="fs-3 fw-bold">@TotalConversions</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h6 class="card-title text-muted">Total Deletes</h6>
+                    <div class="fs-3 fw-bold">@TotalDeletes</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h6 class="card-title text-muted">Total Reclaimed Space</h6>
+                    <div class="fs-3 fw-bold">@FormatBytes(TotalReclaimedBytes)</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (Records.Count == 0)
+    {
+        <EmptyState Icon="journal-text" Text="No history records found." />
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-striped table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Action</th>
+                        <th>File</th>
+                        <th>Success</th>
+                        <th>Size</th>
+                        <th>Message</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var record in Records.OrderByDescending(x => x.TimestampUtc))
+                    {
+                        <tr>
+                            <td>@record.TimestampUtc.ToLocalTime()</td>
+                            <td>@record.ActionType</td>
+                            <td>@record.FileName</td>
+                            <td>@record.Success</td>
+                            <td>@FormatBytes(record.SizeBytes)</td>
+                            <td>@record.Message</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@code
+{
+    private List<HistoryRecord> Records = [];
+    private bool _loaded;
+
+    private bool _confirmingClear;
+    private bool _isClearing;
+    private string _statusMessage = string.Empty;
+
+    private int TotalRecords =>
+        Records.Count;
+
+    private int TotalConversions =>
+        Records.Count(x => x.ActionType == HistoryActionType.ConversionSucceeded);
+
+    private int TotalDeletes =>
+        Records.Count(x => x.ActionType == HistoryActionType.QuarantineDeleted);
+
+    private long TotalReclaimedBytes =>
+        Records
+            .Where(x => x.ActionType == HistoryActionType.QuarantineDeleted && x.Success)
+            .Sum(x => x.SizeBytes);
+
+    protected override async Task OnInitializedAsync()
+    {
+        Records = (await HistoryService.GetHistoryAsync()).ToList();
+        _loaded = true;
+    }
+
+    private async Task ClearHistoryAsync()
+    {
+        if (_isClearing)
+        {
+            return;
+        }
+
+        _isClearing = true;
+
+        try
+        {
+            await HistoryService.ClearHistoryAsync();
+
+            Records = [];
+            _confirmingClear = false;
+
+            _statusMessage = "History cleared.";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Failed to clear history: {ex.Message}";
+        }
+        finally
+        {
+            _isClearing = false;
+        }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        string[] sizes = ["B", "KB", "MB", "GB", "TB"];
+
+        double len = bytes;
+        int order = 0;
+
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len /= 1024;
+        }
+
+        return $"{len:0.##} {sizes[order]}";
+    }
+}

@@ -1,0 +1,380 @@
+@page "/download-cleanup"
+@rendermode InteractiveServer
+
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+@using Simplifiarr.Core.Utilities
+@using Simplifiarr.Web.Components.Shared
+@using Simplifiarr.Web.Support
+
+@inject ISettingsService SettingsService
+@inject IDownloadCleanupService DownloadCleanupService
+
+<PageTitle>Download Cleanup</PageTitle>
+
+<h1>Download Cleanup</h1>
+
+<p>
+    Finds files in your download folders that are <strong>also in your
+    library</strong> and that <strong>qBittorrent no longer has</strong> - so
+    the download copy is just taking up room. A file is only listed when:
+</p>
+
+<ul>
+    <li>
+        the library has the <strong>same file</strong> (a hardlink) or a copy
+        whose every byte matches - checked by reading both, not by guessing
+        from the name or size, and
+    </li>
+    <li>
+        it isn't part of <strong>any</strong> torrent in qBittorrent (seeding,
+        paused, errored - any state). If qBittorrent can't be reached the scan
+        refuses to run.
+    </li>
+</ul>
+
+<p>
+    Selected files are <strong>deleted directly</strong> - they do not go
+    through Quarantine, because Quarantine lives on one drive and moving a
+    hardlink there from another drive would turn it into a full copy. Every
+    file is re-checked against qBittorrent and the library again right
+    before it is deleted. Deleting a hardlinked download copy only removes
+    that extra name (the library file is untouched and no space is freed);
+    deleting an <em>Identical copy</em> frees its space.
+</p>
+
+@if (_profiles.Count == 0)
+{
+    <div class="alert alert-warning">
+        No enabled drive profiles are configured.
+    </div>
+}
+else
+{
+    <div class="row g-3 mt-2">
+        @foreach (var profile in _profiles)
+        {
+            <div class="col-md-6">
+                <DriveScanCard DriveName="@profile.Name"
+                               Paths="GetFolderPaths(profile)"
+                               Rows="BuildRows(profile)"
+                               IsScanningDrive="@(_scanningDrive == profile.Name)"
+                               OnScanDrive="() => ScanDriveAsync(profile.Name)" />
+            </div>
+        }
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(_errorMessage))
+{
+    <div class="alert alert-danger mt-3">
+        @_errorMessage
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert alert-info mt-3">
+        @_statusMessage
+    </div>
+}
+
+@if (_skipReasons.Count > 0)
+{
+    <details class="mt-2">
+        <summary class="small text-muted">@_skipReasons.Count file(s) were left alone - why</summary>
+        <ul class="small text-muted mb-0">
+            @foreach (var reason in _skipReasons.Take(50))
+            {
+                <li>@reason</li>
+            }
+        </ul>
+    </details>
+}
+
+@if (_candidates.Count == 0)
+{
+    <EmptyState Icon="check-circle" Text="No removable download copies found yet - scan a drive above." />
+}
+else
+{
+    <h2 class="section-header mt-4">Download Copies Already In Your Library</h2>
+
+    <p>
+        <strong>@_candidates.Count</strong> file(s) |
+        <strong>@SizeFormatter.FormatBytes(_candidates.Sum(c => c.SizeBytes))</strong> total |
+        <strong>@SizeFormatter.FormatBytes(SpaceFreed(_candidates))</strong> of that is
+        separate copies (the rest are hardlinks and free no space)
+    </p>
+
+    <p>
+        <strong>Selected:</strong> @_selection.Count
+        (@SizeFormatter.FormatBytes(SpaceFreed(SelectedCandidates())) of separate copies)
+    </p>
+
+    @if (_isConfirming)
+    {
+        <BatchConfirmBanner IsBusy="_isProcessing"
+                            ConfirmLabel="Confirm Delete"
+                            OnConfirm="ConfirmRemoveSelectedAsync"
+                            OnCancel="() => _isConfirming = false">
+            <Message>
+                <strong>Permanently delete @_selection.Count download file(s)?</strong>
+                They skip Quarantine and can't be restored from it. The
+                library copies are not touched. Each file is re-checked
+                against qBittorrent and its library copy first, and skipped if
+                anything has changed.
+            </Message>
+        </BatchConfirmBanner>
+    }
+    else
+    {
+        <button type="button"
+                class="btn btn-secondary"
+                disabled="@_isProcessing"
+                @onclick="ToggleSelectAll">
+            @(_selection.Count == _candidates.Count ? "Deselect All" : "Select All")
+        </button>
+
+        <button type="button"
+                class="btn btn-primary ms-2"
+                disabled="@(_isProcessing || _selection.Count == 0)"
+                @onclick="() => _isConfirming = true">
+            <i class="bi bi-trash3" aria-hidden="true"></i>
+            Delete Selected Download Copies
+        </button>
+    }
+
+    <table class="table mt-3">
+        <thead>
+            <tr>
+                <th>Select</th>
+                <th>Download Copy</th>
+                <th>Library Copy</th>
+                <th>Proof</th>
+                <th>Size</th>
+                <th>Drive</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var candidate in _candidates)
+            {
+                <tr>
+                    <SelectableCheckboxCell Checked="_selection.IsSelected(candidate)"
+                                            Disabled="_isProcessing"
+                                            OnChanged="selected => _selection.SetSelected(candidate, selected)" />
+                    <td>
+                        <code>@candidate.DownloadPath</code>
+                    </td>
+                    <td>
+                        <code>@candidate.LibraryPath</code>
+                    </td>
+                    <td>
+                        @if (candidate.MatchKind == DownloadMatchKind.Hardlink)
+                        {
+                            <span class="badge bg-secondary">Same file (hardlink)</span>
+                            <div class="text-muted small">Frees no space</div>
+                        }
+                        else
+                        {
+                            <span class="badge bg-success">Identical copy</span>
+                            <div class="text-muted small">Every byte compared</div>
+                        }
+                        <div class="text-muted small">Not in qBittorrent</div>
+                    </td>
+                    <td>@SizeFormatter.FormatBytes(candidate.SizeBytes)</td>
+                    <td>@candidate.DriveProfileName</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code
+{
+    private List<DriveProfile> _profiles = [];
+    private List<DownloadCleanupCandidate> _candidates = [];
+
+    private readonly CandidateSelection<DownloadCleanupCandidate> _selection =
+        new(candidate => candidate.DownloadPath);
+
+    private string? _scanningDrive;
+    private string _statusMessage = string.Empty;
+    private string _errorMessage = string.Empty;
+    private List<string> _skipReasons = [];
+    private bool _isConfirming;
+    private bool _isProcessing;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _profiles =
+            await SettingsService.GetEnabledDriveProfilesAsync();
+
+        LoadCachedCandidates();
+    }
+
+    private void LoadCachedCandidates()
+    {
+        _candidates =
+            _profiles
+                .SelectMany(profile =>
+                    DownloadCleanupService.GetCandidates(profile.Name))
+                .OrderByDescending(candidate => candidate.SizeBytes)
+                .ThenBy(candidate => candidate.DownloadPath, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+    }
+
+    private static List<DriveScanCardPath> GetFolderPaths(
+        DriveProfile profile)
+    {
+        var entries =
+            new (string Label, string Path)[]
+            {
+                ("Downloads", profile.DownloadPath),
+                ("Audiobook Downloads", profile.AudiobookDownloadPath),
+                ("Music Downloads", profile.MusicDownloadPath),
+                ("Comic Downloads", profile.ComicDownloadPath)
+            };
+
+        return entries
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Path))
+            .Select(entry =>
+                new DriveScanCardPath
+                {
+                    Label = entry.Label,
+                    Path = entry.Path
+                })
+            .ToList();
+    }
+
+    private List<DriveScanCardRow> BuildRows(
+        DriveProfile profile)
+    {
+        var count =
+            DownloadCleanupService.GetCandidates(profile.Name).Count;
+
+        var lastScan =
+            DownloadCleanupService.GetLastScanUtc(profile.Name);
+
+        return
+        [
+            new DriveScanCardRow
+            {
+                Label = "Download Copies",
+                Count = count,
+                LastScanText =
+                    lastScan.HasValue
+                        ? lastScan.Value.ToLocalTime().ToString("g")
+                        : "Never",
+                OnScanClick = () => ScanDriveAsync(profile.Name)
+            }
+        ];
+    }
+
+    private static long SpaceFreed(
+        IEnumerable<DownloadCleanupCandidate> candidates) =>
+        candidates
+            .Where(candidate => candidate.MatchKind == DownloadMatchKind.IdenticalCopy)
+            .Sum(candidate => candidate.SizeBytes);
+
+    private List<DownloadCleanupCandidate> SelectedCandidates() =>
+        _candidates
+            .Where(candidate => _selection.IsSelected(candidate))
+            .ToList();
+
+    private void ToggleSelectAll() =>
+        _selection.ToggleSelectAll(_candidates);
+
+    private async Task ScanDriveAsync(
+        string driveName)
+    {
+        if (_scanningDrive is not null)
+        {
+            return;
+        }
+
+        _scanningDrive = driveName;
+        _errorMessage = string.Empty;
+        _skipReasons = [];
+        _statusMessage =
+            $"Scanning {driveName}... comparing files byte for byte can take a while on big libraries.";
+
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var result =
+                await DownloadCleanupService.ScanAsync(driveName);
+
+            if (result.Error is not null)
+            {
+                _errorMessage = result.Error;
+                _statusMessage = string.Empty;
+                return;
+            }
+
+            _selection.Clear();
+            LoadCachedCandidates();
+
+            _statusMessage =
+                $"Scan complete for {driveName}. {result.Candidates.Count} download copy(ies) can be removed " +
+                $"({result.DownloadFilesChecked} download file(s) checked against {result.TorrentCount} qBittorrent torrent(s)).";
+
+            if (result.SkippedStillInQbittorrent > 0)
+            {
+                _statusMessage +=
+                    $" {result.SkippedStillInQbittorrent} more are in your library too but qBittorrent still has them, so they were left alone.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Scan failed: {ex.Message}";
+            _statusMessage = string.Empty;
+        }
+        finally
+        {
+            _scanningDrive = null;
+        }
+    }
+
+    private async Task ConfirmRemoveSelectedAsync()
+    {
+        if (_isProcessing || _selection.Count == 0)
+        {
+            return;
+        }
+
+        _isProcessing = true;
+        _errorMessage = string.Empty;
+
+        try
+        {
+            var result =
+                await DownloadCleanupService.RemoveAsync(SelectedCandidates());
+
+            if (result.Error is not null)
+            {
+                _errorMessage = result.Error;
+                return;
+            }
+
+            _skipReasons = result.SkipReasons;
+
+            _statusMessage =
+                $"Deleted {result.Removed} download file(s). Left alone: {result.Skipped}.";
+
+            _selection.Clear();
+            _isConfirming = false;
+
+            LoadCachedCandidates();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Removal failed: {ex.Message}";
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+}

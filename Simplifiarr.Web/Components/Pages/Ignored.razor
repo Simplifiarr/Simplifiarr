@@ -1,0 +1,129 @@
+@page "/ignored"
+@rendermode InteractiveServer
+
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+
+@inject IIgnoredItemsService IgnoredItemsService
+
+<PageTitle>Ignored Items</PageTitle>
+
+<h1>Ignored Items</h1>
+
+<p>
+    Items you've chosen to dismiss from Hardlinks or Potential Duplicates.
+    They're still recognized by Simplifiarr but won't show up as promotion
+    opportunities or duplicates. Un-ignoring a promotion item makes it
+    eligible again the next time you rescan that library; an un-ignored
+    duplicate reappears on the Duplicates page right away.
+</p>
+
+<p>
+    <a href="hardlinks">Back to Hardlinks</a>
+</p>
+
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert alert-info mt-3">
+        @_statusMessage
+    </div>
+}
+
+@if (_items.Count == 0)
+{
+    <EmptyState Icon="eye-slash" Text="Nothing is currently ignored." />
+}
+else
+{
+    <p>
+        <strong>@_items.Count</strong> ignored item(s).
+    </p>
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Category</th>
+                <th>Item</th>
+                <th>Drive</th>
+                <th>Ignored</th>
+                <th>Reason</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            @foreach (var item in _items)
+            {
+                <tr>
+                    <td>@item.Category</td>
+
+                    <td>
+                        <strong>@item.Title</strong>
+
+                        @if (item.Category == IgnoredCategory.Tv)
+                        {
+                            <div class="text-muted small">
+                                @(item.Season.HasValue ? $"Season {item.Season:00}" : "Season Unknown")
+                                @(item.Episode.HasValue ? $" · Episode {item.Episode:00}" : string.Empty)
+                            </div>
+                        }
+                        else if (item.Category == IgnoredCategory.Movie && item.Year.HasValue)
+                        {
+                            <div class="text-muted small">@item.Year</div>
+                        }
+                        else if (item.Category is IgnoredCategory.Book or IgnoredCategory.Audiobook or IgnoredCategory.Music or IgnoredCategory.Comic &&
+                                 !string.IsNullOrWhiteSpace(item.Author))
+                        {
+                            <div class="text-muted small">@item.Author</div>
+                        }
+
+                        <div class="text-muted small">
+                            <code>@item.SourcePath</code>
+                        </div>
+                    </td>
+
+                    <td>@item.DriveProfileName</td>
+
+                    <td>@item.IgnoredUtc.ToLocalTime().ToString("g")</td>
+
+                    <td>@item.Reason</td>
+
+                    <td>
+                        <button type="button"
+                                class="btn btn-secondary btn-sm"
+                                @onclick="() => Unignore(item.SourcePath)">
+                            <i class="bi bi-eye" aria-hidden="true"></i>
+                            Un-ignore
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code
+{
+    private IReadOnlyList<IgnoredItem> _items = [];
+
+    private string _statusMessage = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        LoadItems();
+    }
+
+    private void LoadItems()
+    {
+        _items = IgnoredItemsService.GetAll();
+    }
+
+    private void Unignore(string sourcePath)
+    {
+        IgnoredItemsService.Remove(sourcePath);
+        LoadItems();
+
+        _statusMessage =
+            "Un-ignored. Rescan that library on Hardlinks to see it again as an opportunity.";
+    }
+}
