@@ -31,6 +31,13 @@ public class SimplifiarrSettings
     public string JellyfinApiKey { get; set; } =
         string.Empty;
 
+    /// <summary>
+    /// Where ffprobe.exe is (the file or its folder). Leave blank to have
+    /// Simplifiarr look in the usual install locations itself.
+    /// </summary>
+    public string FfprobePath { get; set; } =
+        string.Empty;
+
     public string QuarantinePath { get; set; } =
         AppPaths.DefaultQuarantinePath;
 

@@ -22,6 +22,8 @@ public class FileInventoryCacheService
 
     private readonly string _cachePath;
 
+    private ScanSession? _session;
+
     public FileInventoryCacheService(
         IFileScannerService fileScanner)
     {
@@ -57,8 +59,34 @@ public class FileInventoryCacheService
             return [];
         }
 
+        ScanSession? session;
+
+        lock (_sync)
+        {
+            session = _session;
+
+            if (session is not null)
+            {
+                var alreadyRead =
+                    TryAnswerFromSession(session, key);
+
+                if (alreadyRead is not null)
+                {
+                    return alreadyRead;
+                }
+            }
+        }
+
+        var filesReadBefore =
+            session?.FilesRead ?? 0;
+
         var files =
-            await _fileScanner.ScanAsync(folderPath);
+            await _fileScanner.ScanAsync(
+                folderPath,
+                session?.CancellationToken ?? default,
+                session is null
+                    ? null
+                    : count => session.Report(filesReadBefore + count));
 
         lock (_sync)
         {
@@ -68,10 +96,105 @@ public class FileInventoryCacheService
                 ScannedUtc = DateTime.UtcNow
             };
 
-            SaveToDisk();
+            if (session is not null && ReferenceEquals(session, _session))
+            {
+                session.ReadKeys.Add(key);
+                session.FilesRead = filesReadBefore + files.Count;
+            }
+            else
+            {
+                SaveToDisk();
+            }
         }
 
         return files;
+    }
+
+    /// <summary>
+    /// Inside a session: the folder itself was already read, or a folder
+    /// that contains it was - in which case its listing is just the part
+    /// of the parent's listing that sits under it. Caller holds the lock.
+    /// </summary>
+    private List<FileRecord>? TryAnswerFromSession(
+        ScanSession session,
+        string key)
+    {
+        if (session.ReadKeys.Contains(key))
+        {
+            return _entries[key].Files.ToList();
+        }
+
+        var prefix = key + Path.DirectorySeparatorChar;
+
+        foreach (var parentKey in session.ReadKeys)
+        {
+            if (!prefix.StartsWith(
+                    parentKey + Path.DirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var parent = _entries[parentKey];
+
+            var files =
+                parent.Files
+                    .Where(file =>
+                        file.FullPath.StartsWith(
+                            prefix,
+                            StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+            _entries[key] = new CacheEntry
+            {
+                Files = files,
+                ScannedUtc = parent.ScannedUtc
+            };
+
+            session.ReadKeys.Add(key);
+
+            return files.ToList();
+        }
+
+        return null;
+    }
+
+    public IDisposable BeginScanSession(
+        CancellationToken cancellationToken = default,
+        Action<long>? onFilesRead = null)
+    {
+        lock (_sync)
+        {
+            if (_session is not null)
+            {
+                throw new InvalidOperationException(
+                    "A scan session is already running.");
+            }
+
+            _session =
+                new ScanSession(this, cancellationToken, onFilesRead);
+
+            return _session;
+        }
+    }
+
+    private void EndScanSession(
+        ScanSession session)
+    {
+        lock (_sync)
+        {
+            if (!ReferenceEquals(session, _session))
+            {
+                return;
+            }
+
+            _session = null;
+
+            if (session.ReadKeys.Count > 0)
+            {
+                SaveToDisk();
+            }
+        }
     }
 
     public DateTime? GetLastScanUtc(
@@ -131,5 +254,24 @@ public class FileInventoryCacheService
             [];
 
         public DateTime ScannedUtc { get; set; }
+    }
+
+    private sealed class ScanSession(
+        FileInventoryCacheService owner,
+        CancellationToken cancellationToken,
+        Action<long>? onFilesRead) : IDisposable
+    {
+        public CancellationToken CancellationToken { get; } = cancellationToken;
+
+        public HashSet<string> ReadKeys { get; } =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        public long FilesRead { get; set; }
+
+        public void Report(long filesRead) =>
+            onFilesRead?.Invoke(filesRead);
+
+        public void Dispose() =>
+            owner.EndScanSession(this);
     }
 }

@@ -4,20 +4,52 @@ namespace Simplifiarr.Core.Services;
 
 public class FileScannerService : IFileScannerService
 {
-    public Task<List<FileRecord>> ScanAsync(string path)
+    private const int ProgressInterval = 500;
+
+    // Hidden and system files are included, as they always have been. A
+    // folder the service account can't open is skipped instead of failing
+    // the whole scan.
+    private static readonly EnumerationOptions WalkOptions = new()
+    {
+        RecurseSubdirectories = true,
+        IgnoreInaccessible = true,
+        AttributesToSkip = FileAttributes.None
+    };
+
+    public Task<List<FileRecord>> ScanAsync(
+        string path,
+        CancellationToken cancellationToken = default,
+        Action<int>? onProgress = null)
     {
         if (!Directory.Exists(path))
         {
             return Task.FromResult(new List<FileRecord>());
         }
 
-        var files = Directory
-            .EnumerateFiles(path, "*", SearchOption.AllDirectories)
-            .Select(file =>
-            {
-                var info = new FileInfo(file);
+        // Walking a large library takes a while; do it off the caller's
+        // thread so the page that asked stays responsive.
+        return Task.Run(
+            () => Walk(path, cancellationToken, onProgress),
+            cancellationToken);
+    }
 
-                return new FileRecord
+    private static List<FileRecord> Walk(
+        string path,
+        CancellationToken cancellationToken,
+        Action<int>? onProgress)
+    {
+        var files = new List<FileRecord>();
+
+        // Enumerating through DirectoryInfo hands back each file's size and
+        // dates along with its name, so there is no second trip to the disk
+        // per file.
+        foreach (var info in new DirectoryInfo(path)
+                     .EnumerateFiles("*", WalkOptions))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            files.Add(
+                new FileRecord
                 {
                     FullPath = info.FullName,
                     FileName = info.Name,
@@ -25,11 +57,17 @@ public class FileScannerService : IFileScannerService
                     FileType = GetFileType(info.Extension),
                     SizeBytes = info.Length,
                     LastModifiedUtc = info.LastWriteTimeUtc
-                };
-            })
-            .ToList();
+                });
 
-        return Task.FromResult(files);
+            if (files.Count % ProgressInterval == 0)
+            {
+                onProgress?.Invoke(files.Count);
+            }
+        }
+
+        onProgress?.Invoke(files.Count);
+
+        return files;
     }
 
     private static FileType GetFileType(string extension)

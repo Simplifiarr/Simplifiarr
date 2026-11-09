@@ -1,12 +1,26 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Simplifiarr.Core.Models;
+using Simplifiarr.Core.Utilities;
 
 namespace Simplifiarr.Core.Services;
 
 public class FfprobeMediaMetadataExtractor
     : IMediaMetadataExtractor
 {
+    // A healthy probe takes well under a second. A file on a sleeping or
+    // failing disk must not be able to hang a whole scan.
+    private static readonly TimeSpan ProbeTimeout =
+        TimeSpan.FromSeconds(30);
+
+    private readonly ISettingsService _settingsService;
+
+    public FfprobeMediaMetadataExtractor(
+        ISettingsService settingsService)
+    {
+        _settingsService = settingsService;
+    }
+
     public async Task<MediaMetadata?> ExtractAsync(
         string filePath)
     {
@@ -17,13 +31,25 @@ public class FfprobeMediaMetadataExtractor
 
         try
         {
-            var process =
+            var settings =
+                await _settingsService.GetSettingsAsync();
+
+            FfprobeLocator.Configure(settings.FfprobePath);
+
+            var ffprobe = FfprobeLocator.Find();
+
+            if (ffprobe is null)
+            {
+                return null;
+            }
+
+            using var process =
                 new Process
                 {
                     StartInfo =
                         new ProcessStartInfo
                         {
-                            FileName = "ffprobe",
+                            FileName = ffprobe,
                             Arguments =
                                 $"-v error " +
                                 "-select_streams v:0 " +
@@ -31,7 +57,6 @@ public class FfprobeMediaMetadataExtractor
                                 "-of json " +
                                 $"\"{filePath}\"",
                             RedirectStandardOutput = true,
-                            RedirectStandardError = true,
                             UseShellExecute = false,
                             CreateNoWindow = true
                         }
@@ -39,10 +64,26 @@ public class FfprobeMediaMetadataExtractor
 
             process.Start();
 
-            var output =
-                await process.StandardOutput.ReadToEndAsync();
+            using var timeout =
+                new CancellationTokenSource(ProbeTimeout);
 
-            await process.WaitForExitAsync();
+            string output;
+
+            try
+            {
+                output =
+                    await process.StandardOutput.ReadToEndAsync(timeout.Token);
+
+                await process.WaitForExitAsync(timeout.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                process.Kill(entireProcessTree: true);
+
+                AppLog.Warn($"ffprobe took longer than {ProbeTimeout.TotalSeconds:N0}s and was stopped: '{filePath}'.");
+
+                return null;
+            }
 
             if (string.IsNullOrWhiteSpace(output))
             {
@@ -97,8 +138,10 @@ public class FfprobeMediaMetadataExtractor
                     }
             };
         }
-        catch
+        catch (Exception exception)
         {
+            AppLog.Warn($"Could not read video details from '{filePath}'.", exception);
+
             return null;
         }
     }

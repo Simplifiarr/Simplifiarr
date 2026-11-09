@@ -20,22 +20,44 @@ public class AssetTorrentMatcher
         var matches =
             new List<AssetTorrentMatch>();
 
+        // Work out each torrent's title once, and file the torrents under
+        // it. This used to re-parse every torrent's name for every asset
+        // (thousands of assets x dozens of torrents, on every drive of
+        // every scan), which was where most of a scan's time went. The
+        // matches found, and their order, are unchanged.
+        var torrentsByTitle =
+            new Dictionary<string, List<(TorrentRecord Torrent, ParsedRelease Parsed)>>(
+                StringComparer.OrdinalIgnoreCase);
+
+        foreach (var torrent in torrents)
+        {
+            var parsed =
+                _releaseParser.Parse(
+                    Path.GetFileNameWithoutExtension(
+                        torrent.ContentPath));
+
+            var title = parsed.NormalizedTitle ?? string.Empty;
+
+            if (!torrentsByTitle.TryGetValue(title, out var sameTitle))
+            {
+                sameTitle = [];
+                torrentsByTitle[title] = sameTitle;
+            }
+
+            sameTitle.Add((torrent, parsed));
+        }
+
         foreach (var asset in assets)
         {
-            foreach (var torrent in torrents)
+            if (!torrentsByTitle.TryGetValue(
+                    asset.Title ?? string.Empty,
+                    out var candidates))
             {
-                var parsedTorrent =
-                    _releaseParser.Parse(
-                        Path.GetFileNameWithoutExtension(
-                            torrent.ContentPath));
+                continue;
+            }
 
-                if (!string.Equals(
-                        asset.Title,
-                        parsedTorrent.NormalizedTitle,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
+            foreach (var (torrent, parsedTorrent) in candidates)
+            {
 
                 if (asset.Year.HasValue &&
                     parsedTorrent.Year.HasValue &&
@@ -101,7 +123,7 @@ public class AssetTorrentMatcher
                     new AssetTorrentMatch
                     {
                         MediaAssetId = asset.Id,
-                        AssetTitle = asset.Title,
+                        AssetTitle = asset.Title ?? string.Empty,
 
                         TorrentId = torrent.Id,
                         TorrentName = torrent.Name,

@@ -73,8 +73,16 @@ public sealed class FileLoggerProvider : ILoggerProvider
         public IDisposable? BeginScope<TState>(TState state)
             where TState : notnull => null;
 
+        // Every outgoing web request (qBittorrent, Prowlarr, Radarr...) logs
+        // four information lines of its own, which buries everything else
+        // in the file. Keep those only when something went wrong.
+        private readonly LogLevel _minimum =
+            category.StartsWith("System.Net.Http", StringComparison.Ordinal)
+                ? LogLevel.Warning
+                : LogLevel.Information;
+
         public bool IsEnabled(LogLevel logLevel) =>
-            logLevel != LogLevel.None;
+            logLevel != LogLevel.None && logLevel >= _minimum;
 
         public void Log<TState>(
             LogLevel logLevel,

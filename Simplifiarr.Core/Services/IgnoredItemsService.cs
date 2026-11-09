@@ -10,6 +10,9 @@ public class IgnoredItemsService
 
     private readonly List<IgnoredItem> _items = [];
 
+    private readonly HashSet<string> _ignoredPaths =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private readonly string _cachePath;
 
     public IgnoredItemsService()
@@ -39,11 +42,23 @@ public class IgnoredItemsService
 
         lock (_sync)
         {
-            return _items.Any(item =>
-                string.Equals(
-                    item.SourcePath,
-                    sourcePath,
-                    StringComparison.OrdinalIgnoreCase));
+            return _ignoredPaths.Contains(sourcePath);
+        }
+    }
+
+    // IsIgnored is asked once per file on every scan, so it answers from
+    // this set rather than searching the whole list each time. Rebuilt
+    // whenever the list changes. Caller holds the lock.
+    private void RebuildIndex()
+    {
+        _ignoredPaths.Clear();
+
+        foreach (var item in _items)
+        {
+            if (!string.IsNullOrWhiteSpace(item.SourcePath))
+            {
+                _ignoredPaths.Add(item.SourcePath);
+            }
         }
     }
 
@@ -63,6 +78,7 @@ public class IgnoredItemsService
 
             _items.Add(item);
 
+            RebuildIndex();
             SaveToDisk();
         }
     }
@@ -92,6 +108,7 @@ public class IgnoredItemsService
 
             _items.AddRange(list);
 
+            RebuildIndex();
             SaveToDisk();
         }
     }
@@ -112,6 +129,7 @@ public class IgnoredItemsService
 
             if (removed)
             {
+                RebuildIndex();
                 SaveToDisk();
             }
         }
@@ -131,6 +149,8 @@ public class IgnoredItemsService
 
             _items.Clear();
             _items.AddRange(persisted);
+
+            RebuildIndex();
         }
     }
 

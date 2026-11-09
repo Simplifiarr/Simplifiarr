@@ -67,6 +67,10 @@ main {
     align-items: baseline;
     gap: .85rem;
     overflow: hidden;
+    /* Let the tagline give way to the scan status instead of running
+       underneath it when the window is narrow. */
+    flex: 0 1 auto;
+    min-width: 0;
 }
 
 .top-row ::deep a.brand-link {

@@ -1,10 +1,12 @@
 @page "/"
 @rendermode InteractiveServer
+@implements IDisposable
 
 @using Simplifiarr.Core.Models
 @using Simplifiarr.Core.Services
 
 @inject IDashboardSummaryService DashboardSummaryService
+@inject IScanCoordinator Scans
 @inject NavigationManager Navigation
 
 <PageTitle>Simplifiarr</PageTitle>
@@ -12,8 +14,9 @@
 <h1>Dashboard</h1>
 
 <p class="text-muted">
-    These numbers reflect whatever Hardlinks and Potential Waste last
-    scanned - visit those pages to refresh a specific drive or library.
+    These numbers come from the last scan. Press <strong>Scan</strong> at the
+    top of the page to refresh them - one scan covers every drive and every
+    page.
 </p>
 
 @if (_dashboard is null)
@@ -63,15 +66,46 @@ else
 @code
 {
     private DashboardSummary? _dashboard;
+    private bool _scanWasRunning;
 
     protected override async Task OnInitializedAsync()
     {
+        _scanWasRunning = Scans.Progress.IsRunning;
+
+        Scans.Changed += OnScanChanged;
+
         _dashboard =
             await DashboardSummaryService.GetDashboardSummaryAsync();
+    }
+
+    // When a scan finishes, show its results without making the user
+    // reload the page.
+    private void OnScanChanged()
+    {
+        var isRunning = Scans.Progress.IsRunning;
+        var justFinished = _scanWasRunning && !isRunning;
+
+        _scanWasRunning = isRunning;
+
+        if (!justFinished)
+        {
+            return;
+        }
+
+        _ = InvokeAsync(async () =>
+        {
+            _dashboard =
+                await DashboardSummaryService.GetDashboardSummaryAsync();
+
+            StateHasChanged();
+        });
     }
 
     private void Navigate(string url)
     {
         Navigation.NavigateTo(url);
     }
+
+    public void Dispose() =>
+        Scans.Changed -= OnScanChanged;
 }

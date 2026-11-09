@@ -137,6 +137,102 @@ code {
 }
 
 /*
+  The app-wide Scan control in the top bar (Shared/ScanBar.razor). It sits
+  on the violet bar, so it uses that bar's light-on-violet colours rather
+  than the page's.
+*/
+.scan-bar {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    margin-left: auto;
+    padding-left: 1rem;
+    flex-shrink: 0;
+    color: #f3edff;
+    font-size: .85rem;
+}
+
+.scan-bar-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.25;
+    text-align: right;
+}
+
+.scan-bar-title {
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.scan-bar-detail {
+    color: #e2d6ff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-variant-numeric: tabular-nums;
+}
+
+.scan-bar-track {
+    width: 140px;
+    height: 6px;
+    flex-shrink: 0;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, .25);
+    overflow: hidden;
+}
+
+.scan-bar-fill {
+    height: 100%;
+    background: #ffffff;
+    transition: width .3s ease;
+}
+
+.scan-bar-btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+    padding: .35rem .85rem;
+    border-radius: .375rem;
+    border: 1px solid rgba(255, 255, 255, .55);
+    background: transparent;
+    color: #ffffff;
+    font-size: .85rem;
+}
+
+.scan-bar-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, .18);
+}
+
+.scan-bar-btn:disabled {
+    opacity: .6;
+}
+
+.scan-bar-btn-primary {
+    background: #ffffff;
+    border-color: #ffffff;
+    color: #4c1d95;
+    font-weight: 600;
+}
+
+.scan-bar-btn-primary:hover:not(:disabled) {
+    background: #ede9fe;
+}
+
+@media (max-width: 900px) {
+    .scan-bar-track {
+        display: none;
+    }
+}
+
+@media (max-width: 640.98px) {
+    .scan-bar-text {
+        display: none;
+    }
+}
+
+/*
   Shared page/table patterns used by several pages (PotentialWaste,
   JunkCleanup, and others) - previously defined inside Home.razor.css,
   where Blazor's CSS isolation silently scoped them to Home.razor only,

@@ -1,0 +1,150 @@
+@using Simplifiarr.Core.Services
+@implements IDisposable
+@inject IScanCoordinator Scans
+
+@*
+    The one Scan control for the whole app. The scan itself belongs to the
+    server (IScanCoordinator), so this only shows its state and asks it to
+    start or stop - every open page sees the same thing, and closing the
+    page doesn't stop a scan.
+*@
+
+<div class="scan-bar" role="status" aria-live="polite">
+    @if (_progress.IsRunning)
+    {
+        <div class="scan-bar-text">
+            <span class="scan-bar-title">
+                @if (string.IsNullOrEmpty(_progress.DriveName))
+                {
+                    <text>Starting scan</text>
+                }
+                else if (_progress.DriveCount > 1)
+                {
+                    <text>Scanning @_progress.DriveName (@_progress.DriveNumber of @_progress.DriveCount)</text>
+                }
+                else
+                {
+                    <text>Scanning @_progress.DriveName</text>
+                }
+            </span>
+            <span class="scan-bar-detail">
+                @_progress.StepName
+                @if (_progress.FilesRead > 0)
+                {
+                    <text> &middot; @_progress.FilesRead.ToString("N0") files</text>
+                }
+            </span>
+        </div>
+
+        <div class="scan-bar-track"
+             role="progressbar"
+             aria-label="Scan progress"
+             aria-valuemin="0"
+             aria-valuemax="100"
+             aria-valuenow="@_progress.Percent">
+            <div class="scan-bar-fill" style="width: @(_progress.Percent)%"></div>
+        </div>
+
+        <button type="button"
+                class="scan-bar-btn"
+                disabled="@_progress.CancelRequested"
+                @onclick="Scans.Cancel">
+            @(_progress.CancelRequested ? "Stopping..." : "Cancel")
+        </button>
+    }
+    else
+    {
+        <div class="scan-bar-text">
+            <span class="scan-bar-detail" title="@ProblemsTooltip">
+                @IdleText
+            </span>
+        </div>
+
+        <button type="button"
+                class="scan-bar-btn scan-bar-btn-primary"
+                @onclick="StartScan">
+            <i class="bi bi-arrow-repeat" aria-hidden="true"></i> Scan
+        </button>
+    }
+</div>
+
+@code
+{
+    private ScanProgress _progress = new();
+
+    protected override void OnInitialized()
+    {
+        _progress = Scans.Progress;
+
+        Scans.Changed += OnScanChanged;
+    }
+
+    private void StartScan() =>
+        Scans.Start();
+
+    private void OnScanChanged()
+    {
+        // Raised from the scan's own thread - hop back onto this page's.
+        _ = InvokeAsync(() =>
+        {
+            _progress = Scans.Progress;
+
+            StateHasChanged();
+        });
+    }
+
+    private string IdleText
+    {
+        get
+        {
+            var summary = Scans.LastSummary;
+
+            if (summary is null)
+            {
+                return "Not scanned yet";
+            }
+
+            var when = HowLongAgo(summary.FinishedUtc);
+
+            if (summary.Cancelled)
+            {
+                return $"Scan cancelled {when}";
+            }
+
+            return summary.Problems.Count switch
+            {
+                0 => $"Scanned {when}",
+                1 => $"Scanned {when} - 1 problem",
+                _ => $"Scanned {when} - {summary.Problems.Count} problems"
+            };
+        }
+    }
+
+    private string? ProblemsTooltip
+    {
+        get
+        {
+            var problems = Scans.LastSummary?.Problems;
+
+            return problems is { Count: > 0 }
+                ? string.Join(Environment.NewLine, problems)
+                : null;
+        }
+    }
+
+    private static string HowLongAgo(DateTime utc)
+    {
+        var age = DateTime.UtcNow - utc;
+
+        return age.TotalMinutes < 1 ? "just now"
+            : age.TotalMinutes < 2 ? "a minute ago"
+            : age.TotalHours < 1 ? $"{(int)age.TotalMinutes} minutes ago"
+            : age.TotalHours < 2 ? "an hour ago"
+            : age.TotalDays < 1 ? $"{(int)age.TotalHours} hours ago"
+            : age.TotalDays < 2 ? "yesterday"
+            : $"{(int)age.TotalDays} days ago";
+    }
+
+    public void Dispose() =>
+        Scans.Changed -= OnScanChanged;
+}
