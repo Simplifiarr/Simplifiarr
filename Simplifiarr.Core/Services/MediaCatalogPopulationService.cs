@@ -11,30 +11,14 @@ public class MediaCatalogPopulationService
 
     private readonly IMediaMetadataExtractor _metadataExtractor;
 
-    private readonly IBookMetadataExtractor _bookMetadataExtractor;
-
-    private readonly IAudiobookMetadataExtractor _audiobookMetadataExtractor;
-
-    private readonly IMusicMetadataExtractor _musicMetadataExtractor;
-
-    private readonly IComicMetadataExtractor _comicMetadataExtractor;
-
     public MediaCatalogPopulationService(
         IMediaCatalogService catalogService,
         IReleaseParser releaseParser,
-        IMediaMetadataExtractor metadataExtractor,
-        IBookMetadataExtractor bookMetadataExtractor,
-        IAudiobookMetadataExtractor audiobookMetadataExtractor,
-        IMusicMetadataExtractor musicMetadataExtractor,
-        IComicMetadataExtractor comicMetadataExtractor)
+        IMediaMetadataExtractor metadataExtractor)
     {
         _catalogService = catalogService;
         _releaseParser = releaseParser;
         _metadataExtractor = metadataExtractor;
-        _bookMetadataExtractor = bookMetadataExtractor;
-        _audiobookMetadataExtractor = audiobookMetadataExtractor;
-        _musicMetadataExtractor = musicMetadataExtractor;
-        _comicMetadataExtractor = comicMetadataExtractor;
     }
 
     public async Task<int> PopulateAsync(
@@ -73,120 +57,16 @@ public class MediaCatalogPopulationService
                 continue;
             }
 
-            MediaAsset asset;
+            // Books, audiobooks, music and comics are described by tags
+            // inside the file; their definition knows how to read them.
+            // Anything else is video, described by its release name.
+            var definition =
+                MediaTypeDefinitions.ForFile(file.FileType, mediaTypeOverride);
 
-            if (file.FileType == FileType.Book)
-            {
-                var bookMetadata =
-                    _bookMetadataExtractor.Extract(
-                        file.FullPath);
-
-                asset = new MediaAsset
-                {
-                    Title = bookMetadata.Title,
-                    Author = bookMetadata.Author,
-                    CanonicalPath = file.FullPath,
-                    FileSizeBytes = file.SizeBytes,
-                    MediaType = MediaType.Book
-                };
-            }
-            else if (file.FileType == FileType.Audio &&
-                     mediaTypeOverride == MediaType.Music)
-            {
-                var musicMetadata =
-                    _musicMetadataExtractor.Extract(
-                        file.FullPath);
-
-                asset = new MediaAsset
-                {
-                    Title = musicMetadata.Title,
-                    Author = musicMetadata.Artist,
-                    Album = musicMetadata.Album,
-                    TrackNumber = musicMetadata.TrackNumber,
-                    CanonicalPath = file.FullPath,
-                    FileSizeBytes = file.SizeBytes,
-                    MediaType = MediaType.Music
-                };
-            }
-            else if (file.FileType == FileType.Audio)
-            {
-                var audiobookMetadata =
-                    _audiobookMetadataExtractor.Extract(
-                        file.FullPath);
-
-                asset = new MediaAsset
-                {
-                    Title = audiobookMetadata.Title,
-                    Author = audiobookMetadata.Author,
-                    CanonicalPath = file.FullPath,
-                    FileSizeBytes = file.SizeBytes,
-                    MediaType = MediaType.Audiobook
-                };
-            }
-            else if (file.FileType == FileType.Comic)
-            {
-                var comicMetadata =
-                    _comicMetadataExtractor.Extract(
-                        file.FullPath);
-
-                asset = new MediaAsset
-                {
-                    Title = comicMetadata.Title,
-                    Author = comicMetadata.Author,
-                    Album = comicMetadata.Series,
-                    TrackNumber = comicMetadata.Issue,
-                    Year = comicMetadata.Year,
-                    CanonicalPath = file.FullPath,
-                    FileSizeBytes = file.SizeBytes,
-                    MediaType = MediaType.Comic
-                };
-            }
-            else
-            {
-                var parsed =
-                    _releaseParser.Parse(
-                        Path.GetFileNameWithoutExtension(
-                            file.FileName));
-
-                var metadata =
-                    await _metadataExtractor.ExtractAsync(
-                        file.FullPath);
-
-                asset = new MediaAsset
-                {
-                    Title = parsed.NormalizedTitle,
-                    Year = parsed.Year,
-                    Season = parsed.Season,
-                    Episode = parsed.Episode,
-
-                    Resolution =
-                        metadata?.Resolution ??
-                        parsed.Resolution,
-
-                    Width =
-                        metadata?.Width ?? 0,
-
-                    Height =
-                        metadata?.Height ?? 0,
-
-                    VideoCodec =
-                        metadata?.Codec ??
-                        string.Empty,
-
-                    CanonicalPath = file.FullPath,
-
-                    FileSizeBytes = file.SizeBytes,
-
-                    // FileType.Audio is handled by the Music/Audiobook
-                    // branches above, before this switch runs.
-                    MediaType = file.FileType switch
-                    {
-                        FileType.Video when parsed.IsTv => MediaType.TvEpisode,
-                        FileType.Video => MediaType.Movie,
-                        _ => MediaType.Other
-                    }
-                };
-            }
+            var asset =
+                definition is not null
+                    ? CreateTaggedAsset(definition, file)
+                    : await CreateVideoAssetAsync(file);
 
             _catalogService.AddAsset(asset);
 
@@ -204,6 +84,72 @@ public class MediaCatalogPopulationService
         _catalogService.SaveToDisk();
 
         return count;
+    }
+
+    private static MediaAsset CreateTaggedAsset(
+        MediaTypeDefinition definition,
+        FileRecord file)
+    {
+        var metadata =
+            definition.ReadMetadata(file.FullPath);
+
+        return new MediaAsset
+        {
+            Title = metadata.Title,
+            Author = metadata.Author,
+            Album = metadata.Album,
+            TrackNumber = metadata.TrackNumber,
+            Year = metadata.Year,
+            CanonicalPath = file.FullPath,
+            FileSizeBytes = file.SizeBytes,
+            MediaType = definition.MediaType
+        };
+    }
+
+    private async Task<MediaAsset> CreateVideoAssetAsync(
+        FileRecord file)
+    {
+        var parsed =
+            _releaseParser.Parse(
+                Path.GetFileNameWithoutExtension(
+                    file.FileName));
+
+        var metadata =
+            await _metadataExtractor.ExtractAsync(
+                file.FullPath);
+
+        return new MediaAsset
+        {
+            Title = parsed.NormalizedTitle,
+            Year = parsed.Year,
+            Season = parsed.Season,
+            Episode = parsed.Episode,
+
+            Resolution =
+                metadata?.Resolution ??
+                parsed.Resolution,
+
+            Width =
+                metadata?.Width ?? 0,
+
+            Height =
+                metadata?.Height ?? 0,
+
+            VideoCodec =
+                metadata?.Codec ??
+                string.Empty,
+
+            CanonicalPath = file.FullPath,
+
+            FileSizeBytes = file.SizeBytes,
+
+            MediaType = file.FileType switch
+            {
+                FileType.Video when parsed.IsTv => MediaType.TvEpisode,
+                FileType.Video => MediaType.Movie,
+                _ => MediaType.Other
+            }
+        };
     }
 
     /// <summary>
@@ -253,9 +199,3 @@ public class MediaCatalogPopulationService
         existingAsset.VideoCodec = metadata.Codec;
     }
 }
-
-
-
-
-
-

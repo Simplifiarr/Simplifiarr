@@ -16,10 +16,7 @@ public class DashboardSummaryService : IDashboardSummaryService
 
     private readonly IWasteCandidateCacheService _wasteCandidateCache;
     private readonly IPromotionCandidateCacheService _promotionCandidateCache;
-    private readonly IBookPromotionCandidateCacheService _bookPromotionCandidateCache;
-    private readonly IAudiobookPromotionCandidateCacheService _audiobookPromotionCandidateCache;
-    private readonly IMusicPromotionCandidateCacheService _musicPromotionCandidateCache;
-    private readonly IComicPromotionCandidateCacheService _comicPromotionCandidateCache;
+    private readonly IMediaPromotionService _mediaPromotion;
     private readonly IHistoryService _historyService;
 
     public DashboardSummaryService(
@@ -27,10 +24,7 @@ public class DashboardSummaryService : IDashboardSummaryService
         ISettingsService settingsService,
         IWasteCandidateCacheService wasteCandidateCache,
         IPromotionCandidateCacheService promotionCandidateCache,
-        IBookPromotionCandidateCacheService bookPromotionCandidateCache,
-        IAudiobookPromotionCandidateCacheService audiobookPromotionCandidateCache,
-        IMusicPromotionCandidateCacheService musicPromotionCandidateCache,
-        IComicPromotionCandidateCacheService comicPromotionCandidateCache,
+        IMediaPromotionService mediaPromotion,
         IHistoryService historyService)
     {
         _quarantineInventoryService = quarantineInventoryService;
@@ -38,10 +32,7 @@ public class DashboardSummaryService : IDashboardSummaryService
 
         _wasteCandidateCache = wasteCandidateCache;
         _promotionCandidateCache = promotionCandidateCache;
-        _bookPromotionCandidateCache = bookPromotionCandidateCache;
-        _audiobookPromotionCandidateCache = audiobookPromotionCandidateCache;
-        _musicPromotionCandidateCache = musicPromotionCandidateCache;
-        _comicPromotionCandidateCache = comicPromotionCandidateCache;
+        _mediaPromotion = mediaPromotion;
         _historyService = historyService;
     }
 
@@ -81,14 +72,9 @@ public class DashboardSummaryService : IDashboardSummaryService
         var promotionOpportunityCount =
             enabledProfiles.Sum(profile =>
                 _promotionCandidateCache.GetCandidates(profile.Name).Count) +
-            enabledProfiles.Sum(profile =>
-                _bookPromotionCandidateCache.GetCandidates(profile.Name).Count) +
-            enabledProfiles.Sum(profile =>
-                _audiobookPromotionCandidateCache.GetCandidates(profile.Name).Count) +
-            enabledProfiles.Sum(profile =>
-                _musicPromotionCandidateCache.GetCandidates(profile.Name).Count) +
-            enabledProfiles.Sum(profile =>
-                _comicPromotionCandidateCache.GetCandidates(profile.Name).Count);
+            MediaTypeDefinitions.All.Sum(definition =>
+                enabledProfiles.Sum(profile =>
+                    _mediaPromotion.GetCandidates(definition.MediaType, profile.Name).Count));
 
         var historyRecords =
             await _historyService.GetHistoryAsync();

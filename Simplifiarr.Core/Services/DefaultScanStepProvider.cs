@@ -18,48 +18,44 @@ public class DefaultScanStepProvider
 
     public DefaultScanStepProvider(
         IMoviePromotionCandidateService movies,
-        IBookPromotionCandidateService books,
-        IAudiobookPromotionCandidateService audiobooks,
-        IMusicPromotionCandidateService music,
-        IComicPromotionCandidateService comics,
+        IMediaPromotionService mediaPromotion,
         IWasteCandidateService waste,
         IJunkFileScannerService junk,
         IBlockedFileService blockedFiles)
     {
-        _steps =
-        [
-            new ScanStep(
+        var steps = new List<ScanStep>
+        {
+            new(
                 "Finding movies and TV to link",
-                profile => movies.GetCandidatesAsync(profile.Name, forceRefresh: true, MediaKind.All)),
+                profile => movies.GetCandidatesAsync(profile.Name, forceRefresh: true, MediaKind.All))
+        };
 
-            new ScanStep(
-                "Finding books to link",
-                profile => books.GetCandidatesAsync(profile.Name, forceRefresh: true)),
+        // One step per media type the shared pipeline knows about - a new
+        // type added there is scanned here without touching this file.
+        foreach (var definition in MediaTypeDefinitions.All)
+        {
+            steps.Add(
+                new ScanStep(
+                    $"Finding {definition.PluralName.ToLowerInvariant()} to link",
+                    profile => mediaPromotion.ScanAsync(definition.MediaType, profile.Name)));
+        }
 
-            new ScanStep(
-                "Finding audiobooks to link",
-                profile => audiobooks.GetCandidatesAsync(profile.Name, forceRefresh: true)),
-
-            new ScanStep(
-                "Finding music to link",
-                profile => music.GetCandidatesAsync(profile.Name, forceRefresh: true)),
-
-            new ScanStep(
-                "Finding comics to link",
-                profile => comics.GetCandidatesAsync(profile.Name, forceRefresh: true)),
-
+        steps.Add(
             new ScanStep(
                 "Checking for full copies",
-                profile => waste.GetCandidatesAsync(profile.Name, forceRefresh: true, MediaKind.All)),
+                profile => waste.GetCandidatesAsync(profile.Name, forceRefresh: true, MediaKind.All)));
 
+        steps.Add(
             new ScanStep(
                 "Looking for leftover files",
-                profile => junk.ScanAsync(profile.Name)),
+                profile => junk.ScanAsync(profile.Name)));
 
+        steps.Add(
             new ScanStep(
                 "Checking for blocked files",
-                profile => blockedFiles.GetBlockedFilesAsync(profile.Name, forceRefresh: true))
-        ];
+                profile => blockedFiles.GetBlockedFilesAsync(profile.Name, forceRefresh: true)));
+
+        _steps = steps;
     }
 
     public IReadOnlyList<ScanStep> GetSteps() => _steps;
