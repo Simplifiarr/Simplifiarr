@@ -1,3 +1,5 @@
+using Simplifiarr.Core.Utilities;
+
 namespace Simplifiarr.Core.Models;
 
 public class SimplifiarrSettings
@@ -30,13 +32,13 @@ public class SimplifiarrSettings
         string.Empty;
 
     public string QuarantinePath { get; set; } =
-        @"C:\ProgramData\Simplifiarr\Quarantine";
+        AppPaths.DefaultQuarantinePath;
 
     public string HistoryPath { get; set; } =
-        @"C:\ProgramData\Simplifiarr\History\history.json";
+        AppPaths.DefaultHistoryFile;
 
     public string CrossSeedTorrentStoragePath { get; set; } =
-        @"C:\ProgramData\Simplifiarr\CrossSeedTorrents";
+        AppPaths.DefaultCrossSeedTorrentPath;
 
     public List<DriveProfile> DriveProfiles { get; set; } =
         [];

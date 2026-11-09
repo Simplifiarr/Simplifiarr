@@ -1,10 +1,19 @@
 ﻿using Simplifiarr.Core.Models;
 using Simplifiarr.Core.Services;
+using Simplifiarr.Core.Utilities;
 using Simplifiarr.Web.Components;
+using Simplifiarr.Web.Support;
 using Microsoft.Extensions.Hosting.WindowsServices;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseWindowsService();
+
+// Where settings, history, caches and logs live. Blank means the default
+// (%ProgramData%\Simplifiarr); a second install sets Simplifiarr:DataPath
+// so the two never share files. Must run before any service is created.
+AppPaths.Configure(builder.Configuration["Simplifiarr:DataPath"]);
+
+builder.Logging.AddProvider(new FileLoggerProvider());
 
 // Give in-flight work 20 seconds to finish when the service is stopped.
 builder.Services.Configure<HostOptions>(options =>
@@ -83,6 +92,28 @@ builder.Services.AddSingleton<ITorrentReconstructionService, TorrentReconstructi
 builder.Services.AddSingleton<IWholeTorrentCandidateService, WholeTorrentCandidateService>();
 
 var app = builder.Build();
+
+// Route the Core project's log messages into the real logger (and so into
+// the log file).
+var coreLogger = app.Services
+    .GetRequiredService<ILoggerFactory>()
+    .CreateLogger("Simplifiarr");
+
+AppLog.Sink = (level, message, exception) =>
+    coreLogger.Log(
+        level switch
+        {
+            AppLogLevel.Error => LogLevel.Error,
+            AppLogLevel.Warning => LogLevel.Warning,
+            _ => LogLevel.Information
+        },
+        exception,
+        "{Message}",
+        message);
+
+coreLogger.LogInformation(
+    "Simplifiarr starting. Data folder: {DataRoot}",
+    AppPaths.DataRoot);
 
 using (var scope = app.Services.CreateScope())
 {

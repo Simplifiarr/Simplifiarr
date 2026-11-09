@@ -219,9 +219,21 @@ public class MediaCatalogPopulationService
         MediaAsset existingAsset,
         FileRecord file)
     {
+        var sizeUnchanged =
+            existingAsset.FileSizeBytes == file.SizeBytes;
+
         existingAsset.FileSizeBytes = file.SizeBytes;
 
         if (file.FileType is FileType.Book or FileType.Audio or FileType.Comic)
+        {
+            return;
+        }
+
+        // ffprobe is a separate program launched once per file. A video
+        // that is the same size as last time and already has its
+        // dimensions on record hasn't changed, so don't probe it again -
+        // on a rescan that is nearly every file in the library.
+        if (sizeUnchanged && existingAsset.Height > 0)
         {
             return;
         }

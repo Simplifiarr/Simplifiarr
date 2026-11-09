@@ -1,17 +1,11 @@
-using System.Diagnostics;
-using System.Text.Json;
 using Simplifiarr.Core.Models;
+using Simplifiarr.Core.Utilities;
 
 namespace Simplifiarr.Core.Services;
 
 public class IgnoredItemsService
     : IIgnoredItemsService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true
-    };
-
     private readonly object _sync = new();
 
     private readonly List<IgnoredItem> _items = [];
@@ -20,12 +14,7 @@ public class IgnoredItemsService
 
     public IgnoredItemsService()
     {
-        _cachePath = Path.Combine(
-            Environment.GetFolderPath(
-                Environment.SpecialFolder.CommonApplicationData),
-            "Simplifiarr",
-            "PromotionCache",
-            "ignored-items.json");
+        _cachePath = AppPaths.DataFile("ignored-items.json");
 
         LoadFromDisk();
     }
@@ -132,59 +121,19 @@ public class IgnoredItemsService
     {
         lock (_sync)
         {
-            try
+            var persisted =
+                JsonFileStore.Load<List<IgnoredItem>>(_cachePath);
+
+            if (persisted is null)
             {
-                if (!File.Exists(_cachePath))
-                {
-                    return;
-                }
-
-                var json =
-                    File.ReadAllText(_cachePath);
-
-                var persisted =
-                    JsonSerializer.Deserialize<List<IgnoredItem>>(
-                        json,
-                        JsonOptions);
-
-                if (persisted is null)
-                {
-                    return;
-                }
-
-                _items.Clear();
-                _items.AddRange(persisted);
+                return;
             }
-            catch (Exception exception)
-            {
-                Debug.WriteLine(
-                    $"Unable to load ignored items: {exception}");
-            }
+
+            _items.Clear();
+            _items.AddRange(persisted);
         }
     }
 
-    private void SaveToDisk()
-    {
-        try
-        {
-            var directory =
-                Path.GetDirectoryName(_cachePath)!;
-
-            Directory.CreateDirectory(directory);
-
-            var json = JsonSerializer.Serialize(
-                _items,
-                JsonOptions);
-
-            var temporaryPath = _cachePath + ".tmp";
-
-            File.WriteAllText(temporaryPath, json);
-            File.Move(temporaryPath, _cachePath, true);
-        }
-        catch (Exception exception)
-        {
-            Debug.WriteLine(
-                $"Unable to save ignored items: {exception}");
-        }
-    }
+    private void SaveToDisk() =>
+        JsonFileStore.Save(_cachePath, _items);
 }

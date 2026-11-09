@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using System.Text.Json;
 using Simplifiarr.Core.Models;
 using Simplifiarr.Core.Utilities;
 
@@ -8,14 +6,18 @@ namespace Simplifiarr.Core.Services;
 public class MediaCatalogService
     : IMediaCatalogService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true
-    };
-
     private readonly object _sync = new();
 
     private readonly List<MediaAsset> _assets =
+        [];
+
+    // Lookups by path and by id happen once per file on every scan, so
+    // they go through these indexes instead of walking the whole list.
+    // An asset's path and id never change after it is added.
+    private readonly Dictionary<string, MediaAsset> _assetsByPath =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly Dictionary<Guid, MediaAsset> _assetsById =
         [];
 
     private readonly List<SourceRecord> _sources =
@@ -28,12 +30,7 @@ public class MediaCatalogService
 
     public MediaCatalogService()
     {
-        _cachePath = Path.Combine(
-            Environment.GetFolderPath(
-                Environment.SpecialFolder.CommonApplicationData),
-            "Simplifiarr",
-            "PromotionCache",
-            "media-catalog.json");
+        _cachePath = AppPaths.DataFile("media-catalog.json");
 
         LoadFromDisk();
     }
@@ -51,8 +48,7 @@ public class MediaCatalogService
     {
         lock (_sync)
         {
-            return _assets.FirstOrDefault(asset =>
-                asset.Id == assetId);
+            return _assetsById.GetValueOrDefault(assetId);
         }
     }
 
@@ -238,12 +234,7 @@ public class MediaCatalogService
 
         lock (_sync)
         {
-            return _assets.FirstOrDefault(asset =>
-                !string.IsNullOrWhiteSpace(asset.CanonicalPath) &&
-                string.Equals(
-                    Path.GetFullPath(asset.CanonicalPath),
-                    normalizedPath,
-                    StringComparison.OrdinalIgnoreCase));
+            return _assetsByPath.GetValueOrDefault(normalizedPath);
         }
     }
 
@@ -255,6 +246,34 @@ public class MediaCatalogService
         lock (_sync)
         {
             _assets.Add(asset);
+
+            IndexAsset(asset);
+        }
+    }
+
+    // When two assets share a path or id, the earlier one wins - the same
+    // answer the old "first match in the list" search gave.
+    private void IndexAsset(
+        MediaAsset asset)
+    {
+        _assetsById.TryAdd(asset.Id, asset);
+
+        if (!string.IsNullOrWhiteSpace(asset.CanonicalPath))
+        {
+            _assetsByPath.TryAdd(
+                Path.GetFullPath(asset.CanonicalPath),
+                asset);
+        }
+    }
+
+    private void RebuildIndexes()
+    {
+        _assetsByPath.Clear();
+        _assetsById.Clear();
+
+        foreach (var asset in _assets)
+        {
+            IndexAsset(asset);
         }
     }
 
@@ -288,6 +307,8 @@ public class MediaCatalogService
 
             _assets.RemoveAll(asset => idsToRemove.Contains(asset.Id));
             _sources.RemoveAll(source => idsToRemove.Contains(source.MediaAssetId));
+
+            RebuildIndexes();
 
             SaveToDiskCore();
         }
@@ -331,6 +352,8 @@ public class MediaCatalogService
 
             _assets.RemoveAll(asset => idsToRemove.Contains(asset.Id));
             _sources.RemoveAll(source => idsToRemove.Contains(source.MediaAssetId));
+
+            RebuildIndexes();
 
             SaveToDiskCore();
         }
@@ -442,6 +465,8 @@ public class MediaCatalogService
             _sources.Clear();
             _torrents.Clear();
 
+            RebuildIndexes();
+
             SaveToDiskCore();
         }
     }
@@ -458,92 +483,52 @@ public class MediaCatalogService
     {
         lock (_sync)
         {
-            try
-            {
-                if (!File.Exists(_cachePath))
-                {
-                    return;
-                }
-
-                var json =
-                    File.ReadAllText(_cachePath);
-
-                var snapshot =
-                    JsonSerializer.Deserialize<CatalogSnapshot>(
-                        json,
-                        JsonOptions);
-
-                if (snapshot is null)
-                {
-                    return;
-                }
-
-                _assets.Clear();
-                _assets.AddRange(snapshot.Assets);
-
-                _sources.Clear();
-                _sources.AddRange(snapshot.Sources);
-
-                var removedCount =
-                    _assets.RemoveAll(asset =>
-                        string.IsNullOrWhiteSpace(asset.CanonicalPath) ||
-                        !File.Exists(asset.CanonicalPath));
-
-                var remainingAssetIds =
-                    _assets
-                        .Select(asset => asset.Id)
-                        .ToHashSet();
-
-                var removedSourceCount =
-                    _sources.RemoveAll(source =>
-                        !remainingAssetIds.Contains(source.MediaAssetId));
-
-                if (removedCount > 0 ||
-                    removedSourceCount > 0)
-                {
-                    SaveToDiskCore();
-                }
-            }
-            catch (Exception exception)
-            {
-                Debug.WriteLine(
-                    $"Unable to load media catalog: {exception}");
-            }
-        }
-    }
-
-    private void SaveToDiskCore()
-    {
-        try
-        {
-            var directory =
-                Path.GetDirectoryName(_cachePath)!;
-
-            Directory.CreateDirectory(directory);
-
             var snapshot =
-                new CatalogSnapshot
-                {
-                    Assets = _assets,
-                    Sources = _sources
-                };
+                JsonFileStore.Load<CatalogSnapshot>(_cachePath);
 
-            var json =
-                JsonSerializer.Serialize(
-                    snapshot,
-                    JsonOptions);
+            if (snapshot is null)
+            {
+                return;
+            }
 
-            var temporaryPath = _cachePath + ".tmp";
+            _assets.Clear();
+            _assets.AddRange(snapshot.Assets);
 
-            File.WriteAllText(temporaryPath, json);
-            File.Move(temporaryPath, _cachePath, true);
-        }
-        catch (Exception exception)
-        {
-            Debug.WriteLine(
-                $"Unable to save media catalog: {exception}");
+            _sources.Clear();
+            _sources.AddRange(snapshot.Sources);
+
+            var removedCount =
+                _assets.RemoveAll(asset =>
+                    string.IsNullOrWhiteSpace(asset.CanonicalPath) ||
+                    !File.Exists(asset.CanonicalPath));
+
+            var remainingAssetIds =
+                _assets
+                    .Select(asset => asset.Id)
+                    .ToHashSet();
+
+            var removedSourceCount =
+                _sources.RemoveAll(source =>
+                    !remainingAssetIds.Contains(source.MediaAssetId));
+
+            RebuildIndexes();
+
+            if (removedCount > 0 ||
+                removedSourceCount > 0)
+            {
+                SaveToDiskCore();
+            }
         }
     }
+
+    private void SaveToDiskCore() =>
+        JsonFileStore.Save(
+            _cachePath,
+            new CatalogSnapshot
+            {
+                Assets = _assets,
+                Sources = _sources
+            });
 
     private sealed class CatalogSnapshot
     {

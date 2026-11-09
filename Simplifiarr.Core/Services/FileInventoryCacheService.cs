@@ -1,6 +1,5 @@
-using System.Diagnostics;
-using System.Text.Json;
 using Simplifiarr.Core.Models;
+using Simplifiarr.Core.Utilities;
 
 namespace Simplifiarr.Core.Services;
 
@@ -14,11 +13,6 @@ namespace Simplifiarr.Core.Services;
 public class FileInventoryCacheService
     : IFileInventoryService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true
-    };
-
     private readonly IFileScannerService _fileScanner;
 
     private readonly object _sync = new();
@@ -33,12 +27,7 @@ public class FileInventoryCacheService
     {
         _fileScanner = fileScanner;
 
-        _cachePath = Path.Combine(
-            Environment.GetFolderPath(
-                Environment.SpecialFolder.CommonApplicationData),
-            "Simplifiarr",
-            "PromotionCache",
-            "file-inventory-cache.json");
+        _cachePath = AppPaths.DataFile("file-inventory-cache.json");
 
         LoadFromDisk();
     }
@@ -116,66 +105,25 @@ public class FileInventoryCacheService
     {
         lock (_sync)
         {
-            try
+            var persistedEntries =
+                JsonFileStore.Load<Dictionary<string, CacheEntry>>(_cachePath);
+
+            if (persistedEntries is null)
             {
-                if (!File.Exists(_cachePath))
-                {
-                    return;
-                }
-
-                var json =
-                    File.ReadAllText(_cachePath);
-
-                var persistedEntries =
-                    JsonSerializer.Deserialize<
-                        Dictionary<string, CacheEntry>>(
-                        json,
-                        JsonOptions);
-
-                if (persistedEntries is null)
-                {
-                    return;
-                }
-
-                _entries.Clear();
-
-                foreach (var pair in persistedEntries)
-                {
-                    _entries[pair.Key] = pair.Value;
-                }
+                return;
             }
-            catch (Exception exception)
+
+            _entries.Clear();
+
+            foreach (var pair in persistedEntries)
             {
-                Debug.WriteLine(
-                    $"Unable to load file inventory cache: {exception}");
+                _entries[pair.Key] = pair.Value;
             }
         }
     }
 
-    private void SaveToDisk()
-    {
-        try
-        {
-            var directory =
-                Path.GetDirectoryName(_cachePath)!;
-
-            Directory.CreateDirectory(directory);
-
-            var json = JsonSerializer.Serialize(
-                _entries,
-                JsonOptions);
-
-            var temporaryPath = _cachePath + ".tmp";
-
-            File.WriteAllText(temporaryPath, json);
-            File.Move(temporaryPath, _cachePath, true);
-        }
-        catch (Exception exception)
-        {
-            Debug.WriteLine(
-                $"Unable to save file inventory cache: {exception}");
-        }
-    }
+    private void SaveToDisk() =>
+        JsonFileStore.Save(_cachePath, _entries);
 
     private sealed class CacheEntry
     {

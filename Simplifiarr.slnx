@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="Simplifiarr.Core/Simplifiarr.Core.csproj" />
+  <Project Path="Simplifiarr.Tests/Simplifiarr.Tests.csproj" />
   <Project Path="Simplifiarr.Web/Simplifiarr.Web.csproj" />
 </Solution>

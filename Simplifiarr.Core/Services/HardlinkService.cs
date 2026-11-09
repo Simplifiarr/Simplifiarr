@@ -1,60 +1,30 @@
-using System.Diagnostics;
 using Simplifiarr.Core.Models;
+using Simplifiarr.Core.Utilities;
 
 namespace Simplifiarr.Core.Services;
 
 public class HardlinkService : IHardlinkService
 {
-    public async Task<int?> GetHardlinkCountAsync(string filePath)
+    public Task<int?> GetHardlinkCountAsync(string filePath)
     {
         if (!File.Exists(filePath))
         {
-            return null;
+            return Task.FromResult<int?>(null);
         }
 
-        try
-        {
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = "fsutil",
-                Arguments = $"hardlink list \"{filePath}\"",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-
-            using var process = Process.Start(startInfo);
-
-            if (process is null)
-            {
-                return null;
-            }
-
-            var output = await process.StandardOutput.ReadToEndAsync();
-
-            await process.WaitForExitAsync();
-
-            if (process.ExitCode != 0)
-            {
-                return null;
-            }
-
-            var links = output
-                .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
-                .Select(line => line.Trim())
-                .Where(line => !string.IsNullOrWhiteSpace(line))
-                .ToList();
-
-            return links.Count;
-        }
-        catch
-        {
-            return null;
-        }
+        return Task.FromResult(
+            NativeHardlinks.GetIdentity(filePath)?.LinkCount);
     }
 
-    public async Task<HardlinkCreationResult> CreateHardlinkAsync(
+    public Task<HardlinkCreationResult> CreateHardlinkAsync(
+        string existingFilePath,
+        string newLinkPath)
+    {
+        return Task.FromResult(
+            CreateHardlink(existingFilePath, newLinkPath));
+    }
+
+    private static HardlinkCreationResult CreateHardlink(
         string existingFilePath,
         string newLinkPath)
     {
@@ -78,47 +48,19 @@ public class HardlinkService : IHardlinkService
                 Directory.CreateDirectory(directory);
             }
 
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = "cmd",
-                Arguments = $"/c mklink /H \"{newLinkPath}\" \"{existingFilePath}\"",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
+            var error =
+                NativeHardlinks.CreateHardlink(
+                    existingFilePath,
+                    newLinkPath);
 
-            using var process = Process.Start(startInfo);
-
-            if (process is null)
+            if (error is not null)
             {
-                return new HardlinkCreationResult(false, "Unable to start the mklink process.");
+                return new HardlinkCreationResult(false, error);
             }
 
-            var stdOut = await process.StandardOutput.ReadToEndAsync();
-            var stdErr = await process.StandardError.ReadToEndAsync();
+            RestoreInheritedPermissions(newLinkPath);
 
-            await process.WaitForExitAsync();
-
-            if (process.ExitCode == 0)
-            {
-                RestoreInheritedPermissions(newLinkPath);
-
-                return new HardlinkCreationResult(true, null);
-            }
-
-            var detail =
-                string.Join(
-                        " ",
-                        new[] { stdErr, stdOut }
-                            .Where(text => !string.IsNullOrWhiteSpace(text)))
-                    .Trim();
-
-            return new HardlinkCreationResult(
-                false,
-                string.IsNullOrWhiteSpace(detail)
-                    ? $"mklink exited with code {process.ExitCode}."
-                    : detail);
+            return new HardlinkCreationResult(true, null);
         }
         catch (Exception ex)
         {
@@ -150,78 +92,38 @@ public class HardlinkService : IHardlinkService
 
             fileInfo.SetAccessControl(security);
         }
-        catch
+        catch (Exception exception)
         {
             // Permissions are best effort; the hardlink itself already succeeded.
+            AppLog.Warn(
+                $"Hardlink created, but its permissions could not be reset to inherit from the library folder: '{filePath}'.",
+                exception);
         }
     }
 
-    public async Task<bool> AreHardlinkedAsync(
+    public Task<bool> AreHardlinkedAsync(
         string pathA,
         string pathB)
     {
         if (!File.Exists(pathA) || !File.Exists(pathB))
         {
-            return false;
+            return Task.FromResult(false);
         }
 
         if (string.Equals(pathA, pathB, StringComparison.OrdinalIgnoreCase))
         {
-            return true;
+            return Task.FromResult(true);
         }
 
-        var rootA = Path.GetPathRoot(pathA);
-        var rootB = Path.GetPathRoot(pathB);
+        var identityA = NativeHardlinks.GetIdentity(pathA);
+        var identityB = NativeHardlinks.GetIdentity(pathB);
 
-        if (string.IsNullOrWhiteSpace(rootA) ||
-            !string.Equals(rootA, rootB, StringComparison.OrdinalIgnoreCase))
-        {
-            // Hardlinks can't cross volumes - different drives can never
-            // be the same underlying file.
-            return false;
-        }
-
-        try
-        {
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = "fsutil",
-                Arguments = $"hardlink list \"{pathA}\"",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-
-            using var process = Process.Start(startInfo);
-
-            if (process is null)
-            {
-                return false;
-            }
-
-            var output = await process.StandardOutput.ReadToEndAsync();
-
-            await process.WaitForExitAsync();
-
-            if (process.ExitCode != 0)
-            {
-                return false;
-            }
-
-            var relativeB =
-                pathB[rootA.Length..].TrimStart('\\', '/');
-
-            return output
-                .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
-                .Select(line => line.Trim().TrimStart('\\', '/'))
-                .Any(link =>
-                    string.Equals(link, relativeB, StringComparison.OrdinalIgnoreCase));
-        }
-        catch
-        {
-            return false;
-        }
+        // Two names are the same file exactly when Windows reports the same
+        // file id on the same volume for both.
+        return Task.FromResult(
+            identityA is not null &&
+            identityB is not null &&
+            identityA.Value.VolumeSerialNumber == identityB.Value.VolumeSerialNumber &&
+            identityA.Value.FileIndex == identityB.Value.FileIndex);
     }
 }
-

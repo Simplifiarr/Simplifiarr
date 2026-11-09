@@ -1,20 +1,15 @@
-using System.Text.Json;
 using Simplifiarr.Core.Models;
+using Simplifiarr.Core.Utilities;
 
 namespace Simplifiarr.Core.Services;
 
 public class HistoryService : IHistoryService
 {
-    private const string DefaultHistoryFile =
-        @"C:\ProgramData\Simplifiarr\History\history.json";
-
     private readonly ISettingsService _settingsService;
 
-    private static readonly JsonSerializerOptions JsonOptions =
-        new()
-        {
-            WriteIndented = true
-        };
+    // History is appended to from several pages; without this two actions
+    // finishing together could each read the old file and one would be lost.
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
 
     public HistoryService(
         ISettingsService settingsService)
@@ -27,26 +22,8 @@ public class HistoryService : IHistoryService
         var historyFile =
             await GetHistoryFileAsync();
 
-        EnsureStorageExists(
-            historyFile);
-
-        if (!File.Exists(historyFile))
-        {
-            return Array.Empty<HistoryRecord>();
-        }
-
-        var json =
-            await File.ReadAllTextAsync(historyFile);
-
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return Array.Empty<HistoryRecord>();
-        }
-
-        return JsonSerializer.Deserialize<List<HistoryRecord>>(
-                   json,
-                   JsonOptions)
-               ?? new List<HistoryRecord>();
+        return JsonFileStore.Load<List<HistoryRecord>>(historyFile)
+               ?? [];
     }
 
     public async Task AddRecordAsync(
@@ -55,22 +32,22 @@ public class HistoryService : IHistoryService
         var historyFile =
             await GetHistoryFileAsync();
 
-        EnsureStorageExists(
-            historyFile);
+        await _writeLock.WaitAsync();
 
-        var history =
-            (await GetHistoryAsync()).ToList();
+        try
+        {
+            var history =
+                JsonFileStore.Load<List<HistoryRecord>>(historyFile)
+                ?? [];
 
-        history.Add(record);
+            history.Add(record);
 
-        var json =
-            JsonSerializer.Serialize(
-                history,
-                JsonOptions);
-
-        await File.WriteAllTextAsync(
-            historyFile,
-            json);
+            JsonFileStore.Save(historyFile, history, indented: true);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 
     public async Task ClearHistoryAsync()
@@ -78,12 +55,19 @@ public class HistoryService : IHistoryService
         var historyFile =
             await GetHistoryFileAsync();
 
-        EnsureStorageExists(
-            historyFile);
+        await _writeLock.WaitAsync();
 
-        await File.WriteAllTextAsync(
-            historyFile,
-            "[]");
+        try
+        {
+            JsonFileStore.Save(
+                historyFile,
+                new List<HistoryRecord>(),
+                indented: true);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 
     private async Task<string> GetHistoryFileAsync()
@@ -91,36 +75,8 @@ public class HistoryService : IHistoryService
         var settings =
             await _settingsService.GetSettingsAsync();
 
-        if (string.IsNullOrWhiteSpace(settings.HistoryPath))
-        {
-            return DefaultHistoryFile;
-        }
-
-        return settings.HistoryPath;
-    }
-
-    private static void EnsureStorageExists(
-        string historyFile)
-    {
-        var directory =
-            Path.GetDirectoryName(historyFile);
-
-        if (string.IsNullOrWhiteSpace(directory))
-        {
-            directory =
-                Path.GetDirectoryName(DefaultHistoryFile);
-        }
-
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        if (!File.Exists(historyFile))
-        {
-            File.WriteAllText(
-                historyFile,
-                "[]");
-        }
+        return string.IsNullOrWhiteSpace(settings.HistoryPath)
+            ? AppPaths.DefaultHistoryFile
+            : settings.HistoryPath;
     }
 }

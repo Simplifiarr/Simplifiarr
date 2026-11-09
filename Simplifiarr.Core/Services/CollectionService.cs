@@ -1,17 +1,11 @@
-using System.Diagnostics;
-using System.Text.Json;
 using Simplifiarr.Core.Models;
+using Simplifiarr.Core.Utilities;
 
 namespace Simplifiarr.Core.Services;
 
 public class CollectionService
     : ICollectionService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true
-    };
-
     private readonly object _sync = new();
 
     private readonly List<Collection> _collections = [];
@@ -20,12 +14,7 @@ public class CollectionService
 
     public CollectionService()
     {
-        _cachePath = Path.Combine(
-            Environment.GetFolderPath(
-                Environment.SpecialFolder.CommonApplicationData),
-            "Simplifiarr",
-            "PromotionCache",
-            "collections.json");
+        _cachePath = AppPaths.DataFile("collections.json");
 
         LoadFromDisk();
     }
@@ -191,59 +180,19 @@ public class CollectionService
     {
         lock (_sync)
         {
-            try
+            var persisted =
+                JsonFileStore.Load<List<Collection>>(_cachePath);
+
+            if (persisted is null)
             {
-                if (!File.Exists(_cachePath))
-                {
-                    return;
-                }
-
-                var json =
-                    File.ReadAllText(_cachePath);
-
-                var persisted =
-                    JsonSerializer.Deserialize<List<Collection>>(
-                        json,
-                        JsonOptions);
-
-                if (persisted is null)
-                {
-                    return;
-                }
-
-                _collections.Clear();
-                _collections.AddRange(persisted);
+                return;
             }
-            catch (Exception exception)
-            {
-                Debug.WriteLine(
-                    $"Unable to load collections: {exception}");
-            }
+
+            _collections.Clear();
+            _collections.AddRange(persisted);
         }
     }
 
-    private void SaveToDisk()
-    {
-        try
-        {
-            var directory =
-                Path.GetDirectoryName(_cachePath)!;
-
-            Directory.CreateDirectory(directory);
-
-            var json = JsonSerializer.Serialize(
-                _collections,
-                JsonOptions);
-
-            var temporaryPath = _cachePath + ".tmp";
-
-            File.WriteAllText(temporaryPath, json);
-            File.Move(temporaryPath, _cachePath, true);
-        }
-        catch (Exception exception)
-        {
-            Debug.WriteLine(
-                $"Unable to save collections: {exception}");
-        }
-    }
+    private void SaveToDisk() =>
+        JsonFileStore.Save(_cachePath, _collections);
 }

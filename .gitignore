@@ -36,6 +36,9 @@ Reports/
 SIMPLIFIARR_BIBLE.md
 OVERHAUL_PLAN.md
 
+# Machine-specific launcher scripts (service names, ports, folders)
+scripts/local/
+
 
 # Broader backup-file safety net (catches *-backup and *.pre-* naming, not just *.backup)
 *-backup

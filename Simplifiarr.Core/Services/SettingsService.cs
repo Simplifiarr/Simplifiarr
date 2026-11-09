@@ -1,33 +1,32 @@
-using System.Text.Json;
 using Simplifiarr.Core.Models;
+using Simplifiarr.Core.Utilities;
 
 namespace Simplifiarr.Core.Services;
 
 public class SettingsService : ISettingsService
 {
-    private const string SettingsDirectory =
-        @"C:\ProgramData\Simplifiarr";
-
-    private const string SettingsFile =
-        @"C:\ProgramData\Simplifiarr\settings.json";
-
-    private static readonly JsonSerializerOptions JsonOptions =
-        new()
-        {
-            WriteIndented = true
-        };
-
-    public async Task<SimplifiarrSettings> GetSettingsAsync()
+    public Task<SimplifiarrSettings> GetSettingsAsync()
     {
-        EnsureSettingsExist();
+        var settings =
+            JsonFileStore.Load<SimplifiarrSettings>(AppPaths.SettingsFile);
 
-        var json =
-            await File.ReadAllTextAsync(SettingsFile);
+        if (settings is null)
+        {
+            settings = new SimplifiarrSettings();
 
-        return JsonSerializer.Deserialize<SimplifiarrSettings>(
-                   json,
-                   JsonOptions)
-               ?? CreateDefaultSettings();
+            // First run (or an unreadable file): write the defaults out so
+            // there is a file to look at - but never overwrite one that
+            // exists and merely failed to parse.
+            if (!File.Exists(AppPaths.SettingsFile))
+            {
+                JsonFileStore.Save(
+                    AppPaths.SettingsFile,
+                    settings,
+                    indented: true);
+            }
+        }
+
+        return Task.FromResult(settings);
     }
 
     public async Task<List<DriveProfile>> GetEnabledDriveProfilesAsync()
@@ -40,55 +39,20 @@ public class SettingsService : ISettingsService
             .ToList();
     }
 
-    public async Task SaveSettingsAsync(
+    public Task SaveSettingsAsync(
         SimplifiarrSettings settings)
     {
-        Directory.CreateDirectory(
-            SettingsDirectory);
-
-        var json =
-            JsonSerializer.Serialize(
+        if (!JsonFileStore.Save(
+                AppPaths.SettingsFile,
                 settings,
-                JsonOptions);
-
-        await File.WriteAllTextAsync(
-            SettingsFile,
-            json);
-    }
-
-    private static void EnsureSettingsExist()
-    {
-        Directory.CreateDirectory(SettingsDirectory);
-
-        if (File.Exists(SettingsFile))
+                indented: true))
         {
-            return;
+            // The Settings page shows this to the user, so it must not be
+            // swallowed the way a failed cache save is.
+            throw new IOException(
+                $"Could not save settings to '{AppPaths.SettingsFile}'. Check that the folder exists and is writable.");
         }
 
-        var settings =
-            CreateDefaultSettings();
-
-        var json =
-            JsonSerializer.Serialize(
-                settings,
-                JsonOptions);
-
-        File.WriteAllText(
-            SettingsFile,
-            json);
-    }
-
-    private static SimplifiarrSettings CreateDefaultSettings()
-    {
-        return new SimplifiarrSettings
-        {
-            QbittorrentUrl = "http://localhost:8080",
-
-            QuarantinePath =
-                @"C:\ProgramData\Simplifiarr\Quarantine",
-
-            HistoryPath =
-                @"C:\ProgramData\Simplifiarr\History\history.json"
-        };
+        return Task.CompletedTask;
     }
 }

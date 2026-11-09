@@ -1,10 +1,9 @@
+using Simplifiarr.Core.Utilities;
+
 namespace Simplifiarr.Core.Services;
 
 internal static class QuarantinePathResolver
 {
-    private const string DefaultQuarantineRoot =
-        @"C:\ProgramData\Simplifiarr\Quarantine";
-
     public static async Task<string> ResolveAsync(
         ISettingsService settingsService)
     {
@@ -12,7 +11,7 @@ internal static class QuarantinePathResolver
             await settingsService.GetSettingsAsync();
 
         return string.IsNullOrWhiteSpace(settings.QuarantinePath)
-            ? DefaultQuarantineRoot
+            ? AppPaths.DefaultQuarantinePath
             : settings.QuarantinePath;
     }
 }

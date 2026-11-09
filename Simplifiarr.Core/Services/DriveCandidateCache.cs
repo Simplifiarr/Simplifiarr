@@ -1,6 +1,5 @@
-using System.Diagnostics;
-using System.Text.Json;
 using Simplifiarr.Core.Models;
+using Simplifiarr.Core.Utilities;
 
 namespace Simplifiarr.Core.Services;
 
@@ -32,11 +31,6 @@ public sealed class CandidateCacheEntry<TCandidate>
 /// </summary>
 internal sealed class DriveCandidateCache<TCandidate>
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true
-    };
-
     private readonly object _sync = new();
 
     private readonly Dictionary<string, CandidateCacheEntry<TCandidate>> _entries =
@@ -54,12 +48,7 @@ internal sealed class DriveCandidateCache<TCandidate>
         _keySelector = keySelector;
         _stillExists = stillExists;
 
-        _cachePath = Path.Combine(
-            Environment.GetFolderPath(
-                Environment.SpecialFolder.CommonApplicationData),
-            "Simplifiarr",
-            "PromotionCache",
-            cacheFileName);
+        _cachePath = AppPaths.DataFile(cacheFileName);
 
         LoadFromDisk();
     }
@@ -276,77 +265,47 @@ internal sealed class DriveCandidateCache<TCandidate>
     {
         lock (_sync)
         {
+            var persistedEntries =
+                JsonFileStore.Load<
+                    Dictionary<string, CandidateCacheEntry<TCandidate>>>(
+                    _cachePath);
+
+            if (persistedEntries is null)
+            {
+                return;
+            }
+
+            _entries.Clear();
+
+            foreach (var pair in persistedEntries)
+            {
+                _entries[pair.Key] = pair.Value;
+            }
+
+            var removedStaleCandidates = false;
+
             try
             {
-                if (!File.Exists(_cachePath))
-                {
-                    return;
-                }
-
-                var json =
-                    File.ReadAllText(_cachePath);
-
-                var persistedEntries =
-                    JsonSerializer.Deserialize<
-                        Dictionary<string, CandidateCacheEntry<TCandidate>>>(
-                        json,
-                        JsonOptions);
-
-                if (persistedEntries is null)
-                {
-                    return;
-                }
-
-                _entries.Clear();
-
-                foreach (var pair in persistedEntries)
-                {
-                    _entries[pair.Key] = pair.Value;
-                }
-
-                var removedStaleCandidates = false;
-
                 foreach (var entry in _entries.Values)
                 {
                     removedStaleCandidates |=
                         entry.Candidates.RemoveAll(candidate => !_stillExists(candidate)) > 0;
                 }
-
-                if (removedStaleCandidates)
-                {
-                    SaveToDisk();
-                }
             }
             catch (Exception exception)
             {
-                Debug.WriteLine(
-                    $"Unable to load candidate cache '{_cachePath}': {exception}");
+                AppLog.Warn(
+                    $"Could not prune stale entries from '{_cachePath}'.",
+                    exception);
+            }
+
+            if (removedStaleCandidates)
+            {
+                SaveToDisk();
             }
         }
     }
 
-    private void SaveToDisk()
-    {
-        try
-        {
-            var directory =
-                Path.GetDirectoryName(_cachePath)!;
-
-            Directory.CreateDirectory(directory);
-
-            var json = JsonSerializer.Serialize(
-                _entries,
-                JsonOptions);
-
-            var temporaryPath = _cachePath + ".tmp";
-
-            File.WriteAllText(temporaryPath, json);
-            File.Move(temporaryPath, _cachePath, true);
-        }
-        catch (Exception exception)
-        {
-            Debug.WriteLine(
-                $"Unable to save candidate cache '{_cachePath}': {exception}");
-        }
-    }
+    private void SaveToDisk() =>
+        JsonFileStore.Save(_cachePath, _entries);
 }
