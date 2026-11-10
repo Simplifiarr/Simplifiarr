@@ -75,7 +75,8 @@ builder.Services.AddSingleton<IDownloadCleanupService, DownloadCleanupService>()
 builder.Services.AddSingleton<ITorrentPieceVerificationService, TorrentPieceVerificationService>();
 builder.Services.AddSingleton<ITorrentReconstructionService, TorrentReconstructionService>();
 builder.Services.AddSingleton<IWholeTorrentCandidateService, WholeTorrentCandidateService>();
-builder.Services.AddSingleton<IScanStepProvider, DefaultScanStepProvider>();
+builder.Services.AddSingleton<ICrossSeedScanService, CrossSeedScanService>();
+builder.Services.AddSingleton<IScanStepProvider,DefaultScanStepProvider>();
 builder.Services.AddSingleton<IScanCoordinator, ScanCoordinator>();
 
 var app = builder.Build();

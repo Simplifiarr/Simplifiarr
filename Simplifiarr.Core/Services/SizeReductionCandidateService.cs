@@ -5,23 +5,17 @@ namespace Simplifiarr.Core.Services;
 
 /// <summary>
 /// Report-only: finds smaller alternate releases of library files via
-/// Prowlarr. Never downloads a candidate to verify it (unlike Cross-Seed,
-/// there is no byte-exact proof possible here - these are genuinely
-/// different encodes) - everything is judged from the asset's own already-
-/// known metadata and the candidate's cheap Prowlarr search-result metadata
-/// (declared size, release-title-parsed resolution/codec via
-/// IReleaseParser). Same-resolution candidates are preferred but not
-/// required - a smaller candidate at a different resolution still shows,
-/// clearly flagged, sorted after same-resolution matches.
+/// Prowlarr. A release is never downloaded to check it - these are
+/// different encodes, so there is nothing byte-for-byte to prove. Everything
+/// is judged from what is already known about the library file and from
+/// the release's own listing (its stated size, and the resolution and codec
+/// in its name).
 /// </summary>
 public class SizeReductionCandidateService
     : ISizeReductionCandidateService
 {
-    private readonly ISettingsService _settingsService;
-    private readonly IMediaCatalogService _mediaCatalogService;
-    private readonly IProwlarrClient _prowlarrClient;
-    private readonly IReleaseParser _releaseParser;
-    private readonly ISizeReductionCandidateCacheService _candidateCache;
+    private static readonly string[] TierNames =
+        ["2160P", "1440P", "1080P", "720P"];
 
     private static readonly Dictionary<string, int> ResolutionRank =
         new(StringComparer.OrdinalIgnoreCase)
@@ -33,14 +27,17 @@ public class SizeReductionCandidateService
             ["480P"] = 0
         };
 
-    /// <summary>
-    /// Candidates saving less than this are noise (fansubs, samples,
-    /// mislabeled releases) - filtered out rather than shown, per the
-    /// user's explicit "anything under 800MB isn't worth considering" call.
-    /// </summary>
     private const long MinSavingsBytesConst = 800L * 1024 * 1024;
 
-    public long MinSavingsBytes => MinSavingsBytesConst;
+    private readonly ISettingsService _settingsService;
+    private readonly IMediaCatalogService _mediaCatalogService;
+    private readonly IProwlarrClient _prowlarrClient;
+    private readonly IReleaseParser _releaseParser;
+    private readonly ISizeReductionCandidateCacheService _candidateCache;
+
+    private readonly object _sync = new();
+
+    private CancellationTokenSource? _cancellation;
 
     public SizeReductionCandidateService(
         ISettingsService settingsService,
@@ -56,142 +53,116 @@ public class SizeReductionCandidateService
         _candidateCache = candidateCache;
     }
 
-    public async Task<List<SizeReductionCandidate>> GetCandidatesAsync(
-        string resolutionTier,
-        string? driveName = null,
-        bool forceRefresh = false)
+    public IReadOnlyList<string> Tiers => TierNames;
+
+    public long MinSavingsBytes => MinSavingsBytesConst;
+
+    public bool IsSearching { get; private set; }
+
+    public SizeReductionProgress? Progress { get; private set; }
+
+    public string? LastMessage { get; private set; }
+
+    public bool LastSucceeded { get; private set; }
+
+    public event Action? Changed;
+
+    public async Task SearchAsync(
+        string? driveName = null)
     {
-        var profiles =
-            await ResolveProfilesAsync(driveName);
+        CancellationToken token;
 
-        if (!forceRefresh)
+        lock (_sync)
         {
-            return profiles
-                .SelectMany(profile =>
-                    _candidateCache.GetCandidates(profile.Name, resolutionTier))
-                .Where(candidate => candidate.SavingsBytes >= MinSavingsBytes)
-                .OrderByDescending(candidate => candidate.IsUpgrade)
-                .ThenByDescending(candidate => candidate.IsSameResolution)
-                .ThenByDescending(candidate => candidate.SavingsBytes)
-                .ToList();
-        }
-
-        var results =
-            new List<SizeReductionCandidate>();
-
-        var queryResultCache =
-            new Dictionary<string, List<ProwlarrSearchResult>>(
-                StringComparer.OrdinalIgnoreCase);
-
-        foreach (var profile in profiles)
-        {
-            var assets =
-                GetEligibleAssets(profile, resolutionTier);
-
-            var profileCandidates =
-                new List<SizeReductionCandidate>();
-
-            foreach (var asset in assets)
+            if (IsSearching)
             {
-                var query =
-                    BuildQuery(asset);
-
-                var categoryId =
-                    GetCategoryId(asset.MediaType);
-
-                var cacheKey =
-                    $"{categoryId}:{query}";
-
-                if (!queryResultCache.TryGetValue(cacheKey, out var searchResults))
-                {
-                    searchResults =
-                        await _prowlarrClient.SearchAsync(query, categoryId);
-
-                    queryResultCache[cacheKey] = searchResults;
-                }
-
-                foreach (var result in searchResults)
-                {
-                    if (result.SizeBytes >= asset.FileSizeBytes)
-                    {
-                        continue;
-                    }
-
-                    var parsed =
-                        _releaseParser.Parse(result.Title);
-
-                    if (parsed.Year.HasValue &&
-                        asset.Year.HasValue &&
-                        parsed.Year != asset.Year)
-                    {
-                        continue;
-                    }
-
-                    var isSameResolution =
-                        !string.IsNullOrWhiteSpace(parsed.Resolution) &&
-                        string.Equals(
-                            parsed.Resolution,
-                            asset.Resolution,
-                            StringComparison.OrdinalIgnoreCase);
-
-                    var isUpgrade =
-                        !isSameResolution &&
-                        GetResolutionRank(parsed.Resolution) is int candidateRank &&
-                        GetResolutionRank(asset.Resolution) is int assetRank &&
-                        candidateRank > assetRank;
-
-                    var savingsBytes =
-                        asset.FileSizeBytes - result.SizeBytes;
-
-                    if (savingsBytes < MinSavingsBytes)
-                    {
-                        continue;
-                    }
-
-                    profileCandidates.Add(new SizeReductionCandidate
-                    {
-                        MediaAssetId = asset.Id,
-                        AssetTitle = asset.Title,
-                        AssetYear = asset.Year,
-                        Season = asset.Season,
-                        Episode = asset.Episode,
-                        CanonicalPath = asset.CanonicalPath,
-                        AssetSizeBytes = asset.FileSizeBytes,
-                        AssetResolution = asset.Resolution,
-                        AssetVideoCodec = asset.VideoCodec,
-                        DriveProfileName = profile.Name,
-                        Candidate = result,
-                        CandidateResolution = parsed.Resolution,
-                        CandidateCodec =
-                            string.IsNullOrWhiteSpace(parsed.Codec) ? null : parsed.Codec,
-                        IsSameResolution = isSameResolution,
-                        IsUpgrade = isUpgrade,
-                        SavingsBytes = savingsBytes,
-                        SavingsPercent = savingsBytes / (double)asset.FileSizeBytes,
-                        DiscoveredUtc = DateTime.UtcNow
-                    });
-                }
+                return;
             }
 
-            var sortedProfileCandidates =
-                profileCandidates
-                    .OrderByDescending(candidate => candidate.IsSameResolution)
-                    .ThenByDescending(candidate => candidate.SavingsBytes)
-                    .ToList();
+            IsSearching = true;
 
-            _candidateCache.SetCandidates(
-                profile.Name,
-                resolutionTier,
-                sortedProfileCandidates);
+            _cancellation = new CancellationTokenSource();
 
-            results.AddRange(sortedProfileCandidates);
+            token = _cancellation.Token;
         }
 
-        return results
-            .OrderByDescending(candidate => candidate.IsSameResolution)
-            .ThenByDescending(candidate => candidate.SavingsBytes)
+        LastMessage = null;
+
+        Changed?.Invoke();
+
+        try
+        {
+            var profiles =
+                await ResolveProfilesAsync(driveName);
+
+            // Prowlarr answers a search it can't run with "nothing found",
+            // which would look exactly like a clean result and wipe what
+            // was found before. So make sure it is there first.
+            if (!await _prowlarrClient.TestConnectionAsync())
+            {
+                Finish(
+                    false,
+                    "Couldn't reach Prowlarr. Check its address and API key in Settings, under Connections. Earlier results were kept.");
+
+                return;
+            }
+
+            var filesWithSmaller = 0;
+
+            foreach (var profile in profiles)
+            {
+                filesWithSmaller +=
+                    await SearchDriveAsync(profile, token);
+            }
+
+            Finish(
+                true,
+                filesWithSmaller == 0
+                    ? "Search finished. No smaller releases were found."
+                    : $"Search finished. {filesWithSmaller} file(s) have a smaller release.");
+        }
+        catch (OperationCanceledException)
+        {
+            Finish(
+                false,
+                "Search stopped. Drives that weren't finished kept their earlier results.");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Size reduction search failed.", exception);
+
+            Finish(
+                false,
+                $"The search failed: {exception.Message} Earlier results were kept.");
+        }
+    }
+
+    public void Stop()
+    {
+        lock (_sync)
+        {
+            _cancellation?.Cancel();
+        }
+    }
+
+    public async Task<List<SizeReductionCandidate>> GetFoundAsync()
+    {
+        var profiles =
+            await ResolveProfilesAsync(null);
+
+        return profiles
+            .SelectMany(profile =>
+                TierNames.SelectMany(tier =>
+                    _candidateCache.GetCandidates(profile.Name, tier)))
+            .Where(candidate => candidate.SavingsBytes >= MinSavingsBytes)
             .ToList();
     }
+
+    public DateTime? GetLastSearchUtc(
+        string driveName) =>
+        TierNames
+            .Select(tier => _candidateCache.GetLastScanUtc(driveName, tier))
+            .Max();
 
     public async Task<int> CountUnscannedAssetsAsync(
         string? driveName = null)
@@ -199,13 +170,181 @@ public class SizeReductionCandidateService
         var profiles =
             await ResolveProfilesAsync(driveName);
 
-        var assets =
-            _mediaCatalogService.GetAssets();
-
-        return assets.Count(asset =>
-            (asset.MediaType == MediaType.Movie || asset.MediaType == MediaType.TvEpisode) &&
+        return _mediaCatalogService.GetAssets().Count(asset =>
+            IsVideo(asset) &&
             IsUnderAnyProfile(asset, profiles) &&
             IsUnknownResolution(asset.Resolution));
+    }
+
+    /// <summary>
+    /// Searches every film and episode on one drive, then replaces that
+    /// drive's results in one go. Returns how many files have a smaller
+    /// release.
+    /// </summary>
+    private async Task<int> SearchDriveAsync(
+        DriveProfile profile,
+        CancellationToken token)
+    {
+        var assets =
+            _mediaCatalogService.GetAssets()
+                .Where(asset =>
+                    IsVideo(asset) &&
+                    IsUnderAnyProfile(asset, [profile]) &&
+                    TierNames.Contains(asset.Resolution, StringComparer.OrdinalIgnoreCase))
+                .OrderBy(asset => asset.Title, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+        var found =
+            new List<SizeReductionCandidate>();
+
+        var searchesByQuery =
+            new Dictionary<string, List<ProwlarrSearchResult>>(
+                StringComparer.OrdinalIgnoreCase);
+
+        var anyResults = false;
+
+        for (var index = 0; index < assets.Count; index++)
+        {
+            token.ThrowIfCancellationRequested();
+
+            var asset = assets[index];
+
+            Progress =
+                new SizeReductionProgress(
+                    profile.Name,
+                    index,
+                    assets.Count,
+                    DisplayTitle(asset));
+
+            Changed?.Invoke();
+
+            var query = BuildQuery(asset);
+            var categoryId = GetCategoryId(asset.MediaType);
+            var key = $"{categoryId}:{query}";
+
+            if (!searchesByQuery.TryGetValue(key, out var releases))
+            {
+                releases =
+                    await _prowlarrClient.SearchAsync(query, categoryId);
+
+                searchesByQuery[key] = releases;
+            }
+
+            anyResults |= releases.Count > 0;
+
+            found.AddRange(
+                releases
+                    .Select(release => Compare(asset, profile, release))
+                    .OfType<SizeReductionCandidate>());
+        }
+
+        token.ThrowIfCancellationRequested();
+
+        // Every single search coming back empty means Prowlarr stopped
+        // answering part-way, not that the indexers have nothing at all.
+        if (assets.Count > 0 && !anyResults)
+        {
+            throw new InvalidOperationException(
+                $"Prowlarr returned nothing for any of the {assets.Count} file(s) on {profile.Name}.");
+        }
+
+        foreach (var tier in TierNames)
+        {
+            _candidateCache.SetCandidates(
+                profile.Name,
+                tier,
+                found.Where(candidate =>
+                    string.Equals(candidate.AssetResolution, tier, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        return found
+            .Select(candidate => candidate.MediaAssetId)
+            .Distinct()
+            .Count();
+    }
+
+    /// <summary>
+    /// The release as a candidate for this file, or null when it isn't one:
+    /// not smaller by enough, or plainly a different year's film.
+    /// </summary>
+    private SizeReductionCandidate? Compare(
+        MediaAsset asset,
+        DriveProfile profile,
+        ProwlarrSearchResult release)
+    {
+        var savingsBytes =
+            asset.FileSizeBytes - release.SizeBytes;
+
+        // A release with no stated size would look like saving everything.
+        if (release.SizeBytes <= 0 || savingsBytes < MinSavingsBytes)
+        {
+            return null;
+        }
+
+        var parsed =
+            _releaseParser.Parse(release.Title);
+
+        if (parsed.Year.HasValue &&
+            asset.Year.HasValue &&
+            parsed.Year != asset.Year)
+        {
+            return null;
+        }
+
+        var isSameResolution =
+            !string.IsNullOrWhiteSpace(parsed.Resolution) &&
+            string.Equals(
+                parsed.Resolution,
+                asset.Resolution,
+                StringComparison.OrdinalIgnoreCase);
+
+        var isUpgrade =
+            !isSameResolution &&
+            GetResolutionRank(parsed.Resolution) is int releaseRank &&
+            GetResolutionRank(asset.Resolution) is int assetRank &&
+            releaseRank > assetRank;
+
+        return new SizeReductionCandidate
+        {
+            MediaAssetId = asset.Id,
+            AssetTitle = asset.Title,
+            AssetYear = asset.Year,
+            Season = asset.Season,
+            Episode = asset.Episode,
+            CanonicalPath = asset.CanonicalPath,
+            AssetSizeBytes = asset.FileSizeBytes,
+            AssetResolution = asset.Resolution,
+            AssetVideoCodec = asset.VideoCodec,
+            DriveProfileName = profile.Name,
+            Candidate = release,
+            CandidateResolution = parsed.Resolution,
+            CandidateCodec =
+                string.IsNullOrWhiteSpace(parsed.Codec) ? null : parsed.Codec,
+            IsSameResolution = isSameResolution,
+            IsUpgrade = isUpgrade,
+            SavingsBytes = savingsBytes,
+            SavingsPercent = savingsBytes / (double)asset.FileSizeBytes,
+            DiscoveredUtc = DateTime.UtcNow
+        };
+    }
+
+    private void Finish(
+        bool succeeded,
+        string message)
+    {
+        lock (_sync)
+        {
+            IsSearching = false;
+
+            _cancellation?.Dispose();
+            _cancellation = null;
+        }
+
+        Progress = null;
+        LastSucceeded = succeeded;
+        LastMessage = message;
+
+        Changed?.Invoke();
     }
 
     private async Task<List<DriveProfile>> ResolveProfilesAsync(
@@ -221,17 +360,9 @@ public class SizeReductionCandidateService
             .ToList();
     }
 
-    private List<MediaAsset> GetEligibleAssets(
-        DriveProfile profile,
-        string resolutionTier)
-    {
-        return _mediaCatalogService.GetAssets()
-            .Where(asset =>
-                (asset.MediaType == MediaType.Movie || asset.MediaType == MediaType.TvEpisode) &&
-                IsUnderAnyProfile(asset, [profile]) &&
-                string.Equals(asset.Resolution, resolutionTier, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-    }
+    private static bool IsVideo(
+        MediaAsset asset) =>
+        asset.MediaType is MediaType.Movie or MediaType.TvEpisode;
 
     private static bool IsUnderAnyProfile(
         MediaAsset asset,
@@ -255,20 +386,24 @@ public class SizeReductionCandidateService
         return ResolutionRank.TryGetValue(resolution, out var rank) ? rank : null;
     }
 
+    private static string DisplayTitle(
+        MediaAsset asset) =>
+        asset.MediaType == MediaType.TvEpisode
+            ? $"{asset.Title} S{asset.Season ?? 0:00}E{asset.Episode ?? 0:00}"
+            : asset.Title;
+
     private static string BuildQuery(
         MediaAsset asset)
     {
         return asset.MediaType == MediaType.TvEpisode
-            ? $"{asset.Title} S{asset.Season ?? 0:00}E{asset.Episode ?? 0:00}"
+            ? DisplayTitle(asset)
             : $"{asset.Title} {asset.Year}";
     }
 
     /// <summary>
-    /// Torznab top-level category - scopes the Prowlarr search itself to
-    /// video content, so a query like "Weapons 2025" never surfaces an
-    /// unrelated music/book/etc. release that happens to share the title
-    /// (and is often tiny, which would otherwise look like a huge "savings"
-    /// candidate purely from matching text, not actually being the movie).
+    /// Torznab top-level category - keeps the search to video, so a film's
+    /// title never brings back an album or a book of the same name (often
+    /// tiny, which would look like a huge saving).
     /// </summary>
     private static int GetCategoryId(
         MediaType mediaType)

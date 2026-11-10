@@ -1,0 +1,808 @@
+@page "/torrent-rebuilder"
+@rendermode InteractiveServer
+
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+@using Simplifiarr.Core.Utilities
+
+@inject IQbittorrentScanner Qbittorrent
+@inject IProwlarrClient Prowlarr
+@inject IReleaseParser ReleaseParser
+@inject IMediaCatalogService Catalog
+@inject ITorrentReconstructionService Reconstruction
+@inject ISettingsService SettingsService
+
+<PageTitle>Torrent Rebuilder - Simplifiarr</PageTitle>
+
+<PageHeader Title="Torrent Rebuilder"
+            Subtitle="Takes one torrent and rebuilds its files from what is already in your library, even if those files have since been renamed. Each file is checked piece by piece before it is linked, so a rebuilt torrent can seed straight away." />
+
+@* ------------------------------------------------------------ 1. Choose *@
+
+<section class="section">
+    <h2 class="section-title">1. Choose a torrent</h2>
+
+    <div class="app-tabs" role="tablist" aria-label="Where the torrent comes from">
+        @foreach (var source in Sources)
+        {
+            <button type="button"
+                    role="tab"
+                    aria-selected="@(_source == source.Key)"
+                    class="app-tab @(_source == source.Key ? "active" : null)"
+                    @onclick="() => _source = source.Key">
+                @source.Label
+            </button>
+        }
+    </div>
+
+    @if (_source == "file")
+    {
+        <InputFile class="form-control"
+                   accept=".torrent"
+                   disabled="@_isLoading"
+                   OnChange="LoadFromFileAsync" />
+
+        <div class="cell-note mt-1">Pick a .torrent file from this computer.</div>
+    }
+    else if (_source == "qbittorrent")
+    {
+        @if (_torrents is null)
+        {
+            <div class="alert alert-warning">
+                Couldn't reach qBittorrent. Check it in <a href="settings">Settings</a>, under Connections.
+            </div>
+        }
+        else if (_torrents.Count == 0)
+        {
+            <EmptyState Icon="share" Text="qBittorrent has no torrents with files on disk." />
+        }
+        else
+        {
+            <div class="d-flex flex-wrap gap-2">
+                <select class="form-select fill-row" aria-label="Torrent" @bind="_selectedHash">
+                    <option value="">Choose a torrent...</option>
+                    @foreach (var torrent in _torrents)
+                    {
+                        <option value="@torrent.TorrentHash">@torrent.Name</option>
+                    }
+                </select>
+
+                <button type="button"
+                        class="btn btn-primary"
+                        disabled="@(_isLoading || string.IsNullOrWhiteSpace(_selectedHash))"
+                        @onclick="LoadFromQbittorrentAsync">
+                    @(_isLoading ? "Loading..." : "Load")
+                </button>
+            </div>
+        }
+    }
+    else
+    {
+        <form class="d-flex flex-wrap gap-2" @onsubmit="SearchAsync">
+            <input class="form-control fill-row"
+                   aria-label="Title to search for"
+                   placeholder="Film or show title"
+                   @bind="_query" />
+
+            <button type="submit"
+                    class="btn btn-primary"
+                    disabled="@(_isSearching || string.IsNullOrWhiteSpace(_query))">
+                <i class="bi bi-search" aria-hidden="true"></i>
+                @(_isSearching ? "Searching..." : "Search")
+            </button>
+        </form>
+
+        @if (_searchResults.Count > 0)
+        {
+            <div class="table-scroll mt-3">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Torrent</th>
+                            <th class="col-num">Size</th>
+                            <th class="col-num">Seeders</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        @foreach (var result in _searchResults.Take(SearchLimit))
+                        {
+                            <tr @key="result.DownloadUrl">
+                                <td>
+                                    <div class="file-name">@result.Title</div>
+                                    <div class="cell-note">@result.Indexer</div>
+                                </td>
+                                <td class="col-num">@SizeFormatter.FormatBytes(result.SizeBytes)</td>
+                                <td class="col-num">@result.Seeders</td>
+                                <td>
+                                    <button type="button"
+                                            class="btn btn-secondary btn-sm"
+                                            disabled="@_isLoading"
+                                            @onclick="() => LoadFromSearchAsync(result)">
+                                        Load
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            @if (_searchResults.Count > SearchLimit)
+            {
+                <div class="cell-note mt-1">Showing the first @SearchLimit of @_searchResults.Count. Search for something more exact to narrow it.</div>
+            }
+        }
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_loadError))
+    {
+        <div class="alert alert-warning mt-3">@_loadError</div>
+    }
+</section>
+
+@* ------------------------------------------------------------- 2. Files *@
+
+@if (_metadata is not null)
+{
+    <section class="section">
+        <h2 class="section-title">2. Check what your library has</h2>
+
+        <div class="panel">
+            <div class="action-row">
+                <div>
+                    <div class="action-row-title">@_metadata.Name</div>
+                    <div class="action-row-detail">
+                        @SizeFormatter.FormatBytes(_metadata.TotalLengthBytes) ·
+                        @_entries.Count file(s) ·
+                        from @_sourceLabel
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @if (_metadata.IsSingleFile)
+        {
+            <p class="mt-3 mb-0">
+                @if (_singleFileCandidates.Count == 0)
+                {
+                    <span class="status-warn">Nothing in your library is the same size as this file, so it can't be rebuilt.</span>
+                }
+                else
+                {
+                    <span>
+                        <strong>@_singleFileCandidates.Count</strong> file(s) in your library are exactly the same size.
+                        Each is checked piece by piece until one matches.
+                    </span>
+                }
+            </p>
+        }
+        else
+        {
+            <div class="toolbar mt-3">
+                <div class="toolbar-summary">
+                    <strong>@_entries.Count(entry => _inLibrary.Contains(entry))</strong> of @_entries.Count file(s)
+                    have a same-size file in your library · @_selected.Count selected
+                </div>
+
+                <div class="toolbar-actions">
+                    <button type="button"
+                            class="btn btn-secondary btn-sm"
+                            disabled="@_isRebuilding"
+                            @onclick="SelectPossible">
+                        Select all that can be rebuilt
+                    </button>
+
+                    <button type="button"
+                            class="btn btn-secondary btn-sm"
+                            disabled="@(_isRebuilding || _selected.Count == 0)"
+                            @onclick="() => _selected.Clear()">
+                        Clear
+                    </button>
+                </div>
+            </div>
+
+            <div class="table-scroll">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th class="col-check">Select</th>
+                            <th>File in the torrent</th>
+                            <th class="col-num">Size</th>
+                            <th>In your library</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        @foreach (var entry in _entries.Take(_shown))
+                        {
+                            var possible = _inLibrary.Contains(entry);
+
+                            <tr @key="entry">
+                                <SelectableCheckboxCell Checked="_selected.Contains(entry)"
+                                                        Disabled="_isRebuilding || !possible"
+                                                        OnChanged="selected => Toggle(entry, selected)" />
+
+                                <td><div class="file-name">@entry.RelativePath</div></td>
+
+                                <td class="col-num">@SizeFormatter.FormatBytes(entry.LengthBytes)</td>
+
+                                <td>
+                                    @if (possible)
+                                    {
+                                        <span class="status-ok">Same-size file found</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="status-muted">Nothing the same size</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            @if (_entries.Count > _shown)
+            {
+                <button type="button" class="btn btn-secondary mt-2" @onclick="() => _shown += PageSize">
+                    Show @Math.Min(PageSize, _entries.Count - _shown) more (@(_entries.Count - _shown) left)
+                </button>
+            }
+        }
+    </section>
+
+    @* --------------------------------------------------------- 3. Rebuild *@
+
+    <section class="section">
+        <h2 class="section-title">3. Rebuild</h2>
+
+        <p>
+            Matching files are hardlinked into <code>@_storagePath</code> under the names this torrent expects,
+            and the .torrent file is saved beside them. Nothing is copied, moved or changed in your library.
+        </p>
+
+        <button type="button"
+                class="btn btn-primary"
+                disabled="@(_isRebuilding || !CanRebuild)"
+                @onclick="RebuildAsync">
+            <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
+            @(_isRebuilding
+                ? "Rebuilding..."
+                : _metadata.IsSingleFile ? "Rebuild" : $"Rebuild {_selected.Count} file(s)")
+        </button>
+
+        @if (!string.IsNullOrWhiteSpace(_progress))
+        {
+            <div class="cell-note mt-2" role="status">@_progress</div>
+        }
+
+        @if (_results.Count > 0)
+        {
+            <div class="alert @(_results.All(row => row.Result.Success) ? "alert-info" : "alert-warning") mt-3" role="status">
+                <strong>@_results.Count(row => row.Result.Success)</strong> of @_results.Count file(s) rebuilt.
+
+                @if (_rebuiltRoot is not null)
+                {
+                    <div>They are in <code>@_rebuiltRoot</code>.</div>
+                }
+
+                @if (IsWholeTorrentRebuilt && _addResult is null)
+                {
+                    <div class="mt-2">
+                        <button type="button"
+                                class="btn btn-primary btn-sm"
+                                disabled="@_isAddingToQbittorrent"
+                                @onclick="AddToQbittorrentAsync">
+                            @(_isAddingToQbittorrent ? "Adding..." : "Add to qBittorrent (stopped)")
+                        </button>
+                    </div>
+                }
+                else if (_results.Any(row => row.Result.Success) && !IsWholeTorrentRebuilt)
+                {
+                    <div class="cell-note">
+                        Only part of the torrent was rebuilt, so it isn't offered to qBittorrent - it would try to download the rest.
+                    </div>
+                }
+
+                @if (_addResult is not null)
+                {
+                    <div class="mt-2">@_addResult</div>
+                }
+            </div>
+
+            <div class="table-scroll">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>File in the torrent</th>
+                            <th>Result</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        @foreach (var row in _results)
+                        {
+                            <tr>
+                                <td><div class="file-name">@row.Name</div></td>
+
+                                <td>
+                                    @if (row.Result.Success)
+                                    {
+                                        <span class="status-ok">Rebuilt</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="status-warn">Not rebuilt</span>
+                                    }
+                                </td>
+
+                                <td>
+                                    @if (row.Result.Success)
+                                    {
+                                        <div class="detail-label mt-0">Your file</div>
+                                        <code>@row.Result.MatchedAsset?.CanonicalPath</code>
+
+                                        <div class="detail-label">Linked as</div>
+                                        <code>@row.Result.TargetPath</code>
+                                    }
+                                    else
+                                    {
+                                        @row.Result.FailureReason
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+}
+
+<p class="cell-note">
+    Want Simplifiarr to look for other torrents of everything you already seed?
+    That is <a href="cross-seed">Cross-Seed</a>.
+</p>
+
+@code
+{
+    private const int PageSize = 100;
+    private const int SearchLimit = 50;
+
+    private static readonly (string Key, string Label)[] Sources =
+    [
+        ("file", "A .torrent file"),
+        ("qbittorrent", "From qBittorrent"),
+        ("search", "Search indexers")
+    ];
+
+    private sealed record ResultRow(
+        string Name,
+        TorrentReconstructionResult Result);
+
+    private string _source = "file";
+
+    // Null when qBittorrent couldn't be reached.
+    private List<TorrentRecord>? _torrents = [];
+
+    private string _selectedHash = string.Empty;
+    private string _query = string.Empty;
+
+    private List<ProwlarrSearchResult> _searchResults = [];
+
+    private bool _isLoading;
+    private bool _isSearching;
+    private string? _loadError;
+
+    // The loaded torrent.
+    private TorrentMetadata? _metadata;
+    private byte[]? _torrentBytes;
+    private string _sourceLabel = string.Empty;
+
+    /// <summary>The torrent's files that have any bytes, biggest first.</summary>
+    private List<TorrentFileEntry> _entries = [];
+
+    /// <summary>Entries with at least one same-size file in the library.</summary>
+    private HashSet<TorrentFileEntry> _inLibrary = [];
+
+    private readonly HashSet<TorrentFileEntry> _selected = [];
+
+    private List<MediaAsset> _singleFileCandidates = [];
+
+    private int _shown = PageSize;
+
+    // Rebuilding.
+    private string _storagePath = string.Empty;
+
+    private bool _isRebuilding;
+    private string? _progress;
+    private List<ResultRow> _results = [];
+    private string? _rebuiltRoot;
+
+    private bool _isAddingToQbittorrent;
+    private string? _addResult;
+
+    private bool CanRebuild =>
+        _metadata is not null &&
+        (_metadata.IsSingleFile
+            ? _singleFileCandidates.Count > 0
+            : _selected.Count > 0);
+
+    /// <summary>
+    /// True when every file of the torrent was rebuilt, so qBittorrent
+    /// would have nothing left to download.
+    /// </summary>
+    private bool IsWholeTorrentRebuilt =>
+        _metadata is not null &&
+        _results.Count > 0 &&
+        _results.All(row => row.Result.Success) &&
+        (_metadata.IsSingleFile || _results.Count == _entries.Count);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var settings =
+            await SettingsService.GetSettingsAsync();
+
+        _storagePath = settings.CrossSeedTorrentStoragePath;
+
+        _torrents =
+            (await Qbittorrent.TryGetTorrentsAsync())?
+                .Where(torrent =>
+                    File.Exists(torrent.ContentPath) ||
+                    Directory.Exists(torrent.ContentPath))
+                .OrderBy(torrent => torrent.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+    }
+
+    // ---------------------------------------------------------------- Load
+
+    private async Task LoadFromFileAsync(InputFileChangeEventArgs args)
+    {
+        await LoadAsync(
+            $"the file {args.File.Name}",
+            async () =>
+            {
+                // .torrent files are small (typically well under 1 MB).
+                await using var stream =
+                    args.File.OpenReadStream(maxAllowedSize: 20L * 1024 * 1024);
+
+                using var buffer = new MemoryStream();
+
+                await stream.CopyToAsync(buffer);
+
+                return buffer.ToArray();
+            });
+    }
+
+    private async Task LoadFromQbittorrentAsync()
+    {
+        var torrent =
+            _torrents?.FirstOrDefault(candidate =>
+                string.Equals(candidate.TorrentHash, _selectedHash, StringComparison.OrdinalIgnoreCase));
+
+        if (torrent is null)
+        {
+            return;
+        }
+
+        await LoadAsync(
+            "qBittorrent",
+            () => Qbittorrent.GetTorrentExportBytesAsync(torrent.TorrentHash));
+    }
+
+    private async Task LoadFromSearchAsync(ProwlarrSearchResult result)
+    {
+        await LoadAsync(
+            result.Indexer,
+            () => Prowlarr.DownloadTorrentAsync(result.DownloadUrl));
+    }
+
+    private async Task LoadAsync(
+        string sourceLabel,
+        Func<Task<byte[]?>> getBytes)
+    {
+        if (_isLoading || _isRebuilding)
+        {
+            return;
+        }
+
+        _isLoading = true;
+        _loadError = null;
+
+        try
+        {
+            var bytes = await getBytes();
+
+            var metadata =
+                bytes is null ? null : BencodeTorrentReader.TryParse(bytes);
+
+            if (bytes is null || metadata is null)
+            {
+                _loadError =
+                    bytes is null
+                        ? "The .torrent file couldn't be fetched."
+                        : "That isn't a .torrent file Simplifiarr can read.";
+
+                return;
+            }
+
+            SetTorrent(metadata, bytes, sourceLabel);
+        }
+        catch (Exception exception)
+        {
+            _loadError = $"Couldn't load the torrent: {exception.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void SetTorrent(
+        TorrentMetadata metadata,
+        byte[] bytes,
+        string sourceLabel)
+    {
+        _metadata = metadata;
+        _torrentBytes = bytes;
+        _sourceLabel = sourceLabel;
+
+        _selected.Clear();
+        _results = [];
+        _rebuiltRoot = null;
+        _addResult = null;
+        _progress = null;
+        _shown = PageSize;
+
+        var assets = Catalog.GetAssets();
+
+        if (metadata.IsSingleFile)
+        {
+            _entries = [];
+            _inLibrary = [];
+
+            _singleFileCandidates =
+                CrossSeedCandidateFilter.SameSizeCandidates(
+                    assets,
+                    metadata.TotalLengthBytes,
+                    metadata.Name);
+
+            return;
+        }
+
+        _singleFileCandidates = [];
+
+        _entries =
+            metadata.Files
+                .Where(entry => entry.LengthBytes > 0)
+                .OrderByDescending(entry => entry.LengthBytes)
+                .ToList();
+
+        _inLibrary =
+            _entries
+                .Where(entry =>
+                    CrossSeedCandidateFilter.SameSizeCandidates(
+                        assets,
+                        entry.LengthBytes,
+                        entry.PathSegments.LastOrDefault() ?? string.Empty).Count > 0)
+                .ToHashSet();
+
+        SelectPossible();
+    }
+
+    private async Task SearchAsync()
+    {
+        if (_isSearching || string.IsNullOrWhiteSpace(_query))
+        {
+            return;
+        }
+
+        _isSearching = true;
+        _loadError = null;
+        _searchResults = [];
+
+        try
+        {
+            _searchResults =
+                (await Prowlarr.SearchAsync(_query.Trim()))
+                    .OrderByDescending(result => result.Seeders)
+                    .ToList();
+
+            if (_searchResults.Count == 0)
+            {
+                _loadError =
+                    "Nothing was found. If that's unexpected, check Prowlarr in Settings, under Connections.";
+            }
+        }
+        finally
+        {
+            _isSearching = false;
+        }
+    }
+
+    // -------------------------------------------------------------- Select
+
+    private void Toggle(TorrentFileEntry entry, bool selected)
+    {
+        if (selected)
+        {
+            _selected.Add(entry);
+        }
+        else
+        {
+            _selected.Remove(entry);
+        }
+    }
+
+    private void SelectPossible()
+    {
+        _selected.Clear();
+
+        _selected.UnionWith(_inLibrary);
+    }
+
+    // ------------------------------------------------------------- Rebuild
+
+    private async Task RebuildAsync()
+    {
+        if (_isRebuilding || _metadata is null || !CanRebuild)
+        {
+            return;
+        }
+
+        _isRebuilding = true;
+        _results = [];
+        _rebuiltRoot = null;
+        _addResult = null;
+
+        try
+        {
+            var assets = Catalog.GetAssets();
+
+            if (_metadata.IsSingleFile)
+            {
+                _progress = $"Checking {_metadata.Name}...";
+
+                await InvokeAsync(StateHasChanged);
+
+                _results =
+                [
+                    new ResultRow(
+                        _metadata.Name,
+                        await RebuildOneAsync(() =>
+                            Reconstruction.ReconstructFromCatalogAsync(
+                                _metadata,
+                                _singleFileCandidates,
+                                _storagePath)))
+                ];
+            }
+            else
+            {
+                // The torrent's own order, not the order they were ticked.
+                var entries =
+                    _entries.Where(_selected.Contains).ToList();
+
+                for (var index = 0; index < entries.Count; index++)
+                {
+                    var entry = entries[index];
+
+                    _progress =
+                        $"Checking {entry.RelativePath} ({index + 1} of {entries.Count})...";
+
+                    await InvokeAsync(StateHasChanged);
+
+                    var result =
+                        await RebuildOneAsync(() =>
+                            Reconstruction.ReconstructFileEntryFromCatalogAsync(
+                                _metadata,
+                                entry,
+                                assets,
+                                _storagePath));
+
+                    _results = [.. _results, new ResultRow(entry.RelativePath, result)];
+                }
+            }
+
+            _rebuiltRoot =
+                _results
+                    .Where(row => row.Result.Success)
+                    .Select(row => row.Result.OutputRoot)
+                    .FirstOrDefault(root => root is not null);
+
+            if (_torrentBytes is not null)
+            {
+                foreach (var root in _results
+                             .Where(row => row.Result.Success)
+                             .Select(row => row.Result.OutputRoot)
+                             .OfType<string>()
+                             .Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    await SaveTorrentFileAsync(root);
+                }
+            }
+        }
+        finally
+        {
+            _isRebuilding = false;
+            _progress = null;
+        }
+    }
+
+    private static async Task<TorrentReconstructionResult> RebuildOneAsync(
+        Func<Task<TorrentReconstructionResult>> rebuild)
+    {
+        try
+        {
+            return await rebuild();
+        }
+        catch (Exception exception)
+        {
+            return new TorrentReconstructionResult
+            {
+                Success = false,
+                FailureReason = exception.Message
+            };
+        }
+    }
+
+    /// <summary>
+    /// Keeps the .torrent beside the rebuilt files, so it can be added to a
+    /// torrent client by hand.
+    /// </summary>
+    private async Task SaveTorrentFileAsync(string outputRoot)
+    {
+        try
+        {
+            // A single-file torrent's data file is outputRoot\<name>, so
+            // its .torrent can't also live in a folder of that name.
+            var folder =
+                _metadata!.IsSingleFile
+                    ? outputRoot
+                    : Path.Combine(outputRoot, _metadata.Name);
+
+            Directory.CreateDirectory(folder);
+
+            await File.WriteAllBytesAsync(
+                Path.Combine(folder, $"{_metadata.Name}.torrent"),
+                _torrentBytes!);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // The files are already linked; the saved .torrent is a
+            // convenience.
+            AppLog.Warn("Couldn't save the .torrent beside the rebuilt files.", exception);
+        }
+    }
+
+    private async Task AddToQbittorrentAsync()
+    {
+        if (_isAddingToQbittorrent || _torrentBytes is null || _rebuiltRoot is null)
+        {
+            return;
+        }
+
+        _isAddingToQbittorrent = true;
+
+        try
+        {
+            var result =
+                await Qbittorrent.AddTorrentAsync(_torrentBytes, _rebuiltRoot);
+
+            _addResult =
+                result.Success
+                    ? "Added to qBittorrent, stopped. Start it there once it has checked."
+                    : "qBittorrent didn't take it. You can add the saved .torrent file by hand, pointing at the folder above.";
+        }
+        catch (Exception exception)
+        {
+            _addResult = $"Couldn't add it to qBittorrent: {exception.Message}";
+        }
+        finally
+        {
+            _isAddingToQbittorrent = false;
+        }
+    }
+}

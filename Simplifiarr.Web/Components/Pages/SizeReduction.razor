@@ -1,541 +1,500 @@
 @page "/size-reduction"
 @rendermode InteractiveServer
+@implements IDisposable
 
 @using Simplifiarr.Core.Models
 @using Simplifiarr.Core.Services
 @using Simplifiarr.Core.Utilities
 
 @inject ISettingsService SettingsService
-@inject ISizeReductionCandidateService SizeReductionCandidateService
-@inject ISizeReductionCandidateCacheService CandidateCache
+@inject ISizeReductionCandidateService Search
 
-<PageTitle>Size Reduction Scan</PageTitle>
+<PageTitle>Size Reduction - Simplifiarr</PageTitle>
 
-<h1>Size Reduction Scan</h1>
-
-<p>
-    Finds smaller alternate releases of your movies/TV episodes on Prowlarr -
-    report-only, nothing is ever downloaded or replaced automatically. Unlike
-    Cross-Seed, these candidates are genuinely different encodes, so there's
-    no byte-for-byte proof possible - everything here comes from your file's
-    already-known resolution/codec and the candidate's declared size and
-    release-title-parsed resolution/codec. Same-resolution candidates are
-    preferred and sorted first; a smaller candidate at a different resolution
-    can still show, clearly marked, below them.
-</p>
+<PageHeader Title="Size Reduction"
+            Subtitle="Looks on your indexers, through Prowlarr, for smaller releases of films and episodes you already have. It only reports what it finds - nothing is downloaded or replaced.">
+    @if (Search.IsSearching)
+    {
+        <button type="button" class="btn btn-secondary" @onclick="Search.Stop">
+            <i class="bi bi-stop-fill" aria-hidden="true"></i>
+            Stop
+        </button>
+    }
+    else if (_profiles.Count > 1 && _prowlarrIsSetUp)
+    {
+        <button type="button" class="btn btn-primary" @onclick="() => Start(null)">
+            <i class="bi bi-search" aria-hidden="true"></i>
+            Search all drives
+        </button>
+    }
+</PageHeader>
 
 @if (_profiles.Count == 0)
 {
     <div class="alert alert-warning">
-        No enabled drive profiles are configured.
+        No drives are set up yet. <a href="settings">Add one in Settings</a>.
     </div>
 }
-else
+else if (!_prowlarrIsSetUp)
 {
-    <div class="row g-3 mt-2">
-        @foreach (var profile in _profiles)
-        {
-            <div class="col-md-6">
-                <DriveScanCard DriveName="@profile.Name"
-                               Paths="BuildPaths(profile)"
-                               Rows="BuildRows(profile)"
-                               IsScanningDrive="@(_isScanningDrive == profile.Name)"
-                               OnScanDrive="() => ScanDriveAsync(profile.Name)" />
-            </div>
-        }
+    <div class="alert alert-warning">
+        Prowlarr isn't set up yet, so there is nowhere to search.
+        <a href="settings">Add its address and API key in Settings</a>, under Connections.
     </div>
 }
 
-@if (!string.IsNullOrWhiteSpace(_statusMessage))
+@if (Search.Progress is { } progress)
 {
-    <div class="alert alert-info mt-3">
-        @_statusMessage
+    <div class="alert alert-info" role="status">
+        <strong>Searching @progress.DriveName</strong> -
+        @progress.Done of @progress.Total file(s) done.
+        <div class="cell-note">Now: @progress.CurrentTitle. You can leave this page; the search carries on.</div>
+    </div>
+}
+else if (!string.IsNullOrWhiteSpace(Search.LastMessage))
+{
+    <div class="alert @(Search.LastSucceeded ? "alert-info" : "alert-warning")" role="status">
+        @Search.LastMessage
+    </div>
+}
+
+@if (_profiles.Count > 0)
+{
+    <div class="panel section">
+        @foreach (var profile in _profiles)
+        {
+            var found = _groups.Count(group => group.DriveName == profile.Name);
+
+            <div class="action-row">
+                <div>
+                    <div class="action-row-title">@profile.Name</div>
+                    <div class="action-row-detail">
+                        @if (Search.GetLastSearchUtc(profile.Name) is { } searchedUtc)
+                        {
+                            <text>Last searched @FormatTime(searchedUtc) · @found file(s) with a smaller release</text>
+                        }
+                        else
+                        {
+                            <text>Not searched yet</text>
+                        }
+                    </div>
+                </div>
+
+                <button type="button"
+                        class="btn btn-secondary btn-sm"
+                        disabled="@(Search.IsSearching || !_prowlarrIsSetUp)"
+                        @onclick="() => Start(profile.Name)">
+                    Search
+                </button>
+            </div>
+        }
     </div>
 }
 
 @if (_unscannedCount > 0)
 {
-    <div class="alert alert-secondary mt-3">
-        <strong>@_unscannedCount</strong> asset(s) skipped - resolution not
-        yet determined. Run a scan on the
-        <a href="hardlinks">Hardlinks</a> page first so those files can be
-        probed.
+    <p class="cell-note">
+        @_unscannedCount file(s) are left out because their resolution isn't known yet.
+        Press Scan at the top of the page to read it.
+    </p>
+}
+
+@if (_groups.Count > 0)
+{
+    <div class="app-tabs" role="tablist" aria-label="Media type">
+        @foreach (var isTv in new[] { false, true })
+        {
+            <button type="button"
+                    role="tab"
+                    aria-selected="@(_showTv == isTv)"
+                    class="app-tab @(_showTv == isTv ? "active" : null)"
+                    @onclick="() => ShowTab(isTv)">
+                @(isTv ? "TV" : "Movies") <span class="app-tab-count">@_groups.Count(group => group.IsTv == isTv)</span>
+            </button>
+        }
+    </div>
+
+    <div class="toolbar">
+        <div class="toolbar-summary">
+            <strong>@Visible.Count</strong> file(s) ·
+            up to <strong>@SizeFormatter.FormatBytes(Visible.Sum(group => group.BestSavingsBytes))</strong> smaller
+        </div>
+
+        <div class="toolbar-actions">
+            <label class="form-check mb-0 align-self-center">
+                <input type="checkbox"
+                       class="form-check-input"
+                       checked="@_sameQualityOnly"
+                       @onchange="e => SetSameQualityOnly((bool?)e.Value == true)" />
+                <span class="form-check-label">Same quality or better only</span>
+            </label>
+
+            <select class="form-select form-select-sm w-auto"
+                    aria-label="Resolution"
+                    value="@_tier"
+                    @onchange="e => SetTier(e.Value?.ToString())">
+                <option value="">Any resolution</option>
+                @foreach (var tier in Search.Tiers)
+                {
+                    <option value="@tier">@tier.ToLowerInvariant()</option>
+                }
+            </select>
+
+            <select class="form-select form-select-sm w-auto"
+                    aria-label="Sort by"
+                    value="@_sort"
+                    @onchange="e => SetSort(e.Value?.ToString())">
+                <option value="saving">Biggest saving first</option>
+                <option value="size">Largest file first</option>
+                <option value="title">Title</option>
+            </select>
+        </div>
     </div>
 }
 
-<div class="row g-2 align-items-end mt-3 mb-2">
-    <div class="col-auto">
-        <label class="form-label d-block">Resolution</label>
-        @foreach (var tier in Tiers)
-        {
-            <div class="form-check form-check-inline">
-                <input class="form-check-input"
-                       type="checkbox"
-                       id="@("tier-" + tier)"
-                       checked="@_selectedTiers.Contains(tier)"
-                       @onchange="e => ToggleTier(tier, (bool?)e.Value == true)" />
-                <label class="form-check-label" for="@("tier-" + tier)">@tier</label>
-            </div>
-        }
-    </div>
-</div>
-
-@if (!_hasScanned)
+@if (_profiles.Count == 0)
 {
-    <EmptyState Icon="search" Text="No size reduction scan has been run yet." />
+}
+else if (!_hasSearched)
+{
+    <EmptyState Icon="search" Text="No search has been run yet. Press Search next to a drive." />
 }
 else if (_groups.Count == 0)
 {
-    <EmptyState Icon="check-circle" Text="No smaller candidates were found." />
+    <EmptyState Icon="check-circle" Text="No smaller releases were found." />
+}
+else if (Visible.Count == 0)
+{
+    <EmptyState Icon="funnel" Text="Nothing matches these filters." />
 }
 else
 {
-    <p>
-        <strong>@_groups.Count</strong> file(s) &middot;
-        <strong>@_groups.Sum(group => group.Candidates.Count)</strong> candidate(s) total
-        @{
-            var upgradeGroupCount = _groups.Count(group => group.Candidates.Any(candidate => candidate.IsUpgrade));
-        }
-        @if (upgradeGroupCount > 0)
-        {
-            <text> &middot; </text>
-            <span class="badge bg-success">⬆ @upgradeGroupCount file(s) have an upgrade available</span>
-        }
-    </p>
+    @foreach (var group in Visible.Take(_shown))
+    {
+        <div class="group-card" @key="group.MediaAssetId">
+            <div class="group-card-header">
+                <div>
+                    <div class="group-card-title">
+                        @group.Title
+                        @if (group.HasUpgrade)
+                        {
+                            <span class="pill">Better quality available</span>
+                        }
+                    </div>
+                    <div class="cell-note">
+                        Yours: @SizeFormatter.FormatBytes(group.SizeBytes) · @group.Resolution.ToLowerInvariant()
+                        @if (!string.IsNullOrWhiteSpace(group.VideoCodec))
+                        {
+                            <text> · @group.VideoCodec</text>
+                        }
+                        · @group.DriveName
+                    </div>
+                </div>
 
-    <div class="table-responsive">
-        <table class="table table-sm">
-            <thead>
-                <tr>
-                    <th style="width: 2em;"></th>
-                    <th role="button" @onclick='() => SetSort("Title")'>Title @SortIndicator("Title")</th>
-                    <th role="button" @onclick='() => SetSort("CurrentSize")'>Current File @SortIndicator("CurrentSize")</th>
-                    <th role="button" @onclick='() => SetSort("CandidateCount")'>Candidates @SortIndicator("CandidateCount")</th>
-                    <th role="button" @onclick='() => SetSort("Savings")'>Best Savings @SortIndicator("Savings")</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var group in _groups)
-                {
-                    var expanded = IsExpanded(group.MediaAssetId);
+                <div class="group-card-meta">
+                    Up to <strong>@SizeFormatter.FormatBytes(group.BestSavingsBytes)</strong> smaller
+                    (@group.BestSavingsPercent.ToString("P0"))
+                </div>
+            </div>
 
-                    <tr role="button" @onclick="() => ToggleExpanded(group.MediaAssetId)">
-                        <td>@(expanded ? "▼" : "▶")</td>
-                        <td>
-                            @group.AssetTitle
-                            @if (group.AssetYear is not null)
+            <details class="group-card-details">
+                <summary>@group.Releases.Count smaller release(s)</summary>
+
+                <div class="table-scroll">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Release</th>
+                                <th>Quality</th>
+                                <th class="col-num">Size</th>
+                                <th class="col-num">Saves</th>
+                                <th class="col-num">Seeders</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+
+                        <tbody>
+                            @foreach (var release in group.Releases)
                             {
-                                <text> (@group.AssetYear)</text>
-                            }
-                            @if (group.Season is not null && group.Episode is not null)
-                            {
-                                <text> S@(group.Season.Value.ToString("00"))E@(group.Episode.Value.ToString("00"))</text>
-                            }
-                        </td>
-                        <td>
-                            @SizeFormatter.FormatBytes(group.AssetSizeBytes)<br />
-                            <small class="text-muted">
-                                @group.AssetResolution &middot;
-                                @(string.IsNullOrWhiteSpace(group.AssetVideoCodec) ? "—" : group.AssetVideoCodec)
-                            </small><br />
-                            <small class="text-muted"><code>@group.CanonicalPath</code></small>
-                        </td>
-                        <td>@group.Candidates.Count</td>
-                        <td>
-                            <strong>@SizeFormatter.FormatBytes(group.BestSavingsBytes)</strong><br />
-                            <small class="text-muted">@group.BestSavingsPercent.ToString("P0")</small>
-                        </td>
-                    </tr>
+                                <tr>
+                                    <td>
+                                        <div class="file-name">@release.Candidate.Title</div>
+                                        <div class="cell-note">@release.Candidate.Indexer</div>
+                                    </td>
 
-                    @if (expanded)
-                    {
-                        <tr>
-                            <td></td>
-                            <td colspan="4" class="p-0">
-                                <table class="table table-sm mb-0">
-                                    <thead>
-                                        <tr class="text-muted">
-                                            <th>Candidate</th>
-                                            <th>Resolution / Codec</th>
-                                            <th>Savings</th>
-                                            <th></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @foreach (var candidate in group.Candidates)
+                                    <td class="text-nowrap">
+                                        @(string.IsNullOrWhiteSpace(release.CandidateResolution) ? "Not stated" : release.CandidateResolution.ToLowerInvariant())
+                                        @if (!string.IsNullOrWhiteSpace(release.CandidateCodec))
                                         {
-                                            <tr>
-                                                <td>
-                                                    @candidate.Candidate.Title<br />
-                                                    <small class="text-muted">
-                                                        @candidate.Candidate.Indexer &middot;
-                                                        @SizeFormatter.FormatBytes(candidate.Candidate.SizeBytes) &middot;
-                                                        @candidate.Candidate.Seeders / @candidate.Candidate.Leechers
-                                                    </small>
-                                                </td>
-                                                <td>
-                                                    @candidate.CandidateResolution &middot;
-                                                    @(candidate.CandidateCodec ?? "—")
-                                                    @if (candidate.IsUpgrade)
-                                                    {
-                                                        <span class="badge bg-success ms-1">⬆ Upgrade</span>
-                                                    }
-                                                    else if (!candidate.IsSameResolution)
-                                                    {
-                                                        <span class="badge bg-warning text-dark ms-1">Lower resolution</span>
-                                                    }
-                                                </td>
-                                                <td>
-                                                    <strong>@SizeFormatter.FormatBytes(candidate.SavingsBytes)</strong>
-                                                    <small class="text-muted">(@candidate.SavingsPercent.ToString("P0"))</small>
-                                                </td>
-                                                <td>
-                                                    @if (!string.IsNullOrWhiteSpace(candidate.Candidate.InfoUrl))
-                                                    {
-                                                        <a href="@candidate.Candidate.InfoUrl" target="_blank" rel="noopener">
-                                                            View on Indexer
-                                                        </a>
-                                                    }
-                                                </td>
-                                            </tr>
+                                            <text> · @release.CandidateCodec</text>
                                         }
-                                    </tbody>
-                                </table>
-                            </td>
-                        </tr>
-                    }
-                }
-            </tbody>
-        </table>
-    </div>
+
+                                        @if (release.IsUpgrade)
+                                        {
+                                            <div class="status-ok">Higher resolution</div>
+                                        }
+                                        else if (!release.IsSameResolution &&
+                                                 !string.IsNullOrWhiteSpace(release.CandidateResolution))
+                                        {
+                                            <div class="status-warn">Lower resolution</div>
+                                        }
+                                    </td>
+
+                                    <td class="col-num">@SizeFormatter.FormatBytes(release.Candidate.SizeBytes)</td>
+
+                                    <td class="col-num">
+                                        <strong>@SizeFormatter.FormatBytes(release.SavingsBytes)</strong>
+                                        <div class="cell-note">@release.SavingsPercent.ToString("P0")</div>
+                                    </td>
+
+                                    <td class="col-num">@release.Candidate.Seeders</td>
+
+                                    <td>
+                                        @if (IsWebLink(release.Candidate.InfoUrl))
+                                        {
+                                            <a class="text-nowrap" href="@release.Candidate.InfoUrl" target="_blank" rel="noopener noreferrer">
+                                                Open
+                                            </a>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="detail-label">Your file</div>
+                <code>@group.Path</code>
+            </details>
+        </div>
+    }
+
+    @if (Visible.Count > _shown)
+    {
+        <button type="button" class="btn btn-secondary" @onclick="() => _shown += PageSize">
+            Show @Math.Min(PageSize, Visible.Count - _shown) more (@(Visible.Count - _shown) left)
+        </button>
+    }
 }
 
 @code
 {
-    private static readonly string[] Tiers =
-        ["2160P", "1440P", "1080P", "720P"];
+    private const int PageSize = 50;
 
-    private sealed class AssetGroup
+    /// <summary>One library file and the smaller releases found for it.</summary>
+    private sealed class FileGroup
     {
-        public Guid MediaAssetId { get; set; }
+        public Guid MediaAssetId { get; init; }
 
-        public string AssetTitle { get; set; } =
-            string.Empty;
+        public string Title { get; init; } = string.Empty;
 
-        public int? AssetYear { get; set; }
+        public bool IsTv { get; init; }
 
-        public int? Season { get; set; }
+        public string DriveName { get; init; } = string.Empty;
 
-        public int? Episode { get; set; }
+        public string Path { get; init; } = string.Empty;
 
-        public string CanonicalPath { get; set; } =
-            string.Empty;
+        public long SizeBytes { get; init; }
 
-        public long AssetSizeBytes { get; set; }
+        public string Resolution { get; init; } = string.Empty;
 
-        public string AssetResolution { get; set; } =
-            string.Empty;
+        public string VideoCodec { get; init; } = string.Empty;
 
-        public string AssetVideoCodec { get; set; } =
-            string.Empty;
+        public List<SizeReductionCandidate> Releases { get; init; } = [];
 
-        public List<SizeReductionCandidate> Candidates { get; set; } =
-            [];
+        public bool HasUpgrade =>
+            Releases.Any(release => release.IsUpgrade);
 
         public long BestSavingsBytes =>
-            Candidates.Count == 0 ? 0 : Candidates.Max(candidate => candidate.SavingsBytes);
+            Releases.Max(release => release.SavingsBytes);
 
         public double BestSavingsPercent =>
-            Candidates.Count == 0 ? 0 : Candidates.Max(candidate => candidate.SavingsPercent);
+            Releases.Max(release => release.SavingsPercent);
     }
 
     private List<DriveProfile> _profiles = [];
-    private List<AssetGroup> _groups = [];
-    private readonly HashSet<Guid> _expandedAssetIds = [];
 
-    private bool _hasScanned;
-    private bool _isScanning;
-    private string? _isScanningDrive;
-    private string? _activeDriveName;
-    private string? _activeTier;
+    private List<SizeReductionCandidate> _found = [];
+
+    /// <summary>Every file with a release, after the quality filter.</summary>
+    private List<FileGroup> _groups = [];
+
+    private bool _prowlarrIsSetUp;
+    private bool _hasSearched;
+    private bool _wasSearching;
 
     private int _unscannedCount;
 
-    private readonly HashSet<string> _selectedTiers =
-        new(Tiers, StringComparer.OrdinalIgnoreCase);
+    private bool _showTv;
+    private bool _sameQualityOnly;
+    private string _tier = string.Empty;
+    private string _sort = "saving";
+    private int _shown = PageSize;
 
-    private string _sortColumn = "Default";
-    private bool _sortDescending = true;
-    private string _statusMessage = string.Empty;
+    private List<FileGroup> Visible =>
+        Sorted(
+            _groups.Where(group =>
+                group.IsTv == _showTv &&
+                (_tier.Length == 0 ||
+                 string.Equals(group.Resolution, _tier, StringComparison.OrdinalIgnoreCase))))
+            .ToList();
 
     protected override async Task OnInitializedAsync()
     {
+        _wasSearching = Search.IsSearching;
+
+        Search.Changed += OnSearchChanged;
+
+        var settings =
+            await SettingsService.GetSettingsAsync();
+
+        _prowlarrIsSetUp =
+            !string.IsNullOrWhiteSpace(settings.ProwlarrUrl) &&
+            !string.IsNullOrWhiteSpace(settings.ProwlarrApiKey);
+
         _profiles =
             (await SettingsService.GetEnabledDriveProfilesAsync())
                 .OrderBy(profile => profile.Name)
                 .ToList();
 
-        LoadCachedCandidates();
+        await LoadAsync();
 
-        await RefreshUnscannedCountAsync();
+        // Open on whichever tab has something in it.
+        _showTv =
+            !_groups.Any(group => !group.IsTv) &&
+            _groups.Any(group => group.IsTv);
     }
 
-    private static List<DriveScanCardPath> BuildPaths(
-        DriveProfile profile)
+    private void Start(string? driveName)
     {
-        var paths = new List<DriveScanCardPath>();
-
-        if (!string.IsNullOrWhiteSpace(profile.MovieLibraryPath))
-        {
-            paths.Add(new DriveScanCardPath { Label = "Movies", Path = profile.MovieLibraryPath });
-        }
-
-        if (!string.IsNullOrWhiteSpace(profile.TvLibraryPath))
-        {
-            paths.Add(new DriveScanCardPath { Label = "TV", Path = profile.TvLibraryPath });
-        }
-
-        return paths;
-    }
-
-    private List<DriveScanCardRow> BuildRows(
-        DriveProfile profile)
-    {
-        var anyScanning =
-            _isScanning || _isScanningDrive == profile.Name;
-
-        return Tiers
-            .Select(tier => new DriveScanCardRow
-            {
-                Label = tier,
-                Count = CandidateCache.GetCandidates(profile.Name, tier).Count,
-                LastScanText = FormatScanTime(
-                    CandidateCache.GetLastScanUtc(profile.Name, tier)),
-                IsScanning =
-                    _isScanning &&
-                    _activeDriveName == profile.Name &&
-                    _activeTier == tier,
-                IsDisabled = anyScanning,
-                OnScanClick = () => ScanAsync(profile.Name, tier)
-            })
-            .ToList();
-    }
-
-    private async Task ScanDriveAsync(
-        string driveName)
-    {
-        if (_isScanning || _isScanningDrive is not null)
+        if (Search.IsSearching)
         {
             return;
         }
 
-        _isScanningDrive = driveName;
+        // Runs on its own, so it carries on if this page is closed.
+        _ = Task.Run(() => Search.SearchAsync(driveName));
+    }
 
-        try
+    // Raised from the search's own thread - hop back onto this page's.
+    private void OnSearchChanged()
+    {
+        _ = InvokeAsync(async () =>
         {
-            foreach (var tier in Tiers)
+            var justFinished =
+                _wasSearching && !Search.IsSearching;
+
+            _wasSearching = Search.IsSearching;
+
+            if (justFinished)
             {
-                await ScanAsync(driveName, tier);
+                await LoadAsync();
             }
-        }
-        finally
-        {
-            _isScanningDrive = null;
-        }
+
+            StateHasChanged();
+        });
     }
 
-    private async Task ScanAsync(
-        string driveName,
-        string tier)
+    private async Task LoadAsync()
     {
-        if (_isScanning)
-        {
-            return;
-        }
+        _found = await Search.GetFoundAsync();
 
-        _isScanning = true;
-        _activeDriveName = driveName;
-        _activeTier = tier;
-        _statusMessage = $"Scanning {driveName} ({tier})...";
-        await InvokeAsync(StateHasChanged);
+        _unscannedCount = await Search.CountUnscannedAssetsAsync();
 
-        try
-        {
-            await SizeReductionCandidateService.GetCandidatesAsync(
-                tier,
-                driveName,
-                forceRefresh: true);
+        _hasSearched =
+            _profiles.Any(profile => Search.GetLastSearchUtc(profile.Name).HasValue);
 
-            await RefreshUnscannedCountAsync();
-
-            LoadCachedCandidates();
-
-            _statusMessage = $"Scan complete for {driveName} ({tier}).";
-        }
-        catch (Exception ex)
-        {
-            _statusMessage = $"Scan failed: {ex.Message}";
-        }
-        finally
-        {
-            _isScanning = false;
-            _activeDriveName = null;
-            _activeTier = null;
-        }
+        BuildGroups();
     }
 
-    private async Task RefreshUnscannedCountAsync()
+    private void BuildGroups()
     {
-        _unscannedCount =
-            await SizeReductionCandidateService.CountUnscannedAssetsAsync();
-    }
-
-    private void ToggleTier(
-        string tier,
-        bool isChecked)
-    {
-        if (isChecked)
-        {
-            _selectedTiers.Add(tier);
-        }
-        else
-        {
-            _selectedTiers.Remove(tier);
-        }
-
-        LoadCachedCandidates();
-    }
-
-    private void ToggleExpanded(
-        Guid mediaAssetId)
-    {
-        if (!_expandedAssetIds.Add(mediaAssetId))
-        {
-            _expandedAssetIds.Remove(mediaAssetId);
-        }
-    }
-
-    private bool IsExpanded(
-        Guid mediaAssetId) =>
-        _expandedAssetIds.Contains(mediaAssetId);
-
-    private void LoadCachedCandidates()
-    {
-        var candidates =
-            _profiles
-                .SelectMany(profile =>
-                    _selectedTiers.SelectMany(tier =>
-                        CandidateCache.GetCandidates(profile.Name, tier)))
-                .Where(candidate => candidate.SavingsBytes >= SizeReductionCandidateService.MinSavingsBytes)
-                .ToList();
-
         _groups =
-            candidates
-                .GroupBy(candidate => candidate.MediaAssetId)
+            _found
+                .Where(release =>
+                    !_sameQualityOnly || release.IsSameResolution || release.IsUpgrade)
+                .GroupBy(release => release.MediaAssetId)
                 .Select(group =>
                 {
                     var first = group.First();
 
-                    return new AssetGroup
+                    var isTv =
+                        first.Season is not null && first.Episode is not null;
+
+                    var title =
+                        first.AssetYear is null
+                            ? first.AssetTitle
+                            : $"{first.AssetTitle} ({first.AssetYear})";
+
+                    return new FileGroup
                     {
                         MediaAssetId = group.Key,
-                        AssetTitle = first.AssetTitle,
-                        AssetYear = first.AssetYear,
-                        Season = first.Season,
-                        Episode = first.Episode,
-                        CanonicalPath = first.CanonicalPath,
-                        AssetSizeBytes = first.AssetSizeBytes,
-                        AssetResolution = first.AssetResolution,
-                        AssetVideoCodec = first.AssetVideoCodec,
-                        Candidates = group
-                            .OrderByDescending(candidate => candidate.IsUpgrade)
-                            .ThenByDescending(candidate => candidate.IsSameResolution)
-                            .ThenByDescending(candidate => candidate.SavingsBytes)
+                        Title = isTv
+                            ? $"{first.AssetTitle} S{first.Season:00}E{first.Episode:00}"
+                            : title,
+                        IsTv = isTv,
+                        DriveName = first.DriveProfileName,
+                        Path = first.CanonicalPath,
+                        SizeBytes = first.AssetSizeBytes,
+                        Resolution = first.AssetResolution,
+                        VideoCodec = first.AssetVideoCodec,
+                        Releases = group
+                            .OrderByDescending(release => release.IsUpgrade)
+                            .ThenByDescending(release => release.IsSameResolution)
+                            .ThenByDescending(release => release.SavingsBytes)
                             .ToList()
                     };
                 })
                 .ToList();
 
-        ApplySort();
-
-        // "Has anything ever been scanned" is independent of the current
-        // tier filter - unchecking every tier shouldn't make the page think
-        // no scan has ever run.
-        _hasScanned =
-            _profiles.Any(profile =>
-                Tiers.Any(tier =>
-                    CandidateCache.GetLastScanUtc(profile.Name, tier) is not null));
+        _shown = PageSize;
     }
 
-    private void SetSort(
-        string column)
-    {
-        if (_sortColumn == column)
+    private IEnumerable<FileGroup> Sorted(IEnumerable<FileGroup> groups) =>
+        _sort switch
         {
-            _sortDescending = !_sortDescending;
-        }
-        else
-        {
-            _sortColumn = column;
-            _sortDescending = true;
-        }
+            "title" => groups.OrderBy(group => group.Title, StringComparer.OrdinalIgnoreCase),
+            "size" => groups.OrderByDescending(group => group.SizeBytes),
+            _ => groups
+                .OrderByDescending(group => group.HasUpgrade)
+                .ThenByDescending(group => group.BestSavingsBytes)
+        };
 
-        ApplySort();
+    private void ShowTab(bool tv)
+    {
+        _showTv = tv;
+        _shown = PageSize;
     }
 
-    private void ApplySort()
+    private void SetSameQualityOnly(bool value)
     {
-        IOrderedEnumerable<AssetGroup> sorted =
-            _sortColumn switch
-            {
-                "Title" =>
-                    _sortDescending
-                        ? _groups.OrderByDescending(group => group.AssetTitle)
-                        : _groups.OrderBy(group => group.AssetTitle),
-                "CurrentSize" =>
-                    _sortDescending
-                        ? _groups.OrderByDescending(group => group.AssetSizeBytes)
-                        : _groups.OrderBy(group => group.AssetSizeBytes),
-                "CandidateCount" =>
-                    _sortDescending
-                        ? _groups.OrderByDescending(group => group.Candidates.Count)
-                        : _groups.OrderBy(group => group.Candidates.Count),
-                "Savings" =>
-                    _sortDescending
-                        ? _groups.OrderByDescending(group => group.BestSavingsBytes)
-                        : _groups.OrderBy(group => group.BestSavingsBytes),
-                _ =>
-                    _groups
-                        .OrderByDescending(group => group.Candidates.Any(candidate => candidate.IsUpgrade))
-                        .ThenByDescending(group => group.Candidates.Any(candidate => candidate.IsSameResolution))
-                        .ThenByDescending(group => group.BestSavingsBytes)
-            };
+        _sameQualityOnly = value;
 
-        _groups = sorted.ToList();
+        BuildGroups();
     }
 
-    private string SortIndicator(
-        string column)
+    private void SetTier(string? tier)
     {
-        if (_sortColumn != column)
-        {
-            return string.Empty;
-        }
-
-        return _sortDescending ? "▼" : "▲";
+        _tier = tier ?? string.Empty;
+        _shown = PageSize;
     }
 
-    private static string FormatScanTime(
-        DateTime? scanUtc)
+    private void SetSort(string? sort)
     {
-        if (!scanUtc.HasValue)
-        {
-            return "Never";
-        }
+        _sort = sort ?? "saving";
+        _shown = PageSize;
+    }
 
-        return new DateTimeOffset(
-                DateTime.SpecifyKind(scanUtc.Value, DateTimeKind.Utc))
-            .LocalDateTime
+    // An indexer's link is shown as given, so only ever as a web link.
+    private static bool IsWebLink(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
+        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    private static string FormatTime(DateTime utc) =>
+        DateTime.SpecifyKind(utc, DateTimeKind.Utc)
+            .ToLocalTime()
             .ToString("g");
-    }
+
+    public void Dispose() =>
+        Search.Changed -= OnSearchChanged;
 }

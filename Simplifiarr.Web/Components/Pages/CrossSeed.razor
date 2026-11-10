@@ -1,1969 +1,400 @@
 @page "/cross-seed"
 @rendermode InteractiveServer
+@implements IDisposable
 
-@using System.Diagnostics
 @using Simplifiarr.Core.Models
 @using Simplifiarr.Core.Services
 @using Simplifiarr.Core.Utilities
-@using Simplifiarr.Web.Support
 
-@inject IQbittorrentScanner QbittorrentScanner
-@inject ITorrentPieceVerificationService PieceVerificationService
-@inject ITorrentReconstructionService ReconstructionService
-@inject IWholeTorrentCandidateService WholeTorrentCandidateService
-@inject IHardlinkService HardlinkService
-@inject IMediaCatalogService MediaCatalogService
-@inject IProwlarrClient ProwlarrClient
-@inject IReleaseParser ReleaseParser
-@inject IFileScannerService FileScannerService
+@inject ICrossSeedScanService Scanner
 @inject ISettingsService SettingsService
 
-<PageTitle>Cross-Seed</PageTitle>
+<PageTitle>Cross-Seed - Simplifiarr</PageTitle>
 
-<h1>Cross-Seed</h1>
+<PageHeader Title="Cross-Seed"
+            Subtitle="Finds other torrents of files you already seed, so you can seed the same files on more trackers without downloading anything. A torrent only counts once every piece of it has been checked against your files.">
+    @if (Scanner.IsScanning)
+    {
+        <button type="button" class="btn btn-secondary" @onclick="Scanner.Stop">
+            <i class="bi bi-stop-fill" aria-hidden="true"></i>
+            Stop
+        </button>
+    }
+    else
+    {
+        <button type="button"
+                class="btn btn-primary"
+                disabled="@(_isAdding || !_isSetUp)"
+                @onclick="Start">
+            <i class="bi bi-search" aria-hidden="true"></i>
+            Find cross-seeds
+        </button>
+    }
+</PageHeader>
 
-<p>
-    Phase 12 (Cross-Seeding). Reads a torrent's expected file layout and
-    piece hashes (the same data a torrent client uses for its own "force
-    recheck"), then hardlinks an already-owned file into place under the
-    torrent's exact expected name, even if that file has since been
-    renamed - proven byte-for-byte, never a guess based on name or size
-    alone. Get a torrent below from whichever source is convenient; the
-    rest of the flow is the same regardless of where it came from.
-</p>
-
-<button type="button"
-        class="btn btn-outline-secondary btn-sm mb-3"
-        @onclick="OpenTorrentStorageFolder">
-    <i class="bi bi-folder2-open" aria-hidden="true"></i>
-    Open Torrent Storage Folder
-</button>
-
-<div class="card mb-3">
-    <div class="card-body">
-        <h5>Scan All Active Torrents</h5>
-
-        <p class="text-muted">
-            Checks every active qBittorrent torrent against Prowlarr for
-            alternate releases of the same content. Only indexer results
-            whose size is exact or within 1% of your torrent are even
-            downloaded, and a candidate only counts as a match once every
-            piece of it - including the pieces that straddle two files - is
-            re-hashed against your files and passes. Never a fuzzy
-            name/size guess, and no partial credit if even one file in a
-            multi-file candidate can't be proven. Matches are collected
-            below for you to review before anything is hardlinked.
-        </p>
-
-        <div class="d-flex flex-wrap gap-2 align-items-center">
-            <button type="button"
-                    class="btn btn-primary"
-                    disabled="@_isScanning"
-                    @onclick="ScanAllAsync">
-                <i class="bi bi-search" aria-hidden="true"></i>
-                @(_isScanning ? "Scanning..." : "Scan All")
-            </button>
-
-            @if (_isScanning)
-            {
-                <button type="button"
-                        class="btn btn-outline-secondary"
-                        @onclick="CancelScan">
-                    <i class="bi bi-x-lg" aria-hidden="true"></i>
-                    Cancel
-                </button>
-            }
-        </div>
-
-        @if (_isScanning)
-        {
-            <p class="mt-2 mb-0 text-muted">
-                Checking: @(_currentlyScanningTorrentName ?? "...")
-                (@_scanTorrentsProcessed / @_scanTorrentsTotal torrents,
-                @_scanMatchCount match(es) found so far)
-            </p>
-        }
-
-        @if (!string.IsNullOrWhiteSpace(_scanStatusMessage))
-        {
-            <p class="mt-2 mb-0">@_scanStatusMessage</p>
-        }
-
-        @if (_scanAlreadySeedingTitles.Count > 0)
-        {
-            <details class="mt-2">
-                <summary class="small text-muted">
-                    @_scanAlreadySeedingTitles.Count result(s) skipped - already in qBittorrent
-                </summary>
-                <ul class="small text-muted mb-0">
-                    @foreach (var title in _scanAlreadySeedingTitles.Distinct().Take(50))
-                    {
-                        <li>@title</li>
-                    }
-                </ul>
-            </details>
-        }
-
-        @if (_scanResults.Count > 0)
-        {
-            <div class="mt-3">
-                @if (_isConfirmingAddSelected)
-                {
-                    <BatchConfirmBanner CssClass="alert alert-primary p-2 mb-3"
-                                        IsBusy="_isCommittingScanResults"
-                                        CanConfirm="_scanSelection.Count > 0"
-                                        ConfirmLabel="Confirm Add Selected"
-                                        BusyLabel="Committing..."
-                                        OnConfirm="AddSelectedAsync"
-                                        OnCancel="CancelAddSelectedConfirmation">
-                        <Message>
-                            Hardlink @_scanSelection.Count selected match(es) into your
-                            torrent storage folder?
-                        </Message>
-                    </BatchConfirmBanner>
-                }
-                else if (_isConfirmingAddAll)
-                {
-                    <BatchConfirmBanner CssClass="alert alert-primary p-2 mb-3"
-                                        IsBusy="_isCommittingScanResults"
-                                        ConfirmLabel="Confirm Add All"
-                                        BusyLabel="Committing..."
-                                        OnConfirm="AddAllAsync"
-                                        OnCancel="CancelAddAllConfirmation">
-                        <Message>
-                            Hardlink all @AddableScanResults.Count() match(es) into your torrent
-                            storage folder?
-                            @if (_scanResults.Count > AddableScanResults.Count())
-                            {
-                                <span>
-                                    (@(_scanResults.Count - AddableScanResults.Count()) already seeded on the
-                                    same tracker are left out.)
-                                </span>
-                            }
-                        </Message>
-                    </BatchConfirmBanner>
-                }
-                else
-                {
-                    <div class="d-flex flex-wrap gap-2 mb-3">
-                        <button type="button"
-                                class="btn btn-primary"
-                                disabled="@(_scanSelection.Count == 0)"
-                                @onclick="RequestAddSelectedConfirmation">
-                            <i class="bi bi-plus-lg" aria-hidden="true"></i>
-                            Add Selected (@_scanSelection.Count)
-                        </button>
-
-                        <button type="button"
-                                class="btn btn-outline-primary"
-                                @onclick="RequestAddAllConfirmation">
-                            <i class="bi bi-plus-lg" aria-hidden="true"></i>
-                            Add All
-                        </button>
-                    </div>
-                }
-
-                @if (!string.IsNullOrWhiteSpace(_commitStatusMessage))
-                {
-                    <p class="mb-2">@_commitStatusMessage</p>
-                }
-
-                <div class="table-responsive">
-                    <table class="table table-sm">
-                        <thead>
-                            <tr>
-                                <th>
-                                    <input type="checkbox"
-                                           checked="@(_scanSelection.Count > 0 && _scanSelection.Count == _scanResults.Count)"
-                                           disabled="@_isCommittingScanResults"
-                                           @onchange="() => _scanSelection.ToggleSelectAll(_scanResults)" />
-                                </th>
-                                <th>Found Searching For</th>
-                                <th>Matched Candidate</th>
-                                <th>Indexer</th>
-                                <th>Size</th>
-                                <th>Proof</th>
-                                <th>Your File(s)</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var result in _scanResults)
-                            {
-                                <tr>
-                                    <SelectableCheckboxCell Checked="_scanSelection.IsSelected(result)"
-                                                             Disabled="_isCommittingScanResults"
-                                                             OnChanged="selected => _scanSelection.SetSelected(result, selected)" />
-                                    <td>@result.SourceQueryTitle</td>
-                                    <td>@result.CandidateResult.Title</td>
-                                    <td>
-                                        @result.CandidateResult.Indexer
-                                        <div class="text-muted small">
-                                            @string.Join(", ", result.CandidateMetadata.TrackerUrls.Select(TrackerDomain).Where(domain => domain is not null).Distinct())
-                                        </div>
-                                    </td>
-                                    <td>
-                                        @SizeFormatter.FormatBytes(result.CandidateMetadata.TotalLengthBytes)
-                                        <div class="text-muted small">@result.CandidateMetadata.TotalLengthBytes bytes</div>
-                                    </td>
-                                    <td>
-                                        <span class="badge bg-success">100% verified</span>
-                                        <div class="text-muted small">
-                                            @(result.Match.WholeTorrentVerification?.VerifiedPieceCount ?? 0)
-                                            / @(result.Match.WholeTorrentVerification?.TotalPieceCount ?? 0)
-                                            pieces hashed, @result.Match.EntryMatches.Count file(s)
-                                        </div>
-                                    </td>
-                                    <td>
-                                        @if (result.IsAlreadySeededOnSameTracker)
-                                        {
-                                            <div class="small mb-1">
-                                                <span class="badge bg-warning text-dark">
-                                                    Already seeding on this tracker - not a new cross-seed
-                                                </span>
-                                            </div>
-                                        }
-                                        @if (result.SeedingTorrents.Count > 0)
-                                        {
-                                            <div class="small mb-1">
-                                                <span class="badge bg-info text-dark">You seed these files as</span>
-                                                @foreach (var seeding in result.SeedingTorrents.Take(3))
-                                                {
-                                                    <div>@seeding.Name <span class="text-muted">(@TrackerLabel(seeding))</span></div>
-                                                }
-                                                @if (result.SeedingTorrents.Count > 3)
-                                                {
-                                                    <div class="text-muted">+ @(result.SeedingTorrents.Count - 3) more</div>
-                                                }
-                                            </div>
-                                        }
-                                        else
-                                        {
-                                            <div class="small mb-1">
-                                                <span class="badge bg-secondary">Not in any qBittorrent torrent</span>
-                                            </div>
-                                        }
-                                        <code>@result.Match.EntryMatches[0].ResolvedPath</code>
-                                        @if (result.Match.EntryMatches.Count > 1)
-                                        {
-                                            <div class="text-muted small">+ @(result.Match.EntryMatches.Count - 1) more file(s)</div>
-                                        }
-                                    </td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        }
-    </div>
-</div>
-
-<div class="card mb-3">
-    <div class="card-body">
-        <h5>1. Get a torrent</h5>
-
-        <h6 class="mt-3">From an active qBittorrent torrent</h6>
-
-        @if (_torrents.Count == 0)
-        {
-            <EmptyState Icon="share" Text="No active torrents found in qBittorrent." />
-        }
-        else
-        {
-            <select class="form-select" @bind="_selectedHash">
-                <option value="">Select a torrent...</option>
-                @foreach (var torrent in _torrents)
-                {
-                    <option value="@torrent.TorrentHash">@torrent.Name</option>
-                }
-            </select>
-
-            <button type="button"
-                    class="btn btn-primary mt-2"
-                    disabled="@(_isAnalyzing || string.IsNullOrWhiteSpace(_selectedHash))"
-                    @onclick="AnalyzeAsync">
-                <i class="bi bi-search" aria-hidden="true"></i>
-                @(_isAnalyzing ? "Analyzing..." : "Analyze")
-            </button>
-
-            <StatusMessage Message="@_analyzeError" Severity="StatusSeverity.Danger" />
-        }
-
-        <h6 class="mt-4">From a .torrent file on disk</h6>
-
-        <InputFile class="form-control"
-                   accept=".torrent"
-                   disabled="@_isLoadingFromPath"
-                   OnChange="LoadFromBrowserFileAsync" />
-
-        <div class="form-text">
-            @(_isLoadingFromPath ? "Loading..." : "Click to browse for a .torrent file.")
-        </div>
-
-        <StatusMessage Message="@_loadFromPathError" Severity="StatusSeverity.Danger" />
-
-        <h6 class="mt-4">From a Prowlarr search</h6>
-
-        <div class="row g-2 align-items-end">
-            <div class="col-md-8">
-                <input class="form-control" @bind="_prowlarrQuery" placeholder="Movie or show title..." />
-            </div>
-
-            <div class="col-md-4">
-                <button type="button"
-                        class="btn btn-primary w-100"
-                        disabled="@(_isSearchingProwlarr || string.IsNullOrWhiteSpace(_prowlarrQuery))"
-                        @onclick="SearchProwlarrAsync">
-                    <i class="bi bi-search" aria-hidden="true"></i>
-                    @(_isSearchingProwlarr ? "Searching..." : "Search")
-                </button>
-            </div>
-        </div>
-
-        <p class="text-muted mt-1 mb-2">
-            @if (_metadata is not null)
-            {
-                <span>Pre-filled with the loaded torrent's name. Only results whose size is exact or within 1% of the loaded torrent are shown by default - a different size can't be the same files.</span>
-            }
-            else
-            {
-                <span>Search across your configured indexers for a torrent to load.</span>
-            }
-        </p>
-
-        <StatusMessage Message="@_prowlarrSearchError" Severity="StatusSeverity.Danger" />
-
-        @if (_prowlarrCandidates.Count > 0)
-        {
-            var visibleProwlarr = VisibleProwlarrCandidates();
-            var hiddenProwlarrCount = _prowlarrCandidates.Count - visibleProwlarr.Count;
-
-            if (_prowlarrTargetSize is not null)
-            {
-                <p class="mt-2 mb-1">
-                    <strong>@visibleProwlarr.Count</strong> result(s) match the loaded torrent's size
-                    (@SizeFormatter.FormatBytes(_prowlarrTargetSize.Value)).
-
-                    @if (hiddenProwlarrCount > 0 || _showAllProwlarrResults)
-                    {
-                        <button type="button"
-                                class="btn btn-link btn-sm p-0 ms-1"
-                                @onclick="() => _showAllProwlarrResults = !_showAllProwlarrResults">
-                            @(_showAllProwlarrResults
-                                ? "Hide the different-size results"
-                                : $"Show {hiddenProwlarrCount} different-size result(s)")
-                        </button>
-                    }
-                </p>
-            }
-
-            if (visibleProwlarr.Count == 0)
-            {
-                <p class="text-muted">
-                    Nothing in these results is the same size as the loaded torrent, so none of them can be the same files.
-                </p>
-            }
-
-            <div class="table-responsive mt-2">
-                <table class="table table-sm">
-                    <thead>
-                        <tr>
-                            <th>Title</th>
-                            <th>Indexer</th>
-                            <th>Size</th>
-                            <th>Seeders/Leechers</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var result in visibleProwlarr.Take(50))
-                        {
-                            <tr>
-                                <td>@result.Title</td>
-                                <td>@result.Indexer</td>
-                                <td>
-                                    @SizeFormatter.FormatBytes(result.SizeBytes)
-
-                                    @if (_prowlarrTargetSize is long target)
-                                    {
-                                        switch (ProwlarrCandidateRanker.ClassifySize(result.SizeBytes, target))
-                                        {
-                                            case ProwlarrCandidateRanker.SizeMatch.Exact:
-                                                <span class="badge bg-success ms-1">Same size</span>
-                                                break;
-                                            case ProwlarrCandidateRanker.SizeMatch.Near:
-                                                <span class="badge bg-warning text-dark ms-1">Within 1%</span>
-                                                break;
-                                            default:
-                                                <span class="badge bg-secondary ms-1">Different size</span>
-                                                break;
-                                        }
-                                    }
-                                </td>
-                                <td>@result.Seeders / @result.Leechers</td>
-                                <td>
-                                    <button type="button"
-                                            class="btn btn-sm btn-outline-primary"
-                                            disabled="@_isLoadingFromProwlarr"
-                                            @onclick="() => LoadFromProwlarrResultAsync(result)">
-                                        Load This
-                                    </button>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-        }
-
-        @if (_metadata is not null)
-        {
-            <p class="mt-3 mb-0">
-                <strong>Loaded from:</strong> @_sourceLabel<br />
-                <strong>Name:</strong> @_metadata.Name<br />
-                <strong>Total size:</strong> @_metadata.TotalLengthBytes bytes<br />
-                <strong>Piece length:</strong> @_metadata.PieceLengthBytes bytes<br />
-                <strong>Piece count:</strong> @_metadata.Pieces.Count
-            </p>
-        }
-    </div>
-</div>
-
-@if (_metadata is not null && !_metadata.IsSingleFile)
+@if (!_isSetUp)
 {
-    <div class="card mb-3">
-        <div class="card-body">
-            <h5>2. Pick file(s) from this multi-file torrent</h5>
-
-            <TorrentFileEntryPicker Entries="_metadata.Files"
-                                     Selected="_selectedFileEntries"
-                                     OnToggled="ToggleFileEntry"
-                                     OnToggleAll="ToggleAllFileEntries" />
-        </div>
+    <div class="alert alert-warning">
+        Cross-seeding needs both qBittorrent and Prowlarr.
+        <a href="settings">Set them up in Settings</a>, under Connections.
     </div>
 }
 
-@if (_metadata is not null && _activeSourceTorrent is not null && (_metadata.IsSingleFile || _selectedFileEntry is not null))
+@if (Scanner.Progress is { } progress)
 {
-    <div class="card mb-3">
-        <div class="card-body">
-            <h5>Verify against its own current file</h5>
-
-            <p class="text-muted">
-                Sanity check - this torrent's file hasn't been renamed, so
-                verifying it against its own metadata proves the parser and
-                piece-hashing are correct against real, known-good data.
-            </p>
-
-            <button type="button"
-                    class="btn btn-primary"
-                    disabled="@_isVerifying"
-                    @onclick="VerifyAsync">
-                <i class="bi bi-check2-circle" aria-hidden="true"></i>
-                @(_isVerifying ? "Verifying..." : "Verify Against Its Own Current File")
-            </button>
-
-            <StatusMessage Message="@_verifyError" Severity="StatusSeverity.Danger" />
-
-            @if (_verifyResult is not null)
-            {
-                <p class="mt-3 mb-0">
-                    <strong>Full match:</strong> @_verifyResult.IsFullMatch<br />
-                    <strong>Verified pieces:</strong> @_verifyResult.VerifiedPieceCount / @_verifyResult.TotalPieceCount<br />
-                    @if (_verifyResult.BoundaryPieceCount > 0)
-                    {
-                        <strong>Boundary pieces (unverifiable in isolation):</strong> @_verifyResult.BoundaryPieceCount<br />
-                    }
-                    @if (!string.IsNullOrWhiteSpace(_verifyResult.FailureReason))
-                    {
-                        <strong>Reason:</strong> @_verifyResult.FailureReason
-                    }
-                </p>
-            }
-        </div>
+    <div class="alert alert-info" role="status">
+        <strong>Checking torrent @(progress.Done + 1) of @progress.Total</strong> -
+        @progress.Found match(es) so far.
+        <div class="cell-note">Now: @progress.CurrentTorrent. You can leave this page; the scan carries on.</div>
     </div>
-
-    <div class="card mb-3">
-        <div class="card-body">
-            <h5>Simulate a rename and reconstruct</h5>
-
-            <p class="text-muted">
-                Creates a scratch hardlink of the same file under a
-                different name (simulating what a Radarr/Sonarr import
-                rename would produce), then reconstructs it back into the
-                torrent's expected name in a new folder - proving the whole
-                pipeline works even without an already-renamed example on
-                hand. Test files are created in a
-                <code>SimplifiarrCrossSeedTest</code> folder on the
-                torrent's own drive (hardlinks only work within one
-                volume)@(string.IsNullOrWhiteSpace(_testRootDir) ? "." : $" - this run used {_testRootDir}.")
-            </p>
-
-            <button type="button"
-                    class="btn btn-primary"
-                    disabled="@_isReconstructing"
-                    @onclick="SimulateRenameAndReconstructAsync">
-                <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
-                @(_isReconstructing ? "Working..." : "Simulate a Rename and Reconstruct")
-            </button>
-
-            <StatusMessage Message="@_reconstructError" Severity="StatusSeverity.Danger" />
-
-            @if (_reconstructResult is not null)
-            {
-                <div class="mt-3">
-                    <p class="mb-1">
-                        <strong>Success:</strong> @_reconstructResult.Success
-                    </p>
-
-                    @if (!string.IsNullOrWhiteSpace(_reconstructResult.FailureReason))
-                    {
-                        <p class="mb-1">
-                            <strong>Reason:</strong> @_reconstructResult.FailureReason
-                        </p>
-                    }
-
-                    @if (_reconstructResult.Success)
-                    {
-                        <table class="table table-sm mt-2">
-                            <thead>
-                                <tr>
-                                    <th>File</th>
-                                    <th>Path</th>
-                                    <th>Hardlink count</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>Original</td>
-                                    <td><code>@_originalFilePath</code></td>
-                                    <td>@_originalLinkCount</td>
-                                </tr>
-                                <tr>
-                                    <td>Scratch renamed copy</td>
-                                    <td><code>@_scratchRenamedPath</code></td>
-                                    <td>@_scratchLinkCount</td>
-                                </tr>
-                                <tr>
-                                    <td>Reconstructed</td>
-                                    <td><code>@_reconstructResult.TargetPath</code></td>
-                                    <td>@_reconstructedLinkCount</td>
-                                </tr>
-                            </tbody>
-                        </table>
-
-                        <p class="text-muted mb-0">
-                            All three link counts should be equal and greater
-                            than 1 - proof they're all the same underlying
-                            data on disk, not copies.
-                        </p>
-                    }
-                </div>
-            }
-        </div>
+}
+else if (Scanner.IsScanning)
+{
+    <div class="alert alert-info" role="status">Starting...</div>
+}
+else if (!string.IsNullOrWhiteSpace(Scanner.LastMessage))
+{
+    <div class="alert @(Scanner.LastSucceeded ? "alert-info" : "alert-warning")" role="status">
+        @Scanner.LastMessage
     </div>
 }
 
-@if (_metadata is not null && (_metadata.IsSingleFile || _selectedFileEntries.Count > 0))
+@if (!string.IsNullOrWhiteSpace(_addMessage))
 {
-    <div class="card mb-3">
-        <div class="card-body">
-            <h5>Find &amp; reconstruct from your catalog</h5>
+    <div class="alert alert-info" role="status">@_addMessage</div>
+}
 
-            <p class="text-muted">
-                Searches your whole library for files with the same exact
-                byte size and file type, then proves or disproves a match
-                with the same piece-hash verification, regardless of what
-                that file is currently named.
-            </p>
+@if (_matches.Count == 0)
+{
+    @if (!Scanner.IsScanning)
+    {
+        <EmptyState Icon="share"
+                    Text="@(Scanner.LastMessage is null
+                              ? "Nothing to show yet. Press Find cross-seeds to check everything you seed against your indexers."
+                              : "No cross-seeds are waiting to be added.")" />
+    }
+}
+else
+{
+    @if (_pending.Count > 0)
+    {
+        <BatchConfirmBanner IsBusy="_isAdding"
+                            ConfirmLabel="Confirm"
+                            BusyLabel="Adding..."
+                            OnConfirm="AddPendingAsync"
+                            OnCancel="() => _pending = []">
+            <Message>
+                <strong>Add @_pending.Count torrent(s) to qBittorrent?</strong>
+                Your files are hardlinked into <code>@_storagePath</code> under the names each torrent expects,
+                and the torrents are added stopped so you can check them before they start. No file is copied or moved.
+            </Message>
+        </BatchConfirmBanner>
+    }
+    else
+    {
+        <div class="toolbar">
+            <div class="toolbar-summary">
+                <strong>@_matches.Count</strong> proven match(es)
+                @if (_matches.Count > Addable.Count)
+                {
+                    <text> · @(_matches.Count - Addable.Count) already on that tracker</text>
+                }
+                @if (_selection.Count > 0)
+                {
+                    <text> · @_selection.Count selected</text>
+                }
+            </div>
 
-            @if (!_metadata.IsSingleFile)
-            {
-                <p class="mb-2">
-                    <strong>@_selectedFileEntries.Count</strong> file(s) selected -
-                    <strong>@SelectedWithCandidatesCount()</strong> have a file in your
-                    library with the same exact size and file type.
-                </p>
-
+            <div class="toolbar-actions">
                 <button type="button"
-                        class="btn btn-primary"
-                        disabled="@(_isReconstructingSelected || _selectedFileEntries.Count == 0)"
-                        @onclick="ReconstructSelectedFromCatalogAsync">
-                    <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
-                    @(_isReconstructingSelected ? "Working..." : $"Reconstruct Selected ({_selectedFileEntries.Count})")
+                        class="btn btn-secondary btn-sm"
+                        disabled="@(IsBusy || Addable.Count == 0)"
+                        @onclick="() => _pending = Addable">
+                    Add all new (@Addable.Count)
                 </button>
 
-                @if (!string.IsNullOrWhiteSpace(_selectedProgress))
-                {
-                    <p class="text-muted mt-2 mb-0">@_selectedProgress</p>
-                }
+                <button type="button"
+                        class="btn btn-primary btn-sm"
+                        disabled="@(IsBusy || _selection.Count == 0)"
+                        @onclick="() => _pending = _matches.Where(_selection.IsSelected).ToList()">
+                    Add selected (@_selection.Count)
+                </button>
+            </div>
+        </div>
+    }
 
-                @if (_selectedResults.Count > 0)
-                {
-                    <p class="mt-3 mb-1">
-                        <strong>@_selectedResults.Count(row => row.Result.Success)</strong> succeeded,
-                        <strong>@_selectedResults.Count(row => !row.Result.Success)</strong> failed
-                        (of @_selectedResults.Count).
-                    </p>
+    <div class="table-scroll">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th class="col-check">Select</th>
+                    <th>Torrent found</th>
+                    <th class="col-num">Size</th>
+                    <th>You seed these files as</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
 
-                    <div class="table-responsive">
-                        <table class="table table-sm">
-                            <thead>
-                                <tr>
-                                    <th>File</th>
-                                    <th>Result</th>
-                                    <th>Details</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach (var row in _selectedResults)
+            <tbody>
+                @foreach (var match in _matches)
+                {
+                    <tr @key="match.CandidateResult.DownloadUrl">
+                        <SelectableCheckboxCell Checked="_selection.IsSelected(match)"
+                                                Disabled="IsBusy"
+                                                OnChanged="selected => _selection.SetSelected(match, selected)" />
+
+                        <td>
+                            <div class="file-name">@match.CandidateResult.Title</div>
+                            <div class="cell-note">
+                                @match.CandidateResult.Indexer
+                                @if (Trackers(match) is { Length: > 0 } trackers)
                                 {
-                                    <tr>
-                                        <td>@row.Entry.RelativePath</td>
-                                        <td>
-                                            @if (row.Result.Success)
-                                            {
-                                                <span class="badge bg-success">Reconstructed</span>
-                                            }
-                                            else
-                                            {
-                                                <span class="badge bg-danger">Failed</span>
-                                            }
-                                        </td>
-                                        <td>
-                                            @if (row.Result.Success)
-                                            {
-                                                <div>Matched: <code>@row.Result.MatchedAsset?.CanonicalPath</code></div>
-                                                <div>Linked at: <code>@row.Result.TargetPath</code></div>
-                                            }
-                                            else
-                                            {
-                                                @row.Result.FailureReason
-                                            }
-                                        </td>
-                                    </tr>
+                                    <text> · @trackers</text>
                                 }
-                            </tbody>
-                        </table>
-                    </div>
+                            </div>
+
+                            @if (match.IsAlreadySeededOnSameTracker)
+                            {
+                                <div class="status-warn">Already seeding on this tracker</div>
+                                <div class="cell-note">Adding it would seed the same files twice in one place.</div>
+                            }
+                            else
+                            {
+                                <div class="status-ok">New tracker</div>
+                            }
+                        </td>
+
+                        <td class="col-num">@SizeFormatter.FormatBytes(match.CandidateMetadata.TotalLengthBytes)</td>
+
+                        <td>
+                            @if (match.SeedingTorrents.Count == 0)
+                            {
+                                <span class="status-muted">Not seeding - the files are in your library</span>
+                            }
+                            else
+                            {
+                                @foreach (var seeding in match.SeedingTorrents.Take(3))
+                                {
+                                    <div>
+                                        @seeding.Name
+                                        <span class="cell-note">(@(CrossSeedScanService.TrackerDomain(seeding.Tracker) ?? "no tracker"))</span>
+                                    </div>
+                                }
+
+                                @if (match.SeedingTorrents.Count > 3)
+                                {
+                                    <div class="cell-note">+ @(match.SeedingTorrents.Count - 3) more</div>
+                                }
+                            }
+                        </td>
+
+                        <td>
+                            <details>
+                                <summary>View proof</summary>
+
+                                <div class="detail-label">Checked</div>
+                                <div>
+                                    @(match.Match.WholeTorrentVerification?.VerifiedPieceCount ?? 0) of
+                                    @(match.Match.WholeTorrentVerification?.TotalPieceCount ?? 0) pieces match,
+                                    across @match.Match.EntryMatches.Count file(s)
+                                </div>
+
+                                <div class="detail-label">Your file(s)</div>
+                                @foreach (var entry in match.Match.EntryMatches.Take(5))
+                                {
+                                    <div><code>@entry.ResolvedPath</code></div>
+                                }
+
+                                @if (match.Match.EntryMatches.Count > 5)
+                                {
+                                    <div class="cell-note">+ @(match.Match.EntryMatches.Count - 5) more</div>
+                                }
+
+                                <div class="detail-label">Found by searching for</div>
+                                <div>@match.SourceQueryTitle</div>
+                            </details>
+                        </td>
+                    </tr>
                 }
-            }
-            else
-            {
-            <p class="mb-2">
-                <strong>@_catalogCandidates.Count</strong> candidate(s) found
-                in your library with the same exact size and file type. Each is
-                piece-hashed before anything is linked; the closest name match
-                is tried first.
-            </p>
-
-            @if (_catalogCandidates.Count > 0)
-            {
-                <ul class="small mb-2">
-                    @foreach (var candidate in _catalogCandidates.Take(10))
-                    {
-                        <li><code>@candidate.CanonicalPath</code> (@SizeFormatter.FormatBytes(candidate.FileSizeBytes))</li>
-                    }
-                </ul>
-
-                @if (_catalogCandidates.Count > 10)
-                {
-                    <p class="text-muted small">+ @(_catalogCandidates.Count - 10) more.</p>
-                }
-            }
-
-            <button type="button"
-                    class="btn btn-primary"
-                    disabled="@(_isReconstructingFromCatalog || _catalogCandidates.Count == 0)"
-                    @onclick="ReconstructFromCatalogAsync">
-                <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
-                @(_isReconstructingFromCatalog ? "Working..." : "Reconstruct")
-            </button>
-
-            <StatusMessage Message="@_catalogReconstructError" Severity="StatusSeverity.Danger" />
-
-            @if (_catalogReconstructResult is not null)
-            {
-                <div class="mt-3">
-                    <p class="mb-1">
-                        <strong>Success:</strong> @_catalogReconstructResult.Success
-                    </p>
-
-                    @if (!string.IsNullOrWhiteSpace(_catalogReconstructResult.FailureReason))
-                    {
-                        <p class="mb-1">
-                            <strong>Reason:</strong> @_catalogReconstructResult.FailureReason
-                        </p>
-                    }
-
-                    @if (_catalogReconstructResult.Success && _catalogReconstructResult.MatchedAsset is not null)
-                    {
-                        <p class="mb-1">
-                            <strong>Matched:</strong> @_catalogReconstructResult.MatchedAsset.Title
-                            (<code>@_catalogReconstructResult.MatchedAsset.CanonicalPath</code>)
-                        </p>
-
-                        <p class="mb-1">
-                            <strong>Reconstructed at:</strong> <code>@_catalogReconstructResult.TargetPath</code>
-                        </p>
-                    }
-                </div>
-            }
-            }
-        </div>
+            </tbody>
+        </table>
     </div>
 }
 
-@if (!string.IsNullOrWhiteSpace(_testRootDir))
+@if (_alreadyHave.Count > 0)
 {
-    <button type="button"
-            class="btn btn-outline-danger mb-3"
-            @onclick="CleanUpTestArtifactsAsync">
-        <i class="bi bi-trash" aria-hidden="true"></i>
-        Clean Up Test Artifacts
-    </button>
+    <details class="mt-3">
+        <summary>@_alreadyHave.Count result(s) left out - that torrent is already in qBittorrent</summary>
+
+        <ul class="cell-note">
+            @foreach (var title in _alreadyHave.Distinct().Take(50))
+            {
+                <li>@title</li>
+            }
+        </ul>
+    </details>
 }
+
+<p class="cell-note mt-3">
+    Have one particular .torrent you want to seed from files you already own?
+    Use the <a href="torrent-rebuilder">Torrent Rebuilder</a>.
+</p>
 
 @code
 {
-    // Scan All state.
-    private static readonly string[] ExcludedScanStateSubstrings =
-        ["checking", "error", "missingfiles", "allocating", "moving", "unknown", "metadl"];
+    private List<CrossSeedScanResult> _matches = [];
+    private List<string> _alreadyHave = [];
 
-    private CancellationTokenSource? _scanCts;
-    private bool _isScanning;
-    private string? _scanStatusMessage;
-    private string? _currentlyScanningTorrentName;
-    private int _scanMatchCount;
-    private int _scanTorrentsProcessed;
-    private int _scanTorrentsTotal;
-    private List<CrossSeedScanResult> _scanResults = [];
-    private int _scanAlreadySeedingSkipped;
-    private List<string> _scanAlreadySeedingTitles = [];
+    /// <summary>Matches waiting for the user to confirm adding them.</summary>
+    private List<CrossSeedScanResult> _pending = [];
 
-    private readonly CandidateSelection<CrossSeedScanResult> _scanSelection =
-        new(result => result.CandidateResult.DownloadUrl);
+    private readonly CandidateSelection<CrossSeedScanResult> _selection =
+        new(match => match.CandidateResult.DownloadUrl);
 
-    private bool _isConfirmingAddSelected;
-    private bool _isConfirmingAddAll;
-    private bool _isCommittingScanResults;
-    private string? _commitStatusMessage;
+    private bool _isSetUp;
+    private bool _isAdding;
+    private bool _wasScanning;
 
-    /// <summary>
-    /// qBittorrent torrents whose data contains any of the matched files,
-    /// i.e. what you're seeding these bytes as today.
-    /// </summary>
-    private static List<TorrentRecord> FindSeedingTorrents(
-        WholeTorrentMatchResult match,
-        IReadOnlyCollection<TorrentRecord> allTorrents)
-    {
-        var matchedPaths =
-            match.EntryMatches
-                .Select(entry => NormalizePath(entry.ResolvedPath))
-                .ToList();
+    private string _storagePath = string.Empty;
+    private string? _addMessage;
 
-        return allTorrents
-            .Where(torrent =>
-            {
-                if (string.IsNullOrWhiteSpace(torrent.ContentPath))
-                {
-                    return false;
-                }
+    private bool IsBusy =>
+        _isAdding || Scanner.IsScanning;
 
-                var content = NormalizePath(torrent.ContentPath);
-                var contentAsFolder = content + Path.DirectorySeparatorChar;
-
-                return matchedPaths.Any(path =>
-                    string.Equals(path, content, StringComparison.OrdinalIgnoreCase) ||
-                    path.StartsWith(contentAsFolder, StringComparison.OrdinalIgnoreCase));
-            })
+    private List<CrossSeedScanResult> Addable =>
+        _matches
+            .Where(match => !match.IsAlreadySeededOnSameTracker)
             .ToList();
-    }
-
-    private static string NormalizePath(
-        string path)
-    {
-        try
-        {
-            return Path.GetFullPath(path).TrimEnd('\\', '/');
-        }
-        catch
-        {
-            return path;
-        }
-    }
-
-    /// <summary>
-    /// The registrable-ish domain of a tracker URL (last two host labels), so
-    /// tracker.example.org and announce.example.org count as the same tracker.
-    /// </summary>
-    private static string? TrackerDomain(
-        string trackerUrl)
-    {
-        if (!Uri.TryCreate(trackerUrl, UriKind.Absolute, out var uri) ||
-            uri.HostNameType != UriHostNameType.Dns)
-        {
-            return Uri.TryCreate(trackerUrl, UriKind.Absolute, out var ipUri)
-                ? ipUri.Host
-                : null;
-        }
-
-        var labels = uri.Host.Split('.');
-
-        return labels.Length <= 2
-            ? uri.Host
-            : string.Join('.', labels[^2..]);
-    }
-
-    private IEnumerable<CrossSeedScanResult> AddableScanResults =>
-        _scanResults.Where(result => !result.IsAlreadySeededOnSameTracker);
-
-    private static string TrackerLabel(
-        TorrentRecord torrent) =>
-        Uri.TryCreate(torrent.Tracker, UriKind.Absolute, out var uri)
-            ? uri.Host
-            : "no tracker reported";
-
-    private static bool IsActiveForScan(
-        TorrentRecord torrent)
-    {
-        var state =
-            torrent.State.ToLowerInvariant();
-
-        return !ExcludedScanStateSubstrings.Any(state.Contains);
-    }
-
-    private async Task ScanAllAsync()
-    {
-        if (_isScanning)
-        {
-            return;
-        }
-
-        _isScanning = true;
-        _scanStatusMessage = null;
-        _scanResults = [];
-        _scanSelection.Clear();
-        _scanMatchCount = 0;
-        _scanTorrentsProcessed = 0;
-        _commitStatusMessage = null;
-
-        _scanCts = new CancellationTokenSource();
-        var token = _scanCts.Token;
-
-        try
-        {
-            var allTorrents =
-                await QbittorrentScanner.GetTorrentsAsync();
-
-            var activeTorrents =
-                allTorrents
-                    .Where(torrent =>
-                        File.Exists(torrent.ContentPath) ||
-                        Directory.Exists(torrent.ContentPath))
-                    .Where(IsActiveForScan)
-                    .ToList();
-
-            _scanTorrentsTotal = activeTorrents.Count;
-
-            var queryGroups =
-                activeTorrents
-                    .Select(torrent => (Torrent: torrent, Parsed: ReleaseParser.Parse(torrent.Name)))
-                    .GroupBy(
-                        entry => entry.Parsed.NormalizedTitle,
-                        StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-
-            var catalogAssets =
-                MediaCatalogService.GetAssets();
-
-            // The info-hash of EVERY torrent in qBittorrent, whatever its
-            // state - a candidate sharing one of these is a torrent you
-            // already have (including one you just cross-seeded that is
-            // still checking / stopped / errored), not a new cross-seed
-            // opportunity.
-            var knownInfoHashes =
-                new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var torrent in allTorrents)
-            {
-                foreach (var hash in new[] { torrent.TorrentHash, torrent.InfoHashV1, torrent.InfoHashV2 })
-                {
-                    if (!string.IsNullOrWhiteSpace(hash))
-                    {
-                        knownInfoHashes.Add(hash);
-                    }
-                }
-            }
-
-            _scanAlreadySeedingSkipped = 0;
-            _scanAlreadySeedingTitles = [];
-
-            foreach (var group in queryGroups)
-            {
-                if (token.IsCancellationRequested)
-                {
-                    break;
-                }
-
-                _scanStatusMessage = $"Searching Prowlarr for \"{group.Key}\"...";
-                await InvokeAsync(StateHasChanged);
-
-                List<ProwlarrSearchResult> prowlarrResults;
-
-                try
-                {
-                    prowlarrResults = await ProwlarrClient.SearchAsync(group.Key);
-                }
-                catch
-                {
-                    prowlarrResults = [];
-                }
-
-                // Combine every torrent in this group's own on-disk files
-                // into one pool - they're all "the same show", so any of
-                // their own active files are legitimate primary sources for
-                // any candidate under this title, not just the one torrent
-                // whose search happened to surface a given candidate.
-                var combinedPrimaryFiles = new List<string>();
-
-                // Union of each torrent's own top-20-by-size-proximity
-                // candidates, deduped by download URL - evaluating each
-                // unique candidate once per GROUP (not once per torrent)
-                // avoids both redundant verification work and the same
-                // discovery showing up as multiple near-identical rows.
-                var candidatesToTry = new Dictionary<string, ProwlarrSearchResult>();
-
-                foreach (var entry in group)
-                {
-                    if (token.IsCancellationRequested)
-                    {
-                        break;
-                    }
-
-                    var torrent = entry.Torrent;
-
-                    _currentlyScanningTorrentName = torrent.Name;
-                    _scanTorrentsProcessed++;
-                    await InvokeAsync(StateHasChanged);
-
-                    try
-                    {
-                        combinedPrimaryFiles.AddRange(
-                            (await FileScannerService.ScanAsync(torrent.ContentPath))
-                                .Select(file => file.FullPath));
-                    }
-                    catch
-                    {
-                        // No files from this torrent's directory - fine,
-                        // the catalog fallback and other group members'
-                        // files may still satisfy candidates.
-                    }
-
-                    // Only releases whose total size is exact / within 1% of
-                    // this torrent can be the same files - everything else
-                    // is a different release and isn't worth downloading.
-                    var ranked =
-                        ProwlarrCandidateRanker.FilterSameContentCandidates(prowlarrResults, torrent.SizeBytes);
-
-                    foreach (var candidate in ranked.Take(20))
-                    {
-                        candidatesToTry[candidate.DownloadUrl] = candidate;
-                    }
-                }
-
-                foreach (var candidate in candidatesToTry.Values)
-                {
-                    if (token.IsCancellationRequested)
-                    {
-                        break;
-                    }
-
-                    byte[]? candidateBytes;
-
-                    try
-                    {
-                        candidateBytes = await ProwlarrClient.DownloadTorrentAsync(candidate.DownloadUrl);
-                    }
-                    catch
-                    {
-                        candidateBytes = null;
-                    }
-
-                    if (candidateBytes is null)
-                    {
-                        continue;
-                    }
-
-                    var candidateMetadata =
-                        BencodeTorrentReader.TryParse(candidateBytes);
-
-                    if (candidateMetadata is null)
-                    {
-                        continue;
-                    }
-
-                    if (candidateMetadata.InfoHashHex is not null &&
-                        knownInfoHashes.Contains(candidateMetadata.InfoHashHex))
-                    {
-                        // Same info-hash - this is a torrent you already
-                        // have, not a new cross-seed candidate.
-                        _scanAlreadySeedingSkipped++;
-                        _scanAlreadySeedingTitles.Add(
-                            $"{candidate.Title} ({candidate.Indexer})");
-                        continue;
-                    }
-
-                    var match =
-                        await WholeTorrentCandidateService.EvaluateAsync(
-                            candidateMetadata,
-                            combinedPrimaryFiles,
-                            catalogAssets);
-
-                    if (match.IsFullMatch)
-                    {
-                        var seedingTorrents =
-                            FindSeedingTorrents(match, allTorrents);
-
-                        var candidateDomains =
-                            candidateMetadata.TrackerUrls
-                                .Select(TrackerDomain)
-                                .Where(domain => domain is not null)
-                                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-                        _scanResults.Add(new CrossSeedScanResult
-                        {
-                            SourceQueryTitle = group.Key,
-                            CandidateResult = candidate,
-                            CandidateMetadata = candidateMetadata,
-                            CandidateTorrentBytes = candidateBytes,
-                            Match = match,
-                            SeedingTorrents = seedingTorrents,
-                            SameTrackerTorrents =
-                                seedingTorrents
-                                    .Where(seeding =>
-                                        TrackerDomain(seeding.Tracker) is { } domain &&
-                                        candidateDomains.Contains(domain))
-                                    .ToList()
-                        });
-
-                        _scanMatchCount++;
-                        await InvokeAsync(StateHasChanged);
-                    }
-                }
-            }
-
-            _scanStatusMessage =
-                token.IsCancellationRequested
-                    ? $"Cancelled. Found {_scanMatchCount} match(es) before stopping ({_scanTorrentsProcessed}/{_scanTorrentsTotal} torrents checked)."
-                    : $"Scan complete. Found {_scanMatchCount} match(es) across {_scanTorrentsTotal} active torrent(s).";
-
-            if (_scanAlreadySeedingSkipped > 0)
-            {
-                _scanStatusMessage +=
-                    $" Skipped {_scanAlreadySeedingSkipped} result(s) that are torrents already in your qBittorrent (same info-hash).";
-            }
-        }
-        catch (Exception ex)
-        {
-            _scanStatusMessage = $"Scan failed: {ex.Message}";
-        }
-        finally
-        {
-            _isScanning = false;
-            _currentlyScanningTorrentName = null;
-            _scanCts?.Dispose();
-            _scanCts = null;
-            await InvokeAsync(StateHasChanged);
-        }
-    }
-
-    private void CancelScan()
-    {
-        _scanCts?.Cancel();
-    }
-
-    private void RequestAddSelectedConfirmation()
-    {
-        if (_isCommittingScanResults || _scanSelection.Count == 0)
-        {
-            return;
-        }
-
-        _isConfirmingAddSelected = true;
-    }
-
-    private void CancelAddSelectedConfirmation()
-    {
-        _isConfirmingAddSelected = false;
-    }
-
-    private async Task AddSelectedAsync()
-    {
-        if (_isCommittingScanResults || _scanSelection.Count == 0)
-        {
-            return;
-        }
-
-        var selectedKeys =
-            _scanSelection.SelectedKeys.ToList();
-
-        var itemsToCommit =
-            _scanResults
-                .Where(result => selectedKeys.Contains(result.CandidateResult.DownloadUrl))
-                .ToList();
-
-        await CommitScanResultsAsync(itemsToCommit);
-
-        _isConfirmingAddSelected = false;
-    }
-
-    private void RequestAddAllConfirmation()
-    {
-        if (_isCommittingScanResults || _scanResults.Count == 0)
-        {
-            return;
-        }
-
-        _isConfirmingAddAll = true;
-    }
-
-    private void CancelAddAllConfirmation()
-    {
-        _isConfirmingAddAll = false;
-    }
-
-    private async Task AddAllAsync()
-    {
-        if (_isCommittingScanResults)
-        {
-            return;
-        }
-
-        await CommitScanResultsAsync(AddableScanResults.ToList());
-
-        _isConfirmingAddAll = false;
-    }
-
-    private async Task CommitScanResultsAsync(
-        List<CrossSeedScanResult> items)
-    {
-        _isCommittingScanResults = true;
-        await InvokeAsync(StateHasChanged);
-
-        var committed = 0;
-        var failed = 0;
-        var addedToQbittorrent = 0;
-        var failedToAddToQbittorrent = 0;
-
-        try
-        {
-            var settings =
-                await SettingsService.GetSettingsAsync();
-
-            foreach (var item in items)
-            {
-                _commitStatusMessage = $"Committing {item.CandidateResult.Title}...";
-                await InvokeAsync(StateHasChanged);
-
-                var result =
-                    await WholeTorrentCandidateService.CommitAsync(
-                        item.CandidateMetadata,
-                        item.Match,
-                        item.CandidateTorrentBytes,
-                        settings.CrossSeedTorrentStoragePath);
-
-                if (!result.Success)
-                {
-                    failed++;
-                    continue;
-                }
-
-                committed++;
-                _scanResults.Remove(item);
-                _scanSelection.Remove(item);
-
-                _commitStatusMessage = $"Adding {item.CandidateResult.Title} to qBittorrent (stopped)...";
-                await InvokeAsync(StateHasChanged);
-
-                var addResult =
-                    await QbittorrentScanner.AddTorrentAsync(
-                        item.CandidateTorrentBytes,
-                        result.OutputRoot ?? settings.CrossSeedTorrentStoragePath);
-
-                if (addResult.Success)
-                {
-                    addedToQbittorrent++;
-                }
-                else
-                {
-                    failedToAddToQbittorrent++;
-                }
-            }
-
-            _commitStatusMessage =
-                $"Committed {committed} torrent(s) to storage" +
-                (failed > 0 ? $" ({failed} failed)" : "") +
-                $". Added {addedToQbittorrent} to qBittorrent (stopped)" +
-                (failedToAddToQbittorrent > 0 ? $" ({failedToAddToQbittorrent} failed - check your qBittorrent connection in Settings)" : "") +
-                ".";
-        }
-        finally
-        {
-            _isCommittingScanResults = false;
-            await InvokeAsync(StateHasChanged);
-        }
-    }
-
-    // "Get a torrent" - source-specific state.
-    private List<TorrentRecord> _torrents = [];
-    private string _selectedHash = string.Empty;
-    private bool _isAnalyzing;
-    private string? _analyzeError;
-
-    private TorrentRecord? _selectedTorrent =>
-        _torrents.FirstOrDefault(torrent =>
-            string.Equals(torrent.TorrentHash, _selectedHash, StringComparison.OrdinalIgnoreCase));
-
-    private bool _isLoadingFromPath;
-    private string? _loadFromPathError;
-
-    private string _prowlarrQuery = string.Empty;
-    private bool _isSearchingProwlarr;
-    private bool _isLoadingFromProwlarr;
-    private string? _prowlarrSearchError;
-    private List<ProwlarrSearchResult> _prowlarrCandidates = [];
-
-    // Total size of the loaded torrent when the search ran - what a result
-    // must match to possibly be the same files. Null when searching freely.
-    private long? _prowlarrTargetSize;
-    private bool _showAllProwlarrResults;
-
-    private List<ProwlarrSearchResult> VisibleProwlarrCandidates() =>
-        _prowlarrTargetSize is long target && !_showAllProwlarrResults
-            ? _prowlarrCandidates
-                .Where(result =>
-                    ProwlarrCandidateRanker.ClassifySize(result.SizeBytes, target) !=
-                    ProwlarrCandidateRanker.SizeMatch.Different)
-                .ToList()
-            : _prowlarrCandidates;
-
-    // Shared state, regardless of source.
-    private TorrentMetadata? _metadata;
-    private byte[]? _torrentBytes;
-    private string? _sourceLabel;
-
-    // Only set when the loaded torrent came from qBittorrent - the only
-    // source with "its own current file" to sanity-check against.
-    private TorrentRecord? _activeSourceTorrent;
-
-    // Multi-file torrents let you tick several files and run them all at
-    // once; the single-file Verify/Simulate proofs below still operate on
-    // exactly one entry, so they only apply when exactly one is ticked.
-    private readonly HashSet<TorrentFileEntry> _selectedFileEntries = [];
-
-    private TorrentFileEntry? _selectedFileEntry =>
-        _selectedFileEntries.Count == 1
-            ? _selectedFileEntries.First()
-            : null;
-
-    private bool _isReconstructingSelected;
-    private string? _selectedProgress;
-    private List<SelectedReconstructRow> _selectedResults = [];
-
-    private sealed record SelectedReconstructRow(
-        TorrentFileEntry Entry,
-        TorrentReconstructionResult Result);
-
-    private bool _isVerifying;
-    private string? _verifyError;
-    private PieceVerificationResult? _verifyResult;
-
-    private bool _isReconstructing;
-    private string? _reconstructError;
-    private TorrentReconstructionResult? _reconstructResult;
-    private string? _testRootDir;
-    private string? _originalFilePath;
-    private string? _scratchRenamedPath;
-    private int? _originalLinkCount;
-    private int? _scratchLinkCount;
-    private int? _reconstructedLinkCount;
-
-    private List<MediaAsset> _catalogCandidates = [];
-    private bool _isReconstructingFromCatalog;
-    private string? _catalogReconstructError;
-    private TorrentReconstructionResult? _catalogReconstructResult;
 
     protected override async Task OnInitializedAsync()
     {
-        var allTorrents =
-            await QbittorrentScanner.GetTorrentsAsync();
+        _wasScanning = Scanner.IsScanning;
 
-        _torrents =
-            allTorrents
-                .Where(torrent =>
-                    File.Exists(torrent.ContentPath) ||
-                    Directory.Exists(torrent.ContentPath))
-                .OrderBy(torrent => torrent.Name)
-                .ToList();
+        Scanner.Changed += OnChanged;
+
+        var settings =
+            await SettingsService.GetSettingsAsync();
+
+        _storagePath = settings.CrossSeedTorrentStoragePath;
+
+        _isSetUp =
+            !string.IsNullOrWhiteSpace(settings.QbittorrentUrl) &&
+            !string.IsNullOrWhiteSpace(settings.ProwlarrUrl) &&
+            !string.IsNullOrWhiteSpace(settings.ProwlarrApiKey);
+
+        Load();
     }
 
-    private void SetLoadedTorrent(
-        TorrentMetadata metadata,
-        byte[] torrentBytes,
-        string sourceLabel,
-        TorrentRecord? activeSourceTorrent)
+    private void Start()
     {
-        _metadata = metadata;
-        _torrentBytes = torrentBytes;
-        _sourceLabel = sourceLabel;
-        _activeSourceTorrent = activeSourceTorrent;
-
-        _selectedFileEntries.Clear();
-        _selectedResults = [];
-        _selectedProgress = null;
-        _verifyResult = null;
-        _verifyError = null;
-        _reconstructResult = null;
-        _reconstructError = null;
-        _catalogReconstructResult = null;
-        _catalogReconstructError = null;
-
-        _prowlarrCandidates = [];
-        _prowlarrTargetSize = null;
-        _showAllProwlarrResults = false;
-        _prowlarrQuery = ReleaseParser.Parse(metadata.Name).NormalizedTitle;
-
-        SearchCatalogCandidates();
-    }
-
-    private void SearchCatalogCandidates()
-    {
-        if (_metadata is null)
-        {
-            _catalogCandidates = [];
-            return;
-        }
-
-        _catalogCandidates =
-            _metadata.IsSingleFile
-                ? CrossSeedCandidateFilter.SameSizeCandidates(
-                    MediaCatalogService.GetAssets(),
-                    _metadata.TotalLengthBytes,
-                    _metadata.Name)
-                : _selectedFileEntry is { } entry
-                    ? CrossSeedCandidateFilter.SameSizeCandidates(
-                        MediaCatalogService.GetAssets(),
-                        entry.LengthBytes,
-                        entry.PathSegments.LastOrDefault() ?? string.Empty,
-                        _metadata.Name)
-                    : [];
-
-        _catalogReconstructResult = null;
-    }
-
-    private void ToggleFileEntry(
-        TorrentFileEntry entry)
-    {
-        if (!_selectedFileEntries.Remove(entry))
-        {
-            _selectedFileEntries.Add(entry);
-        }
-
-        OnFileSelectionChanged();
-    }
-
-    private void ToggleAllFileEntries()
-    {
-        if (_metadata is null)
+        if (IsBusy)
         {
             return;
         }
 
-        var selectable =
-            _metadata.Files
-                .Where(entry => entry.LengthBytes > 0)
+        _addMessage = null;
+        _pending = [];
+        _selection.Clear();
+
+        // Runs on its own, so it carries on if this page is closed.
+        _ = Task.Run(Scanner.ScanAsync);
+    }
+
+    // Raised from the scan's own thread - hop back onto this page's.
+    private void OnChanged()
+    {
+        _ = InvokeAsync(() =>
+        {
+            if (_wasScanning && !Scanner.IsScanning)
+            {
+                // The list was rebuilt; old ticks may point at nothing.
+                _selection.Clear();
+                _pending = [];
+            }
+
+            _wasScanning = Scanner.IsScanning;
+
+            Load();
+
+            StateHasChanged();
+        });
+    }
+
+    private void Load()
+    {
+        _matches =
+            Scanner.Matches
+                .OrderBy(match => match.IsAlreadySeededOnSameTracker)
+                .ThenBy(match => match.CandidateResult.Title, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-        if (selectable.All(_selectedFileEntries.Contains))
-        {
-            _selectedFileEntries.Clear();
-        }
-        else
-        {
-            foreach (var entry in selectable)
-            {
-                _selectedFileEntries.Add(entry);
-            }
-        }
-
-        OnFileSelectionChanged();
+        _alreadyHave = Scanner.AlreadyInQbittorrent.ToList();
     }
 
-    private void OnFileSelectionChanged()
+    private async Task AddPendingAsync()
     {
-        _verifyResult = null;
-        _reconstructResult = null;
-        _selectedResults = [];
-        _selectedProgress = null;
-
-        SearchCatalogCandidates();
-    }
-
-    private static async Task PersistTorrentBytesAsync(
-        string outputRoot,
-        string torrentName,
-        byte[] torrentBytes,
-        bool isSingleFile)
-    {
-        try
-        {
-            // A single-file torrent's data file *is* outputRoot\<name>, so
-            // its .torrent can't also live in a folder of that name.
-            var torrentDir =
-                isSingleFile
-                    ? outputRoot
-                    : Path.Combine(outputRoot, torrentName);
-
-            Directory.CreateDirectory(torrentDir);
-
-            var torrentFilePath =
-                Path.Combine(torrentDir, $"{torrentName}.torrent");
-
-            await File.WriteAllBytesAsync(torrentFilePath, torrentBytes);
-        }
-        catch
-        {
-            // Best-effort - the hardlink reconstruction already succeeded,
-            // and this is just a convenience copy for a watch-folder.
-        }
-    }
-
-    private async Task OpenTorrentStorageFolder()
-    {
-        try
-        {
-            var settings =
-                await SettingsService.GetSettingsAsync();
-
-            Directory.CreateDirectory(settings.CrossSeedTorrentStoragePath);
-
-            Process.Start("explorer.exe", settings.CrossSeedTorrentStoragePath);
-        }
-        catch
-        {
-            // Best-effort convenience action - nothing to surface to the user.
-        }
-    }
-
-    private async Task AnalyzeAsync()
-    {
-        if (_isAnalyzing || _selectedTorrent is null)
+        if (IsBusy || _pending.Count == 0)
         {
             return;
         }
 
-        _isAnalyzing = true;
-        _analyzeError = null;
+        var batch = _pending.ToList();
+
+        _isAdding = true;
 
         try
         {
-            var bytes =
-                await QbittorrentScanner.GetTorrentExportBytesAsync(
-                    _selectedTorrent.TorrentHash);
-
-            if (bytes is null)
-            {
-                _analyzeError = "Could not export the .torrent file from qBittorrent.";
-                return;
-            }
-
-            var metadata =
-                BencodeTorrentReader.TryParse(bytes);
-
-            if (metadata is null)
-            {
-                _analyzeError = "Could not parse the .torrent file.";
-                return;
-            }
-
-            SetLoadedTorrent(
-                metadata,
-                bytes,
-                $"qBittorrent - {_selectedTorrent.Name}",
-                _selectedTorrent);
-        }
-        catch (Exception ex)
-        {
-            _analyzeError = $"Analyze failed: {ex.Message}";
-        }
-        finally
-        {
-            _isAnalyzing = false;
-        }
-    }
-
-    private async Task LoadFromBrowserFileAsync(
-        InputFileChangeEventArgs args)
-    {
-        if (_isLoadingFromPath)
-        {
-            return;
-        }
-
-        _isLoadingFromPath = true;
-        _loadFromPathError = null;
-
-        try
-        {
-            var file = args.File;
-
-            // .torrent files are small (typically well under 1 MB).
-            using var stream =
-                file.OpenReadStream(maxAllowedSize: 20L * 1024 * 1024);
-
-            using var buffer =
-                new MemoryStream();
-
-            await stream.CopyToAsync(buffer);
-
-            var bytes =
-                buffer.ToArray();
-
-            var metadata =
-                BencodeTorrentReader.TryParse(bytes);
-
-            if (metadata is null)
-            {
-                _loadFromPathError = "Could not parse that as a .torrent file.";
-                return;
-            }
-
-            SetLoadedTorrent(metadata, bytes, $".torrent file ({file.Name})", null);
-        }
-        catch (Exception ex)
-        {
-            _loadFromPathError = $"Load failed: {ex.Message}";
-        }
-        finally
-        {
-            _isLoadingFromPath = false;
-        }
-    }
-
-    private async Task SearchProwlarrAsync()
-    {
-        if (_isSearchingProwlarr || string.IsNullOrWhiteSpace(_prowlarrQuery))
-        {
-            return;
-        }
-
-        _isSearchingProwlarr = true;
-        _prowlarrSearchError = null;
-        _prowlarrCandidates = [];
-
-        try
-        {
-            var results =
-                await ProwlarrClient.SearchAsync(_prowlarrQuery);
-
-            if (results.Count == 0)
-            {
-                _prowlarrSearchError =
-                    "No torrent results found - or Prowlarr isn't configured yet (check Settings).";
-                return;
-            }
-
-            // An indexer's size is the whole torrent's, so compare against
-            // the loaded torrent's total size, not one file's.
-            _prowlarrTargetSize = _metadata?.TotalLengthBytes;
-            _showAllProwlarrResults = false;
-
-            _prowlarrCandidates =
-                _prowlarrTargetSize is long size
-                    ? ProwlarrCandidateRanker.RankBySizeProximity(results, size)
-                    : results.OrderByDescending(result => result.Seeders).ToList();
-        }
-        catch (Exception ex)
-        {
-            _prowlarrSearchError = $"Search failed: {ex.Message}";
-        }
-        finally
-        {
-            _isSearchingProwlarr = false;
-        }
-    }
-
-    private async Task LoadFromProwlarrResultAsync(
-        ProwlarrSearchResult result)
-    {
-        if (_isLoadingFromProwlarr)
-        {
-            return;
-        }
-
-        _isLoadingFromProwlarr = true;
-        _prowlarrSearchError = null;
-
-        try
-        {
-            var bytes =
-                await ProwlarrClient.DownloadTorrentAsync(result.DownloadUrl);
-
-            if (bytes is null)
-            {
-                _prowlarrSearchError = "Could not download the .torrent file from Prowlarr.";
-                return;
-            }
-
-            var metadata =
-                BencodeTorrentReader.TryParse(bytes);
-
-            if (metadata is null)
-            {
-                _prowlarrSearchError = "Could not parse the .torrent file.";
-                return;
-            }
-
-            SetLoadedTorrent(
-                metadata,
-                bytes,
-                $"Prowlarr ({result.Indexer}) - {result.Title}",
-                null);
-        }
-        catch (Exception ex)
-        {
-            _prowlarrSearchError = $"Load failed: {ex.Message}";
-        }
-        finally
-        {
-            _isLoadingFromProwlarr = false;
-        }
-    }
-
-    private async Task VerifyAsync()
-    {
-        if (_isVerifying || _metadata is null || _activeSourceTorrent is null)
-        {
-            return;
-        }
-
-        if (!_metadata.IsSingleFile && _selectedFileEntry is null)
-        {
-            return;
-        }
-
-        _isVerifying = true;
-        _verifyError = null;
-
-        try
-        {
-            _verifyResult =
-                _metadata.IsSingleFile
-                    ? await PieceVerificationService.VerifyAsync(
-                        _metadata,
-                        _activeSourceTorrent.ContentPath)
-                    : await PieceVerificationService.VerifyFileEntryAsync(
-                        _metadata,
-                        _selectedFileEntry!,
-                        Path.Combine(
-                            _activeSourceTorrent.ContentPath,
-                            Path.Combine(_selectedFileEntry!.PathSegments.ToArray())));
-        }
-        catch (Exception ex)
-        {
-            _verifyError = $"Verification failed: {ex.Message}";
-        }
-        finally
-        {
-            _isVerifying = false;
-        }
-    }
-
-    private async Task SimulateRenameAndReconstructAsync()
-    {
-        if (_isReconstructing || _metadata is null || _activeSourceTorrent is null)
-        {
-            return;
-        }
-
-        if (!_metadata.IsSingleFile && _selectedFileEntry is null)
-        {
-            return;
-        }
-
-        _isReconstructing = true;
-        _reconstructError = null;
-        _reconstructResult = null;
-
-        try
-        {
-            var originalPath =
-                _metadata.IsSingleFile
-                    ? _activeSourceTorrent.ContentPath
-                    : Path.Combine(
-                        _activeSourceTorrent.ContentPath,
-                        Path.Combine(_selectedFileEntry!.PathSegments.ToArray()));
-
-            _originalFilePath = originalPath;
-
-            var driveRoot =
-                Path.GetPathRoot(originalPath);
-
-            if (string.IsNullOrWhiteSpace(driveRoot))
-            {
-                _reconstructError = "Could not determine the torrent's drive.";
-                return;
-            }
-
-            _testRootDir =
-                Path.Combine(driveRoot, "SimplifiarrCrossSeedTest");
-
-            var scratchDir =
-                Path.Combine(_testRootDir, "Scratch");
-
-            var outputDir =
-                Path.Combine(_testRootDir, "Reconstructed");
-
-            _scratchRenamedPath =
-                Path.Combine(
-                    scratchDir,
-                    $"renamed_test_copy{Path.GetExtension(originalPath)}");
-
-            if (!File.Exists(_scratchRenamedPath))
-            {
-                var scratchLinkResult =
-                    await HardlinkService.CreateHardlinkAsync(
-                        originalPath,
-                        _scratchRenamedPath);
-
-                if (!scratchLinkResult.Success)
-                {
-                    _reconstructError =
-                        $"Could not create the scratch renamed copy: {scratchLinkResult.ErrorMessage}";
-
-                    return;
-                }
-            }
-
-            _reconstructResult =
-                _metadata.IsSingleFile
-                    ? await ReconstructionService.ReconstructAsync(
-                        _metadata,
-                        _scratchRenamedPath,
-                        outputDir)
-                    : await ReconstructionService.ReconstructFileEntryAsync(
-                        _metadata,
-                        _selectedFileEntry!,
-                        _scratchRenamedPath,
-                        outputDir);
-
-            if (_reconstructResult.Success)
-            {
-                _originalLinkCount =
-                    await HardlinkService.GetHardlinkCountAsync(
-                        originalPath);
-
-                _scratchLinkCount =
-                    await HardlinkService.GetHardlinkCountAsync(
-                        _scratchRenamedPath);
-
-                _reconstructedLinkCount =
-                    await HardlinkService.GetHardlinkCountAsync(
-                        _reconstructResult.TargetPath!);
-            }
-        }
-        catch (Exception ex)
-        {
-            _reconstructError = $"Reconstruction failed: {ex.Message}";
-        }
-        finally
-        {
-            _isReconstructing = false;
-        }
-    }
-
-    private async Task ReconstructFromCatalogAsync()
-    {
-        if (_isReconstructingFromCatalog || _metadata is null || _catalogCandidates.Count == 0)
-        {
-            return;
-        }
-
-        if (!_metadata.IsSingleFile && _selectedFileEntry is null)
-        {
-            return;
-        }
-
-        _isReconstructingFromCatalog = true;
-        _catalogReconstructError = null;
-        _catalogReconstructResult = null;
-
-        try
-        {
-            var settings =
-                await SettingsService.GetSettingsAsync();
-
-            var outputRoot =
-                settings.CrossSeedTorrentStoragePath;
-
-            _catalogReconstructResult =
-                _metadata.IsSingleFile
-                    ? await ReconstructionService.ReconstructFromCatalogAsync(
-                        _metadata,
-                        _catalogCandidates,
-                        outputRoot)
-                    : await ReconstructionService.ReconstructFileEntryFromCatalogAsync(
-                        _metadata,
-                        _selectedFileEntry!,
-                        _catalogCandidates,
-                        outputRoot);
-
-            if (_catalogReconstructResult.Success && _torrentBytes is not null)
-            {
-                await PersistTorrentBytesAsync(
-                    _catalogReconstructResult.OutputRoot ?? outputRoot,
-                    _metadata.Name,
-                    _torrentBytes,
-                    _metadata.IsSingleFile);
-            }
-        }
-        catch (Exception ex)
-        {
-            _catalogReconstructError = $"Reconstruction failed: {ex.Message}";
-        }
-        finally
-        {
-            _isReconstructingFromCatalog = false;
-        }
-    }
-
-    private int SelectedWithCandidatesCount()
-    {
-        if (_selectedFileEntries.Count == 0)
-        {
-            return 0;
-        }
-
-        var assets =
-            MediaCatalogService.GetAssets();
-
-        return _selectedFileEntries.Count(entry =>
-            CrossSeedCandidateFilter.SameSizeCandidates(
-                assets,
-                entry.LengthBytes,
-                entry.PathSegments.LastOrDefault() ?? string.Empty).Count > 0);
-    }
-
-    private async Task ReconstructSelectedFromCatalogAsync()
-    {
-        if (_isReconstructingSelected ||
-            _metadata is null ||
-            _metadata.IsSingleFile ||
-            _selectedFileEntries.Count == 0)
-        {
-            return;
-        }
-
-        _isReconstructingSelected = true;
-        _selectedResults = [];
-        _selectedProgress = null;
-
-        try
-        {
-            var settings =
-                await SettingsService.GetSettingsAsync();
-
-            var configuredRoot =
-                settings.CrossSeedTorrentStoragePath;
-
-            var assets =
-                MediaCatalogService.GetAssets();
-
-            // Keep the torrent's own file order, not click order.
-            var entries =
-                _metadata.Files
-                    .Where(_selectedFileEntries.Contains)
-                    .ToList();
-
-            var results =
-                new List<SelectedReconstructRow>();
-
-            for (var i = 0; i < entries.Count; i++)
-            {
-                var entry = entries[i];
-
-                _selectedProgress =
-                    $"Working on {entry.RelativePath} ({i + 1} of {entries.Count})...";
-
-                await InvokeAsync(StateHasChanged);
-
-                TorrentReconstructionResult result;
-
-                try
-                {
-                    result =
-                        await ReconstructionService.ReconstructFileEntryFromCatalogAsync(
-                            _metadata,
-                            entry,
-                            assets,
-                            configuredRoot);
-                }
-                catch (Exception ex)
-                {
-                    result = new TorrentReconstructionResult
+            var summary =
+                await Scanner.AddAsync(
+                    batch,
+                    message =>
                     {
-                        Success = false,
-                        FailureReason = $"Reconstruction failed: {ex.Message}"
-                    };
-                }
+                        _addMessage = message;
 
-                results.Add(new SelectedReconstructRow(entry, result));
-                _selectedResults = [.. results];
-            }
+                        _ = InvokeAsync(StateHasChanged);
+                    });
 
-            if (_torrentBytes is not null)
+            _addMessage =
+                $"Added {summary.AddedToQbittorrent} torrent(s) to qBittorrent, stopped. Start them there once they have checked.";
+
+            if (summary.FailedToLink > 0)
             {
-                foreach (var root in results
-                             .Where(row => row.Result.Success && row.Result.OutputRoot is not null)
-                             .Select(row => row.Result.OutputRoot!)
-                             .Distinct(StringComparer.OrdinalIgnoreCase))
-                {
-                    await PersistTorrentBytesAsync(
-                        root,
-                        _metadata.Name,
-                        _torrentBytes,
-                        isSingleFile: false);
-                }
+                _addMessage +=
+                    $" {summary.FailedToLink} couldn't be linked and were left in the list.";
             }
 
-            _selectedProgress = null;
+            if (summary.FailedToAddToQbittorrent > 0)
+            {
+                _addMessage +=
+                    $" {summary.FailedToAddToQbittorrent} were linked into {_storagePath} but qBittorrent didn't take them - add their .torrent files from that folder by hand.";
+            }
+        }
+        catch (Exception exception)
+        {
+            _addMessage = $"Adding stopped: {exception.Message}";
         }
         finally
         {
-            _isReconstructingSelected = false;
+            _isAdding = false;
+            _pending = [];
+
+            foreach (var match in batch)
+            {
+                _selection.Remove(match);
+            }
+
+            Load();
         }
     }
 
-    private Task CleanUpTestArtifactsAsync()
-    {
-        if (string.IsNullOrWhiteSpace(_testRootDir) ||
-            !Directory.Exists(_testRootDir))
-        {
-            return Task.CompletedTask;
-        }
+    private static string Trackers(CrossSeedScanResult match) =>
+        string.Join(
+            ", ",
+            match.CandidateMetadata.TrackerUrls
+                .Select(CrossSeedScanService.TrackerDomain)
+                .OfType<string>()
+                .Distinct(StringComparer.OrdinalIgnoreCase));
 
-        Directory.Delete(_testRootDir, recursive: true);
-
-        _testRootDir = null;
-        _originalFilePath = null;
-        _scratchRenamedPath = null;
-        _reconstructResult = null;
-        _originalLinkCount = null;
-        _scratchLinkCount = null;
-        _reconstructedLinkCount = null;
-        _catalogReconstructResult = null;
-
-        return Task.CompletedTask;
-    }
+    public void Dispose() =>
+        Scanner.Changed -= OnChanged;
 }
