@@ -1,0 +1,44 @@
+@* One headline number. Give it an Href and the whole card is a link. *@
+
+@if (string.IsNullOrWhiteSpace(Href))
+{
+    <div class="stat-card">
+        @Body
+    </div>
+}
+else
+{
+    <a class="stat-card" href="@Href">
+        @Body
+    </a>
+}
+
+@code
+{
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired]
+    public string Value { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? Note { get; set; }
+
+    [Parameter]
+    public string? Href { get; set; }
+
+    /// <summary>Show the number in the accent colour - use for at most one card.</summary>
+    [Parameter]
+    public bool Accent { get; set; }
+
+    private RenderFragment Body => __builder =>
+    {
+        <div class="stat-label">@Label</div>
+        <div class="stat-value @(Accent ? "stat-value-accent" : null)">@Value</div>
+
+        @if (!string.IsNullOrWhiteSpace(Note))
+        {
+            <div class="stat-note">@Note</div>
+        }
+    };
+}

@@ -41,6 +41,26 @@ public class HardlinkRemediationService : IHardlinkRemediationService
             return false;
         }
 
+        // Last line of defence, whatever the plan says: never quarantine a
+        // file in order to link it to itself.
+        if (string.Equals(
+                Path.GetFullPath(plan.LibraryPath),
+                Path.GetFullPath(plan.DownloadPath),
+                StringComparison.OrdinalIgnoreCase) ||
+            await _hardlinkService.AreHardlinkedAsync(
+                plan.LibraryPath,
+                plan.DownloadPath))
+        {
+            await AddConversionHistoryAsync(
+                plan,
+                string.Empty,
+                sizeBytes,
+                false,
+                "Nothing to convert: the library file and the download are already the same file.");
+
+            return false;
+        }
+
         if (!File.Exists(plan.LibraryPath))
         {
             await AddConversionHistoryAsync(

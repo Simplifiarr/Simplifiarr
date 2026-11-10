@@ -150,6 +150,13 @@ public class ScanCoordinator
             {
                 token.ThrowIfCancellationRequested();
 
+                // A drive whose folders overlap still gets scanned, but its
+                // results can't be trusted - say so where the user will see it.
+                foreach (var problem in DriveProfileValidator.GetProblems(profiles[index]))
+                {
+                    summary.Problems.Add($"{profiles[index].Name} setup: {problem}");
+                }
+
                 var filesBefore = summary.FilesRead;
 
                 summary.FilesRead +=

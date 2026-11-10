@@ -30,6 +30,16 @@ public class DuplicateAssetAnalysisService
                         MediaType.Comic)
                 .Where(asset =>
                     !string.IsNullOrWhiteSpace(asset.CanonicalPath))
+                // This page is about the same title twice in your
+                // libraries. A file sitting in a downloads folder is not a
+                // library copy (a download that duplicates a library file
+                // is Potential Waste's job), even if a mis-set library
+                // folder caused it to be catalogued.
+                .Where(asset =>
+                    !profiles.Any(profile =>
+                        PathContainment.IsPathUnderRoot(
+                            asset.CanonicalPath,
+                            profile.DownloadPath)))
                 .ToList();
 
         var candidateGroups =
@@ -52,8 +62,21 @@ public class DuplicateAssetAnalysisService
 
         foreach (var candidateAssets in candidateGroups)
         {
+            // The catalog is only as fresh as the last scan. A copy that
+            // has since been removed (for example from this very page)
+            // must not keep its title on the list until the next scan.
+            var stillThere =
+                candidateAssets
+                    .Where(asset => File.Exists(asset.CanonicalPath))
+                    .ToList();
+
+            if (stillThere.Count <= 1)
+            {
+                continue;
+            }
+
             var distinctAssets =
-                await CollapseHardlinkedAsync(candidateAssets);
+                await CollapseHardlinkedAsync(stillThere);
 
             if (distinctAssets.Count > 1)
             {

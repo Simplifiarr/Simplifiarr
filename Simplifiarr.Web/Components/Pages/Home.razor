@@ -4,69 +4,266 @@
 
 @using Simplifiarr.Core.Models
 @using Simplifiarr.Core.Services
+@using Simplifiarr.Core.Utilities
 
 @inject IDashboardSummaryService DashboardSummaryService
 @inject IScanCoordinator Scans
-@inject NavigationManager Navigation
 
 <PageTitle>Simplifiarr</PageTitle>
 
-<h1>Dashboard</h1>
-
-<p class="text-muted">
-    These numbers come from the last scan. Press <strong>Scan</strong> at the
-    top of the page to refresh them - one scan covers every drive and every
-    page.
-</p>
+<PageHeader Title="Home" Subtitle="@HeaderLine" />
 
 @if (_dashboard is null)
 {
-    <p>Loading...</p>
+    <div class="stat-grid" aria-hidden="true">
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="stat-card">
+                <div class="stat-label">&nbsp;</div>
+                <div class="stat-value">&nbsp;</div>
+            </div>
+        }
+    </div>
 }
 else
 {
-    <div class="dashboard-cards">
+    <div class="stat-grid">
+        <StatCard Label="Space saved"
+                  Value="@_dashboard.StorageSavedFormatted"
+                  Note="by replacing copies with hardlinks"
+                  Href="history"
+                  Accent="true" />
 
-        <div class="dashboard-card dashboard-card-clickable" @onclick='() => Navigate("/hardlinks")'>
-            <h3>Promotion Opportunities</h3>
-            <p class="dashboard-value">@_dashboard.PromotionOpportunityCount</p>
-        </div>
+        <StatCard Label="Reclaimable now"
+                  Value="@_dashboard.PossibleDuplicateCopySizeFormatted"
+                  Note="@Count(_dashboard.PossibleDuplicateCopyCount, "full copy", "full copies")"
+                  Href="potential-waste" />
 
-        <div class="dashboard-card dashboard-card-clickable" @onclick='() => Navigate("/potential-waste")'>
-            <h3>Potential Waste</h3>
-            <p class="dashboard-value">@_dashboard.PossibleDuplicateCopySizeFormatted</p>
-        </div>
+        <StatCard Label="Healthy hardlinks"
+                  Value="@_dashboard.HealthyHardlinkCount.ToString("N0")"
+                  Note="library files sharing space with a download"
+                  Href="potential-waste" />
 
-        <div class="dashboard-card dashboard-card-clickable" @onclick='() => Navigate("/potential-waste")'>
-            <h3>Healthy Hardlinks</h3>
-            <p class="dashboard-value">@_dashboard.HealthyHardlinkCount</p>
-        </div>
-
-        <div class="dashboard-card dashboard-card-clickable" @onclick='() => Navigate("/quarantine")'>
-            <h3>Quarantine Items</h3>
-            <p class="dashboard-value">@_dashboard.QuarantinedFileCount</p>
-            <p class="dashboard-subvalue">
-                @_dashboard.QuarantinedSizeFormatted held in Quarantine
-            </p>
-        </div>
-
-        <div class="dashboard-card dashboard-card-clickable" @onclick='() => Navigate("/history")'>
-            <h3>Storage Saved</h3>
-            <p class="dashboard-value">@_dashboard.StorageSavedFormatted</p>
-        </div>
-
-        <div class="dashboard-card dashboard-card-clickable" @onclick='() => Navigate("/settings")'>
-            <h3>Configured Drive Profiles</h3>
-            <p class="dashboard-value">@_dashboard.EnabledDriveProfileCount</p>
-        </div>
-
+        <StatCard Label="In quarantine"
+                  Value="@Count(_dashboard.QuarantinedFileCount, "file", "files")"
+                  Note="@($"{_dashboard.QuarantinedSizeFormatted} held until you delete or restore")"
+                  Href="quarantine" />
     </div>
+
+    <section class="section">
+        <h2 class="section-title">Next up</h2>
+
+        <div class="panel">
+            @if (_dashboard.EnabledDriveProfileCount == 0)
+            {
+                <div class="action-row">
+                    <div>
+                        <div class="action-row-title">Tell Simplifiarr where your files are</div>
+                        <div class="action-row-detail">Add a drive with its download and library folders to get started.</div>
+                    </div>
+                    <a class="btn btn-primary" href="settings">Open Settings</a>
+                </div>
+            }
+            else if (!HasEverScanned)
+            {
+                <div class="action-row">
+                    <div>
+                        <div class="action-row-title">Run your first scan</div>
+                        <div class="action-row-detail">
+                            Press Scan at the top of the page. One scan covers every drive and every page.
+                        </div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                @foreach (var drive in _dashboard.Drives.Where(drive => drive.SetupProblems.Count > 0))
+                {
+                    <div class="action-row action-row-warn">
+                        <div>
+                            <div class="action-row-title">@drive.Name: folders overlap, so its results can't be trusted</div>
+
+                            @foreach (var problem in drive.SetupProblems)
+                            {
+                                <div class="action-row-detail">@problem</div>
+                            }
+                        </div>
+                        <a class="btn btn-secondary" href="settings">Fix in Settings</a>
+                    </div>
+                }
+
+                @foreach (var problem in ScanProblems)
+                {
+                    <div class="action-row action-row-warn">
+                        <div>
+                            <div class="action-row-title">Part of the last scan failed</div>
+                            <div class="action-row-detail">@problem</div>
+                        </div>
+                    </div>
+                }
+
+                @if (_dashboard.PromotionOpportunityCount > 0)
+                {
+                    <div class="action-row">
+                        <div>
+                            <div class="action-row-title">
+                                @Count(_dashboard.PromotionOpportunityCount, "download is", "downloads are") ready to link into your libraries
+                            </div>
+                            <div class="action-row-detail">Nothing is copied or moved - the library gets a second name for the same file.</div>
+                        </div>
+                        <a class="btn btn-primary" href="hardlinks">Review</a>
+                    </div>
+                }
+
+                @if (_dashboard.PossibleDuplicateCopyCount > 0)
+                {
+                    <div class="action-row">
+                        <div>
+                            <div class="action-row-title">
+                                @Count(_dashboard.PossibleDuplicateCopyCount, "library file is a full copy", "library files are full copies") of a download
+                            </div>
+                            <div class="action-row-detail">
+                                Converting to hardlinks frees @_dashboard.PossibleDuplicateCopySizeFormatted.
+                            </div>
+                        </div>
+                        <a class="btn btn-secondary" href="potential-waste">Review</a>
+                    </div>
+                }
+
+                @if (_dashboard.JunkFileCount > 0)
+                {
+                    <div class="action-row">
+                        <div>
+                            <div class="action-row-title">
+                                @Count(_dashboard.JunkFileCount, "leftover file", "leftover files") found in your libraries
+                            </div>
+                            <div class="action-row-detail">Samples, checksums and other release leftovers.</div>
+                        </div>
+                        <a class="btn btn-secondary" href="junk-cleanup">Review</a>
+                    </div>
+                }
+
+                @if (_dashboard.BlockedFileCount > 0)
+                {
+                    <div class="action-row">
+                        <div>
+                            <div class="action-row-title">
+                                @Count(_dashboard.BlockedFileCount, "library file is", "library files are") marked by Windows as downloaded from the internet
+                            </div>
+                            <div class="action-row-detail">Some players refuse these until they are unblocked.</div>
+                        </div>
+                        <a class="btn btn-secondary" href="blocked-files">Review</a>
+                    </div>
+                }
+
+                @if (NothingToDo)
+                {
+                    <div class="action-row">
+                        <div>
+                            <div class="action-row-title status-ok">
+                                <i class="bi bi-check-circle" aria-hidden="true"></i> Everything is in order
+                            </div>
+                            <div class="action-row-detail">The last scan found nothing that needs you.</div>
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+    </section>
+
+    @if (_dashboard.Drives.Count > 0)
+    {
+        <section class="section">
+            <h2 class="section-title">Drives</h2>
+
+            <div class="table-scroll">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Drive</th>
+                            <th>Status</th>
+                            <th>Found</th>
+                            <th>Healthy hardlinks</th>
+                            <th>Last scan</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        @foreach (var drive in _dashboard.Drives)
+                        {
+                            <tr @key="drive.Name">
+                                <td><strong>@drive.Name</strong></td>
+                                <td>
+                                    @if (drive.SetupProblems.Count > 0)
+                                    {
+                                        <span class="status-warn">Check folders</span>
+                                    }
+                                    else if (drive.LastScanUtc is null)
+                                    {
+                                        <span class="status-muted">Not scanned yet</span>
+                                    }
+                                    else if (drive.ItemsToReview > 0)
+                                    {
+                                        <span class="status-warn">@drive.ItemsToReview to review</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="status-ok">All clear</span>
+                                    }
+                                </td>
+                                <td class="status-muted">@DescribeFound(drive)</td>
+                                <td>@drive.HealthyHardlinkCount.ToString("N0")</td>
+                                <td class="status-muted">@HowLongAgo(drive.LastScanUtc)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
 }
 
 @code
 {
     private DashboardSummary? _dashboard;
     private bool _scanWasRunning;
+
+    private bool HasEverScanned =>
+        _dashboard is not null &&
+        _dashboard.Drives.Any(drive => drive.LastScanUtc.HasValue);
+
+    private IReadOnlyList<string> ScanProblems =>
+        // Folder-setup problems get their own, clearer rows above.
+        (Scans.LastSummary?.Problems ?? [])
+            .Where(problem => !problem.Contains(" setup: ", StringComparison.Ordinal))
+            .ToList();
+
+    private bool NothingToDo =>
+        _dashboard is not null &&
+        _dashboard.PromotionOpportunityCount == 0 &&
+        _dashboard.PossibleDuplicateCopyCount == 0 &&
+        _dashboard.JunkFileCount == 0 &&
+        _dashboard.BlockedFileCount == 0 &&
+        ScanProblems.Count == 0 &&
+        _dashboard.Drives.All(drive => drive.SetupProblems.Count == 0);
+
+    private string HeaderLine
+    {
+        get
+        {
+            if (_dashboard is null)
+            {
+                return "Loading...";
+            }
+
+            var drives = Count(_dashboard.EnabledDriveProfileCount, "drive", "drives");
+            var finished = Scans.LastSummary?.FinishedUtc;
+
+            return finished is null
+                ? $"{drives} · not scanned yet"
+                : $"{drives} · last scan finished {HowLongAgo(finished)}";
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -101,9 +298,54 @@ else
         });
     }
 
-    private void Navigate(string url)
+    private static string Count(int number, string one, string many) =>
+        $"{number:N0} {(number == 1 ? one : many)}";
+
+    private static string DescribeFound(DriveSummary drive)
     {
-        Navigation.NavigateTo(url);
+        var parts = new List<string>();
+
+        if (drive.ToLinkCount > 0)
+        {
+            parts.Add($"{drive.ToLinkCount:N0} to link");
+        }
+
+        if (drive.FullCopyCount > 0)
+        {
+            parts.Add($"{Count(drive.FullCopyCount, "full copy", "full copies")} ({SizeFormatter.FormatBytes(drive.FullCopyBytes)})");
+        }
+
+        if (drive.LeftoverFileCount > 0)
+        {
+            parts.Add(Count(drive.LeftoverFileCount, "leftover", "leftovers"));
+        }
+
+        if (drive.BlockedFileCount > 0)
+        {
+            parts.Add($"{drive.BlockedFileCount:N0} blocked");
+        }
+
+        return parts.Count == 0
+            ? "Nothing to do"
+            : string.Join(" · ", parts);
+    }
+
+    private static string HowLongAgo(DateTime? utc)
+    {
+        if (utc is null)
+        {
+            return "Never";
+        }
+
+        var age = DateTime.UtcNow - utc.Value;
+
+        return age.TotalMinutes < 1 ? "just now"
+            : age.TotalMinutes < 2 ? "a minute ago"
+            : age.TotalHours < 1 ? $"{(int)age.TotalMinutes} minutes ago"
+            : age.TotalHours < 2 ? "an hour ago"
+            : age.TotalDays < 1 ? $"{(int)age.TotalHours} hours ago"
+            : age.TotalDays < 2 ? "yesterday"
+            : $"{(int)age.TotalDays} days ago";
     }
 
     public void Dispose() =>

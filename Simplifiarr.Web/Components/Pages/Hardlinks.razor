@@ -15,25 +15,21 @@
 @inject IWasteCandidateCacheService WasteCandidateCache
 @inject IQuarantineService QuarantineService
 @inject IScanCoordinator Scans
+@inject IMediaPromotionService MediaPromotion
 
-<PageTitle>Promotion Opportunities</PageTitle>
+<PageTitle>Hardlinks - Simplifiarr</PageTitle>
 
-<h1>Library Hardlink Opportunities</h1>
-
-<p>
-    Completed downloads that can be promoted into your libraries using hardlinks.
-    This list comes from the last scan - press <strong>Scan</strong> at the top
-    of the page to refresh it.
-</p>
-
-<p>
-    <a href="ignored">View Ignored Items</a>
-</p>
+<PageHeader Title="Hardlinks"
+            Subtitle="Finished downloads that can be linked into your libraries without copying. This list comes from the last scan.">
+    <a class="btn btn-secondary" href="ignored">
+        <i class="bi bi-eye-slash" aria-hidden="true"></i> Ignored items
+    </a>
+</PageHeader>
 
 @if (_profiles.Count == 0)
 {
     <div class="alert alert-warning">
-        No enabled drive profiles are configured.
+        No drives are set up yet. <a href="settings">Add one in Settings</a>.
     </div>
 }
 else if (_isScanning)
@@ -43,9 +39,40 @@ else if (_isScanning)
     </div>
 }
 
-@if (!string.IsNullOrWhiteSpace(_statusMessage))
+<div class="app-tabs" role="tablist" aria-label="Media type">
+    <button type="button"
+            role="tab"
+            aria-selected="@(_activeTab == MoviesTab)"
+            class="app-tab @(_activeTab == MoviesTab ? "active" : null)"
+            @onclick="() => _activeTab = MoviesTab">
+        Movies <span class="app-tab-count">@GetMovieCandidates().Count</span>
+    </button>
+
+    <button type="button"
+            role="tab"
+            aria-selected="@(_activeTab == TvTab)"
+            class="app-tab @(_activeTab == TvTab ? "active" : null)"
+            @onclick="() => _activeTab = TvTab">
+        TV <span class="app-tab-count">@_candidates.Count(candidate => candidate.IsTv)</span>
+    </button>
+
+    @foreach (var definition in MediaTypeDefinitions.All)
+    {
+        var tab = definition.MediaType.ToString();
+
+        <button type="button"
+                role="tab"
+                aria-selected="@(_activeTab == tab)"
+                class="app-tab @(_activeTab == tab ? "active" : null)"
+                @onclick="() => _activeTab = tab">
+            @definition.PluralName <span class="app-tab-count">@CountFor(definition)</span>
+        </button>
+    }
+</div>
+
+@if (ActiveDefinition is null && !string.IsNullOrWhiteSpace(_statusMessage))
 {
-    <div class="alert alert-info mt-3">
+    <div class="alert alert-info">
         @_statusMessage
     </div>
 }
@@ -100,23 +127,22 @@ else if (_isScanning)
     </div>
 }
 
-@if (!_hasScanned)
+@if (ActiveDefinition is not null)
 {
-    <EmptyState Icon="search" Text="No movie/TV promotion scan has been run yet." />
+    <MediaTypeSection @key="ActiveDefinition.MediaType"
+                      Definition="ActiveDefinition"
+                      Profiles="_profiles"
+                      OnChanged="StateHasChanged" />
 }
-else if (_candidates.Count == 0)
+else if (!_hasScanned)
 {
-    <EmptyState Icon="check-circle" Text="No movie/TV promotion opportunities were found." />
+    <EmptyState Icon="search" Text="No scan has looked for movies or TV yet. Press Scan at the top of the page." />
 }
-else
+else if (_activeTab == MoviesTab)
 {
-    <h2 class="mt-4">
-        Movie Opportunities
-    </h2>
-
     @if (GetMovieCandidates().Count == 0)
     {
-        <EmptyState Icon="check-circle" Text="No movie promotion opportunities were found." />
+        <EmptyState Icon="check-circle" Text="No movies waiting to be linked into the library." />
     }
     else
     {
@@ -316,14 +342,12 @@ else
             </tbody>
         </table>
     }
-
-    <h2 class="mt-4">
-        TV Opportunities
-    </h2>
-
+}
+else if (_activeTab == TvTab)
+{
     @if (GetTvGroups().Count == 0)
     {
-        <EmptyState Icon="check-circle" Text="No TV promotion opportunities were found." />
+        <EmptyState Icon="check-circle" Text="No TV episodes waiting to be linked into the library." />
     }
     else
     {
@@ -547,15 +571,26 @@ else
     }
 }
 
-@foreach (var definition in MediaTypeDefinitions.All)
-{
-    <MediaTypeSection @key="definition.MediaType"
-                      Definition="definition"
-                      Profiles="_profiles" />
-}
-
 @code
 {
+    private const string MoviesTab = "movies";
+    private const string TvTab = "tv";
+
+    // Which tab is showing: Movies, TV, or one of the shared media types.
+    private string _activeTab = MoviesTab;
+
+    private MediaTypeDefinition? ActiveDefinition =>
+        MediaTypeDefinitions.All.FirstOrDefault(definition =>
+            definition.MediaType.ToString() == _activeTab);
+
+    private int CountFor(MediaTypeDefinition definition) =>
+        _profiles
+            .SelectMany(profile =>
+                MediaPromotion.GetCandidates(definition.MediaType, profile.Name))
+            .Select(candidate => candidate.SourcePath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+
     private List<DriveProfile> _profiles = [];
 
     private List<MoviePromotionCandidate> _candidates = [];
@@ -698,11 +733,6 @@ else
             _profiles.Any(profile =>
                 PromotionCandidateCache.GetLastScanUtc(profile.Name).HasValue);
 
-        if (_hasScanned)
-        {
-            _statusMessage =
-                $"Loaded {_candidates.Count} cached promotion opportunity(s).";
-        }
     }
 
 

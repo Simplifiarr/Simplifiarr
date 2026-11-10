@@ -16,10 +16,6 @@
     type's MediaTypeDefinition.
 *@
 
-<h2 class="mt-4">
-    @Definition.PluralName
-</h2>
-
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
     <div class="alert alert-info">
@@ -244,6 +240,13 @@ else
     [Parameter, EditorRequired]
     public List<DriveProfile> Profiles { get; set; } = [];
 
+    /// <summary>
+    /// Raised after the list changes (something was promoted or ignored),
+    /// so the page can update the count on this type's tab.
+    /// </summary>
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
     private List<MediaPromotionCandidate> _candidates = [];
 
     private readonly CandidateSelection<MediaPromotionCandidate> _selection =
@@ -391,6 +394,8 @@ else
 
                 _statusMessage =
                     $"{result.Reason} Remaining {Definition.SingularName} opportunities: {_candidates.Count}.";
+
+                await OnChanged.InvokeAsync();
             }
         }
         catch (Exception ex)
@@ -457,6 +462,8 @@ else
                 failed == 0
                     ? $"Promoted {succeeded} {Definition.SingularName}(s)."
                     : $"Promoted {succeeded} {Definition.SingularName}(s), {failed} failed.";
+
+            await OnChanged.InvokeAsync();
         }
         catch (Exception ex)
         {
@@ -511,13 +518,21 @@ else
         return result;
     }
 
-    private void Ignore(
+    private async Task Ignore(
         MediaPromotionCandidate candidate)
     {
         if (IsBusy)
         {
             return;
         }
+
+        await IgnoreCore(candidate);
+        await OnChanged.InvokeAsync();
+    }
+
+    private Task IgnoreCore(
+        MediaPromotionCandidate candidate)
+    {
 
         IgnoredItemsService.Add(
             new IgnoredItem
@@ -546,6 +561,8 @@ else
 
         _statusMessage =
             $"Ignored \"{candidate.Title}\". It won't reappear until un-ignored and rescanned.";
+
+        return Task.CompletedTask;
     }
 
     private static string HowLongAgo(

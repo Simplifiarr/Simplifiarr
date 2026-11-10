@@ -25,14 +25,26 @@ public class HardlinkConversionPlanner : IHardlinkConversionPlanner
                 downloadRoot,
                 StringComparison.OrdinalIgnoreCase);
 
+        // Converting means moving the library file aside and linking the
+        // download in its place. If both names are the same file there is
+        // nothing to gain and the move would take the only copy away.
+        var sameFile =
+            string.Equals(
+                Path.GetFullPath(candidate.LibraryPath),
+                Path.GetFullPath(candidate.DownloadPath),
+                StringComparison.OrdinalIgnoreCase);
+
         var canConvert =
+            !sameFile &&
             libraryExists &&
             downloadExists &&
             sameVolume &&
             !candidate.IsAlreadyHardlinked;
 
         var reason =
-            !libraryExists
+            sameFile
+                ? "The library file and the download are the same file - check this drive's folders in Settings."
+            : !libraryExists
                 ? "Library file does not exist."
             : !downloadExists
                 ? "Download file does not exist."

@@ -1,163 +1,650 @@
 /*
-  App-wide theme tokens. Deliberately NOT a Blazor-scoped .razor.css file -
-  scoping caused several classes (section-header, waste-queue-table, etc.)
-  to silently render unstyled everywhere except the one page they were
-  accidentally scoped to. This file overrides Bootstrap 5.3's own --bs-*
-  custom properties, so every existing btn/alert/card/table class picks up
-  the theme automatically with no markup changes.
+  Simplifiarr's look, in one file.
+
+  1. Tokens      - every colour, radius and font the app uses, light and dark.
+  2. Bootstrap   - points Bootstrap's own variables at those tokens and
+                   flattens its buttons, cards, tables and alerts, so every
+                   page picks up the look without changing its markup.
+  3. Shell       - sidebar, top bar, navigation, scan control.
+  4. Components  - page header, stat cards, panels, tabs, tables.
+  5. Legacy      - class names older pages still use.
+
+  Deliberately a plain global stylesheet, not Blazor-scoped .razor.css files:
+  scoping once left several shared classes silently unstyled everywhere
+  except the one page they happened to be scoped to.
+
+  Colour rule: violet is the accent - the active page, the main button, the
+  number that matters. Red means delete. Everything else is neutral.
 */
 
+/* ---------------------------------------------------------------- 1. Tokens */
+
 :root {
-    --bs-primary: #7c3aed;
-    --bs-primary-rgb: 124, 58, 237;
-    --bs-primary-bg-subtle: #ede9fe;
-    --bs-primary-border-subtle: #ddd6fe;
-    --bs-primary-text-emphasis: #5b21b6;
+    --app-bg: #f7f7f9;
+    --app-surface: #ffffff;
+    --app-raised: #f0eff4;
+    --app-border: #e4e3ea;
+    --app-text: #1a1920;
+    --app-muted: #5f5d6b;
 
-    --bs-body-bg: #f8f7fb;
-    --bs-body-bg-rgb: 248, 247, 251;
-    --bs-body-color: #1e1b2e;
-    --bs-body-color-rgb: 30, 27, 46;
-    --bs-emphasis-color: #100e19;
-    --bs-secondary-color: #6b7280;
-    --bs-secondary-bg: #efedf5;
-    --bs-tertiary-bg: #f1eff8;
-    --bs-border-color: #e5e7eb;
+    --app-accent: #6d28d9;
+    --app-accent-soft: rgba(109, 40, 217, .09);
+    --app-primary: #6d28d9;
+    --app-primary-hover: #5b21b6;
+    --app-on-primary: #ffffff;
 
-    --bs-link-color: #7c3aed;
-    --bs-link-color-rgb: 124, 58, 237;
-    --bs-link-hover-color: #6d28d9;
-    --bs-link-hover-color-rgb: 109, 40, 217;
+    --app-ok: #15803d;
+    --app-ok-soft: rgba(21, 128, 61, .10);
+    --app-warn: #a16207;
+    --app-warn-soft: rgba(161, 98, 7, .11);
+    --app-danger: #b91c1c;
+    --app-danger-hover: #991b1b;
+    --app-danger-soft: rgba(185, 28, 28, .09);
 
-    --app-accent-strong: #7b2cbf;
-    --app-accent-light: #c77dff;
-    --app-btn-primary-color: #ffffff;
+    --app-radius: 12px;
+    --app-radius-control: 10px;
+
+    --app-font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
 }
 
 [data-bs-theme="dark"] {
-    --bs-primary: #a78bfa;
-    --bs-primary-rgb: 167, 139, 250;
-    --bs-primary-bg-subtle: #3b2564;
-    --bs-primary-border-subtle: #4c2f7c;
-    --bs-primary-text-emphasis: #c4b5fd;
+    --app-bg: #111014;
+    --app-surface: #18171c;
+    --app-raised: #1f1e24;
+    --app-border: #2b2a32;
+    --app-text: #ececf1;
+    --app-muted: #a3a1ad;
 
-    --bs-body-bg: #17141f;
-    --bs-body-bg-rgb: 23, 20, 31;
-    --bs-body-color: #f3f1f9;
-    --bs-body-color-rgb: 243, 241, 249;
-    --bs-emphasis-color: #ffffff;
-    --bs-secondary-color: #a5a0b8;
-    --bs-secondary-bg: #231e30;
-    --bs-tertiary-bg: #2a2438;
-    --bs-border-color: #332c47;
+    --app-accent: #a78bfa;
+    --app-accent-soft: rgba(167, 139, 250, .14);
+    --app-primary: #7c3aed;
+    --app-primary-hover: #8b5cf6;
+    --app-on-primary: #ffffff;
 
-    --bs-link-color: #a78bfa;
-    --bs-link-color-rgb: 167, 139, 250;
-    --bs-link-hover-color: #c4b5fd;
-    --bs-link-hover-color-rgb: 196, 181, 253;
-
-    --app-accent-strong: #a78bfa;
-    --app-accent-light: #7c3aed;
-    --app-btn-primary-color: #1e1130;
+    --app-ok: #4ade80;
+    --app-ok-soft: rgba(74, 222, 128, .12);
+    --app-warn: #fbbf24;
+    --app-warn-soft: rgba(251, 191, 36, .12);
+    --app-danger: #f87171;
+    --app-danger-hover: #ef4444;
+    --app-danger-soft: rgba(248, 113, 113, .12);
 }
 
-/* Cards/tables/dropdowns key off body-bg by default in stock Bootstrap;
-   nudge them to the slightly-offset surface tone so they read as a
-   distinct layer instead of blending into the page background. */
-.card,
-.table,
-.dropdown-menu {
-    --bs-card-bg: var(--bs-secondary-bg);
-    --bs-table-bg: var(--bs-secondary-bg);
-    background-color: var(--bs-secondary-bg);
+/* ------------------------------------------------------------- 2. Bootstrap */
+
+:root,
+[data-bs-theme="dark"] {
+    --bs-body-bg: var(--app-bg);
+    --bs-body-color: var(--app-text);
+    --bs-emphasis-color: var(--app-text);
+    --bs-secondary-color: var(--app-muted);
+    --bs-tertiary-color: var(--app-muted);
+    --bs-secondary-bg: var(--app-surface);
+    --bs-tertiary-bg: var(--app-raised);
+    --bs-border-color: var(--app-border);
+    --bs-border-color-translucent: var(--app-border);
+    --bs-heading-color: var(--app-text);
+
+    --bs-primary: var(--app-primary);
+    --bs-link-color: var(--app-accent);
+    --bs-link-hover-color: var(--app-accent);
+    --bs-code-color: var(--app-accent);
+
+    --bs-body-font-family: var(--app-font);
+    --bs-border-radius: var(--app-radius-control);
+}
+
+:root {
+    --bs-primary-rgb: 109, 40, 217;
+    --bs-link-color-rgb: 109, 40, 217;
+    --bs-link-hover-color-rgb: 91, 33, 182;
+    --bs-body-color-rgb: 26, 25, 32;
+    --bs-body-bg-rgb: 247, 247, 249;
+}
+
+[data-bs-theme="dark"] {
+    --bs-primary-rgb: 124, 58, 237;
+    --bs-link-color-rgb: 167, 139, 250;
+    --bs-link-hover-color-rgb: 196, 181, 253;
+    --bs-body-color-rgb: 236, 236, 241;
+    --bs-body-bg-rgb: 17, 16, 20;
+}
+
+html,
+body {
+    font-family: var(--app-font);
+    background: var(--app-bg);
+    color: var(--app-text);
+}
+
+body {
+    font-size: .9rem;
+    line-height: 1.5;
+}
+
+a {
+    text-underline-offset: 2px;
 }
 
 code {
-    color: var(--bs-primary-text-emphasis);
+    color: var(--app-accent);
+    font-size: .85em;
+    word-break: break-all;
 }
 
-.empty-state {
-    text-align: center;
-    padding: 2.5rem 1rem;
-    color: var(--bs-secondary-color);
+.text-muted {
+    color: var(--app-muted) !important;
 }
 
-.empty-state .bi {
-    font-size: 2.5rem;
-    display: block;
-    margin-bottom: .75rem;
-    opacity: .6;
+.text-success {
+    color: var(--app-ok) !important;
 }
 
-/*
-  Bootstrap's compiled CSS bakes several component colors in as static hex
-  values at build time rather than referencing --bs-primary reactively
-  (only simple utilities like .text-primary/.bg-primary/.border-primary
-  do that) - these need explicit overrides to pick up the theme.
-*/
-.btn-primary {
-    --bs-btn-bg: var(--bs-primary);
-    --bs-btn-border-color: var(--bs-primary);
-    --bs-btn-color: var(--app-btn-primary-color);
-    --bs-btn-hover-bg: color-mix(in srgb, var(--bs-primary) 85%, black);
-    --bs-btn-hover-border-color: color-mix(in srgb, var(--bs-primary) 80%, black);
-    --bs-btn-hover-color: var(--app-btn-primary-color);
-    --bs-btn-active-bg: color-mix(in srgb, var(--bs-primary) 75%, black);
-    --bs-btn-active-border-color: color-mix(in srgb, var(--bs-primary) 70%, black);
-    --bs-btn-active-color: var(--app-btn-primary-color);
-    --bs-btn-disabled-bg: var(--bs-primary);
-    --bs-btn-disabled-border-color: var(--bs-primary);
-    --bs-btn-disabled-color: var(--app-btn-primary-color);
+.text-danger {
+    color: var(--app-danger) !important;
+}
+
+/* Buttons: one filled colour, red for delete, everything else an outline. */
+
+.btn {
+    --bs-btn-border-radius: var(--app-radius-control);
+    --bs-btn-font-weight: 600;
+    --bs-btn-font-size: .875rem;
+    --bs-btn-padding-x: .95rem;
+    --bs-btn-padding-y: .5rem;
     --bs-btn-focus-shadow-rgb: var(--bs-primary-rgb);
+    box-shadow: none !important;
+}
+
+.btn-sm {
+    --bs-btn-border-radius: 8px;
+    --bs-btn-font-size: .8125rem;
+    --bs-btn-padding-x: .7rem;
+    --bs-btn-padding-y: .32rem;
+}
+
+.btn:focus-visible {
+    outline: 2px solid var(--app-accent);
+    outline-offset: 2px;
+}
+
+.btn:disabled,
+.btn.disabled {
+    opacity: .5;
+}
+
+.btn-primary,
+.btn-success {
+    --bs-btn-color: var(--app-on-primary);
+    --bs-btn-bg: var(--app-primary);
+    --bs-btn-border-color: var(--app-primary);
+    --bs-btn-hover-color: var(--app-on-primary);
+    --bs-btn-hover-bg: var(--app-primary-hover);
+    --bs-btn-hover-border-color: var(--app-primary-hover);
+    --bs-btn-active-color: var(--app-on-primary);
+    --bs-btn-active-bg: var(--app-primary-hover);
+    --bs-btn-active-border-color: var(--app-primary-hover);
+    --bs-btn-disabled-color: var(--app-on-primary);
+    --bs-btn-disabled-bg: var(--app-primary);
+    --bs-btn-disabled-border-color: var(--app-primary);
+}
+
+.btn-secondary,
+.btn-warning,
+.btn-info,
+.btn-light,
+.btn-outline-primary,
+.btn-outline-secondary {
+    --bs-btn-color: var(--app-text);
+    --bs-btn-bg: transparent;
+    --bs-btn-border-color: var(--app-border);
+    --bs-btn-hover-color: var(--app-text);
+    --bs-btn-hover-bg: var(--app-raised);
+    --bs-btn-hover-border-color: var(--app-border);
+    --bs-btn-active-color: var(--app-text);
+    --bs-btn-active-bg: var(--app-raised);
+    --bs-btn-active-border-color: var(--app-border);
+    --bs-btn-disabled-color: var(--app-muted);
+    --bs-btn-disabled-bg: transparent;
+    --bs-btn-disabled-border-color: var(--app-border);
 }
 
 .btn-outline-primary {
-    --bs-btn-color: var(--bs-primary);
-    --bs-btn-border-color: var(--bs-primary);
-    --bs-btn-hover-bg: var(--bs-primary);
-    --bs-btn-hover-border-color: var(--bs-primary);
-    --bs-btn-hover-color: var(--app-btn-primary-color);
-    --bs-btn-active-bg: var(--bs-primary);
-    --bs-btn-active-border-color: var(--bs-primary);
-    --bs-btn-active-color: var(--app-btn-primary-color);
-    --bs-btn-disabled-color: var(--bs-primary);
-    --bs-btn-disabled-border-color: var(--bs-primary);
-    --bs-btn-focus-shadow-rgb: var(--bs-primary-rgb);
+    --bs-btn-color: var(--app-accent);
+    --bs-btn-hover-color: var(--app-accent);
+    --bs-btn-active-color: var(--app-accent);
 }
 
-.form-check-input:checked {
-    background-color: var(--bs-primary);
-    border-color: var(--bs-primary);
+.btn-danger {
+    --bs-btn-color: #ffffff;
+    --bs-btn-bg: #b91c1c;
+    --bs-btn-border-color: #b91c1c;
+    --bs-btn-hover-color: #ffffff;
+    --bs-btn-hover-bg: #991b1b;
+    --bs-btn-hover-border-color: #991b1b;
+    --bs-btn-active-bg: #991b1b;
+    --bs-btn-active-border-color: #991b1b;
+    --bs-btn-disabled-bg: #b91c1c;
+    --bs-btn-disabled-border-color: #b91c1c;
+}
+
+.btn-outline-danger {
+    --bs-btn-color: var(--app-danger);
+    --bs-btn-border-color: var(--app-border);
+    --bs-btn-hover-color: var(--app-danger);
+    --bs-btn-hover-bg: var(--app-danger-soft);
+    --bs-btn-hover-border-color: var(--app-border);
+    --bs-btn-active-color: var(--app-danger);
+    --bs-btn-active-bg: var(--app-danger-soft);
+    --bs-btn-active-border-color: var(--app-border);
+}
+
+.btn-link {
+    --bs-btn-color: var(--app-accent);
+    --bs-btn-hover-color: var(--app-accent);
+}
+
+/* Cards and dropdowns: flat surfaces, one thin border, no shadow. */
+
+.card,
+.dropdown-menu {
+    --bs-card-bg: var(--app-surface);
+    --bs-card-border-color: var(--app-border);
+    --bs-card-border-radius: var(--app-radius);
+    --bs-card-inner-border-radius: calc(var(--app-radius) - 1px);
+    --bs-card-cap-bg: transparent;
+    --bs-card-spacer-x: 1.25rem;
+    --bs-card-spacer-y: 1.1rem;
+    background-color: var(--app-surface);
+    border-color: var(--app-border);
+    box-shadow: none;
+}
+
+.card-header {
+    font-weight: 600;
+    border-bottom-color: var(--app-border);
+}
+
+.card-title {
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+/* Tables: a bordered surface with a quiet header row. */
+
+.table {
+    --bs-table-bg: transparent;
+    --bs-table-color: var(--app-text);
+    --bs-table-border-color: var(--app-border);
+    --bs-table-striped-bg: transparent;
+    --bs-table-hover-bg: var(--app-raised);
+    --bs-table-hover-color: var(--app-text);
+    --bs-table-active-bg: var(--app-accent-soft);
+    --bs-table-active-color: var(--app-text);
+    background-color: var(--app-surface);
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius);
+    border-collapse: separate;
+    border-spacing: 0;
+    overflow: hidden;
+    font-variant-numeric: tabular-nums;
+}
+
+.table > :not(caption) > * > * {
+    padding: .75rem 1rem;
+    vertical-align: middle;
+    border-bottom-width: 0;
+    border-top: 1px solid var(--app-border);
+    background-color: transparent;
+    box-shadow: none;
+}
+
+.table > thead > tr > * {
+    border-top: 0;
+    color: var(--app-muted);
+    font-size: .75rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.table > tbody > tr.table-active > *,
+.table > tbody > tr.table-primary > *,
+.table > tbody > tr.table-info > * {
+    background-color: var(--app-accent-soft);
+    color: var(--app-text);
+}
+
+.table-sm > :not(caption) > * > * {
+    padding: .5rem .75rem;
+}
+
+/* A table nested in a card or another table shouldn't draw a second box. */
+.card .table,
+.table .table,
+details .table {
+    border-radius: 8px;
+}
+
+/* Alerts: a tinted surface, no heavy border. */
+
+.alert {
+    --bs-alert-border-radius: var(--app-radius);
+    --bs-alert-padding-x: 1rem;
+    --bs-alert-padding-y: .8rem;
+    --bs-alert-color: var(--app-text);
+    --bs-alert-border-color: transparent;
+    --bs-alert-link-color: var(--app-accent);
+}
+
+.alert-info,
+.alert-primary {
+    --bs-alert-bg: var(--app-accent-soft);
+}
+
+.alert-secondary,
+.alert-light {
+    --bs-alert-bg: var(--app-raised);
+}
+
+.alert-warning {
+    --bs-alert-bg: var(--app-warn-soft);
+}
+
+.alert-danger {
+    --bs-alert-bg: var(--app-danger-soft);
+}
+
+.alert-success {
+    --bs-alert-bg: var(--app-ok-soft);
+}
+
+/* Form controls. */
+
+.form-control,
+.form-select {
+    background-color: var(--app-surface);
+    border-color: var(--app-border);
+    color: var(--app-text);
+    border-radius: var(--app-radius-control);
+    font-size: .875rem;
 }
 
 .form-control:focus,
 .form-select:focus {
-    border-color: var(--bs-primary);
-    box-shadow: 0 0 0 .25rem rgba(var(--bs-primary-rgb), .25);
+    background-color: var(--app-surface);
+    color: var(--app-text);
+    border-color: var(--app-accent);
+    box-shadow: 0 0 0 3px var(--app-accent-soft);
 }
 
-/*
-  The app-wide Scan control in the top bar (Shared/ScanBar.razor). It sits
-  on the violet bar, so it uses that bar's light-on-violet colours rather
-  than the page's.
-*/
+.form-control::placeholder {
+    color: var(--app-muted);
+}
+
+.form-label {
+    font-weight: 600;
+    font-size: .8125rem;
+}
+
+.form-check-input {
+    border-color: var(--app-muted);
+    background-color: var(--app-surface);
+}
+
+.form-check-input:checked {
+    background-color: var(--app-primary);
+    border-color: var(--app-primary);
+}
+
+.form-check-input:focus {
+    border-color: var(--app-accent);
+    box-shadow: 0 0 0 3px var(--app-accent-soft);
+}
+
+.badge {
+    font-weight: 600;
+    border-radius: 6px;
+}
+
+details > summary {
+    cursor: pointer;
+    color: var(--app-muted);
+}
+
+details[open] > summary {
+    color: var(--app-text);
+}
+
+hr {
+    border-color: var(--app-border);
+    opacity: 1;
+}
+
+h1:focus {
+    outline: none;
+}
+
+/* ----------------------------------------------------------------- 3. Shell */
+
+.app-shell {
+    display: flex;
+    min-height: 100vh;
+    background: var(--app-bg);
+}
+
+.app-sidebar {
+    width: 232px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    padding: 1.1rem .75rem 1rem;
+    background: var(--app-surface);
+    border-right: 1px solid var(--app-border);
+}
+
+.app-brand {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    padding: .2rem .75rem .35rem;
+    color: var(--app-text);
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: -.01em;
+    text-decoration: none;
+}
+
+.app-brand:hover {
+    color: var(--app-text);
+}
+
+.app-brand-mark {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    background: var(--app-primary);
+    flex-shrink: 0;
+}
+
+.app-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+    flex: 1;
+}
+
+.nav-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.nav-group-bottom {
+    margin-top: auto;
+    padding-top: .85rem;
+    border-top: 1px solid var(--app-border);
+}
+
+.nav-group-label {
+    padding: 0 .75rem .35rem;
+    font-size: .6875rem;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--app-muted);
+}
+
+.app-nav .nav-link {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    min-height: 2.25rem;
+    padding: 0 .75rem;
+    border-radius: 8px;
+    color: var(--app-muted);
+    font-size: .875rem;
+    font-weight: 500;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.app-nav .nav-link .bi {
+    width: 1rem;
+    font-size: .95rem;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.app-nav .nav-link:hover {
+    background: var(--app-raised);
+    color: var(--app-text);
+}
+
+.app-nav .nav-link.active {
+    background: var(--app-accent-soft);
+    color: var(--app-accent);
+    font-weight: 600;
+}
+
+.app-nav .nav-link:focus-visible,
+.app-brand:focus-visible {
+    outline: 2px solid var(--app-accent);
+    outline-offset: 1px;
+}
+
+.app-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.app-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: .75rem;
+    min-height: 3.5rem;
+    padding: .5rem 2rem;
+    background: var(--app-bg);
+    border-bottom: 1px solid var(--app-border);
+}
+
+.app-content {
+    width: 100%;
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 1.75rem 2rem 3rem;
+}
+
+.app-content h1 {
+    margin: 0 0 .35rem;
+    font-size: 1.625rem;
+    font-weight: 700;
+    letter-spacing: -.02em;
+}
+
+.app-content h2 {
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+
+.app-content h3 {
+    font-size: .95rem;
+    font-weight: 600;
+}
+
+/* Small buttons that live in the top bar. */
+
+.topbar-btn,
+.theme-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    flex-shrink: 0;
+    height: 2.25rem;
+    padding: 0 .8rem;
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius-control);
+    background: transparent;
+    color: var(--app-text);
+    font-size: .8125rem;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.topbar-btn:hover:not(:disabled),
+.theme-toggle-btn:hover {
+    background: var(--app-raised);
+}
+
+.topbar-btn:disabled {
+    opacity: .55;
+    cursor: default;
+}
+
+.topbar-btn:focus-visible,
+.theme-toggle-btn:focus-visible {
+    outline: 2px solid var(--app-accent);
+    outline-offset: 2px;
+}
+
+.topbar-btn-primary {
+    background: var(--app-primary);
+    border-color: var(--app-primary);
+    color: var(--app-on-primary);
+}
+
+.topbar-btn-primary:hover:not(:disabled) {
+    background: var(--app-primary-hover);
+    border-color: var(--app-primary-hover);
+}
+
+/* The app-wide Scan control (Shared/ScanBar.razor). */
+
 .scan-bar {
     display: flex;
     align-items: center;
     gap: .75rem;
-    margin-left: auto;
-    padding-left: 1rem;
-    flex-shrink: 0;
-    color: #f3edff;
-    font-size: .85rem;
+    min-width: 0;
+    margin-right: auto;
+    font-size: .8125rem;
 }
 
 .scan-bar-text {
     display: flex;
     flex-direction: column;
     min-width: 0;
-    line-height: 1.25;
-    text-align: right;
+    line-height: 1.3;
 }
 
 .scan-bar-title {
@@ -168,80 +655,493 @@ code {
 }
 
 .scan-bar-detail {
-    color: #e2d6ff;
+    color: var(--app-muted);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     font-variant-numeric: tabular-nums;
 }
 
+.scan-bar-problems {
+    color: var(--app-warn);
+    font-weight: 600;
+}
+
 .scan-bar-track {
-    width: 140px;
+    width: 160px;
     height: 6px;
     flex-shrink: 0;
     border-radius: 3px;
-    background: rgba(255, 255, 255, .25);
+    background: var(--app-raised);
     overflow: hidden;
 }
 
 .scan-bar-fill {
     height: 100%;
-    background: #ffffff;
+    background: var(--app-accent);
     transition: width .3s ease;
 }
 
-.scan-bar-btn {
-    flex-shrink: 0;
-    white-space: nowrap;
-    padding: .35rem .85rem;
-    border-radius: .375rem;
-    border: 1px solid rgba(255, 255, 255, .55);
-    background: transparent;
-    color: #ffffff;
-    font-size: .85rem;
+/* Phone and narrow windows: the sidebar slides away behind a menu button. */
+
+.nav-toggle {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
 }
 
-.scan-bar-btn:hover:not(:disabled) {
-    background: rgba(255, 255, 255, .18);
+.nav-toggle-btn {
+    display: none;
 }
 
-.scan-bar-btn:disabled {
-    opacity: .6;
-}
+@media (max-width: 860px) {
+    .app-sidebar {
+        display: none;
+        position: fixed;
+        z-index: 20;
+        inset: 0 auto 0 0;
+        box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .45);
+    }
 
-.scan-bar-btn-primary {
-    background: #ffffff;
-    border-color: #ffffff;
-    color: #4c1d95;
-    font-weight: 600;
-}
+    .nav-toggle:checked ~ .app-sidebar {
+        display: flex;
+    }
 
-.scan-bar-btn-primary:hover:not(:disabled) {
-    background: #ede9fe;
-}
+    .nav-toggle-btn {
+        display: inline-flex;
+        margin: 0;
+    }
 
-@media (max-width: 900px) {
+    .app-topbar {
+        padding: .5rem 1rem;
+    }
+
+    .app-content {
+        padding: 1.25rem 1rem 2.5rem;
+    }
+
     .scan-bar-track {
         display: none;
     }
 }
 
-@media (max-width: 640.98px) {
-    .scan-bar-text {
-        display: none;
+/* On a narrow screen a wide table scrolls inside its own box instead of
+   pushing the whole page sideways. Applies to every table on every page,
+   including ones not wrapped in .table-scroll. */
+@media (max-width: 860px) {
+    .app-main {
+        overflow-x: clip;
+    }
+
+    .app-content .table {
+        display: block;
+        max-width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .app-content .table-scroll > .table {
+        display: table;
+        overflow: hidden;
+    }
+
+    /* File names and paths have no spaces to break at. */
+    .app-content code,
+    .app-content .file-name {
+        overflow-wrap: anywhere;
     }
 }
 
-/*
-  Shared page/table patterns used by several pages (PotentialWaste,
-  JunkCleanup, and others) - previously defined inside Home.razor.css,
-  where Blazor's CSS isolation silently scoped them to Home.razor only,
-  so they rendered completely unstyled everywhere else.
-*/
+@media (max-width: 520px) {
+    .scan-bar-text {
+        display: none;
+    }
+
+    .theme-toggle-btn {
+        font-size: 0;
+        gap: 0;
+    }
+
+    .theme-toggle-btn .bi {
+        font-size: 1rem;
+    }
+}
+
+#blazor-error-ui {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    box-sizing: border-box;
+    padding: .7rem 1.25rem;
+    background: var(--app-danger);
+    color: #ffffff;
+    font-weight: 600;
+}
+
+#blazor-error-ui .reload {
+    color: #ffffff;
+    margin-left: .5rem;
+}
+
+#blazor-error-ui .dismiss {
+    position: absolute;
+    right: .9rem;
+    top: .55rem;
+    cursor: pointer;
+}
+
+/* ------------------------------------------------------------ 4. Components */
+
+/* PageHeader.razor: title, one line saying what the page is for, actions. */
+
+.page-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.page-header-text {
+    min-width: 0;
+    flex: 1 1 320px;
+}
+
+.page-header-subtitle {
+    margin: 0;
+    color: var(--app-muted);
+    max-width: 70ch;
+}
+
+.page-header-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem;
+}
+
+/* StatCard.razor */
+
+.stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    display: block;
+    padding: 1.1rem 1.25rem;
+    background: var(--app-surface);
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius);
+    color: var(--app-text);
+    text-decoration: none;
+}
+
+a.stat-card:hover {
+    border-color: var(--app-muted);
+    color: var(--app-text);
+}
+
+a.stat-card:focus-visible {
+    outline: 2px solid var(--app-accent);
+    outline-offset: 2px;
+}
+
+.stat-label {
+    color: var(--app-muted);
+    font-size: .8125rem;
+}
+
+.stat-value {
+    margin-top: .3rem;
+    font-size: 1.875rem;
+    font-weight: 700;
+    line-height: 1.15;
+    letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums;
+}
+
+.stat-value-accent {
+    color: var(--app-accent);
+}
+
+.stat-note {
+    margin-top: .25rem;
+    color: var(--app-muted);
+    font-size: .8125rem;
+}
+
+/* A titled block of content. */
+
+.section {
+    margin-bottom: 2rem;
+}
+
+.section-title {
+    margin: 0 0 .75rem;
+    font-size: .95rem;
+    font-weight: 600;
+}
+
+.panel {
+    background: var(--app-surface);
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius);
+    overflow: hidden;
+}
+
+/* A list of "here is a thing, here is its button" rows inside a panel. */
+
+.action-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    padding: .9rem 1.25rem;
+}
+
+/* The text takes the room; the button keeps its size beside it. */
+.action-row > :first-child {
+    flex: 1 1 280px;
+    min-width: 0;
+}
+
+.action-row > .btn {
+    flex-shrink: 0;
+}
+
+.action-row + .action-row {
+    border-top: 1px solid var(--app-border);
+}
+
+.action-row-title {
+    font-weight: 600;
+}
+
+.action-row-detail {
+    color: var(--app-muted);
+    font-size: .8125rem;
+}
+
+.action-row-warn .action-row-title {
+    color: var(--app-warn);
+}
+
+.status-ok {
+    color: var(--app-ok);
+    font-weight: 600;
+}
+
+.status-warn {
+    color: var(--app-warn);
+    font-weight: 600;
+}
+
+.status-muted {
+    color: var(--app-muted);
+}
+
+/* Tabs across the top of a page's content. */
+
+.app-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .25rem;
+    margin-bottom: 1.25rem;
+    border-bottom: 1px solid var(--app-border);
+}
+
+.app-tab {
+    height: 2.6rem;
+    padding: 0 .9rem;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    background: transparent;
+    color: var(--app-muted);
+    font-size: .875rem;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.app-tab:hover {
+    color: var(--app-text);
+}
+
+.app-tab.active {
+    border-bottom-color: var(--app-accent);
+    color: var(--app-text);
+    font-weight: 600;
+}
+
+.app-tab:focus-visible {
+    outline: 2px solid var(--app-accent);
+    outline-offset: -2px;
+}
+
+.app-tab-count {
+    margin-left: .35rem;
+    color: var(--app-muted);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+
+.app-tab.active .app-tab-count {
+    color: var(--app-accent);
+}
+
+/* Wrap a wide table in this so the table scrolls, not the page. */
+
+.table-scroll {
+    overflow-x: auto;
+}
+
+.table-scroll > .table {
+    min-width: 640px;
+    margin-bottom: 0;
+}
+
+/* The line above a results table: what's there on the left, what you can
+   do with it on the right. */
+.toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    margin-bottom: .9rem;
+}
+
+.toolbar-summary {
+    color: var(--app-muted);
+}
+
+.toolbar-summary strong {
+    color: var(--app-text);
+}
+
+.toolbar-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+}
+
+/* A file's name as the main line of a table cell, with quieter lines under it. */
+.file-name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.cell-note {
+    color: var(--app-muted);
+    font-size: .8125rem;
+}
+
+.cell-actions {
+    display: flex;
+    gap: .4rem;
+    white-space: nowrap;
+}
+
+.table details > summary {
+    white-space: nowrap;
+}
+
+.detail-label {
+    margin-top: .6rem;
+    color: var(--app-muted);
+    font-size: .75rem;
+    font-weight: 600;
+}
+
+.col-check {
+    width: 3rem;
+}
+
+.col-num {
+    text-align: right;
+    white-space: nowrap;
+}
+
+/* A group of rows that belong together (e.g. the copies of one film). */
+.group-card {
+    margin-bottom: 1rem;
+    background: var(--app-surface);
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius);
+    overflow: hidden;
+}
+
+.group-card-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: .25rem 1rem;
+    padding: .85rem 1.1rem;
+}
+
+.group-card-title {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.group-card-meta {
+    color: var(--app-muted);
+    font-size: .8125rem;
+    white-space: nowrap;
+}
+
+.group-card .table {
+    margin: 0;
+    border: 0;
+    border-top: 1px solid var(--app-border);
+    border-radius: 0;
+}
+
+.pill {
+    display: inline-block;
+    padding: .05rem .5rem;
+    border-radius: 999px;
+    background: var(--app-accent-soft);
+    color: var(--app-accent);
+    font-size: .75rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.empty-state {
+    padding: 2.5rem 1rem;
+    text-align: center;
+    color: var(--app-muted);
+    background: var(--app-surface);
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius);
+    margin-bottom: 1rem;
+}
+
+.empty-state .bi {
+    display: block;
+    margin-bottom: .6rem;
+    font-size: 2rem;
+    opacity: .7;
+}
+
+/* ---------------------------------------------------------------- 5. Legacy */
+/* Class names pages written before the redesign still use. */
+
 .section-header {
     margin-top: 2rem;
     margin-bottom: 1rem;
-    color: var(--bs-emphasis-color);
+    color: var(--app-text);
 }
 
 .path-column {
@@ -253,10 +1153,10 @@ code {
 }
 
 .waste-section-title {
-    font-weight: bold;
+    font-weight: 600;
     margin-top: .75rem;
     margin-bottom: .25rem;
-    color: var(--bs-secondary-color);
+    color: var(--app-muted);
 }
 
 .queue-details {
@@ -270,14 +1170,13 @@ code {
 }
 
 .waste-queue-table {
-    font-size: .9rem;
+    font-size: .875rem;
     table-layout: fixed;
     width: 100%;
 }
 
 .waste-queue-table th,
 .waste-queue-table td {
-    padding: .35rem .5rem;
     vertical-align: top;
 }
 
@@ -286,43 +1185,32 @@ code {
 }
 
 .waste-queue-table summary {
-    cursor: pointer;
     white-space: nowrap;
 }
 
 .waste-queue-table th:nth-child(1),
 .waste-queue-table td:nth-child(1) {
-    width: 55px;
-    max-width: 55px;
+    width: 64px;
 }
 
 .waste-queue-table th:nth-child(2),
 .waste-queue-table td:nth-child(2) {
-    width: 85px;
-    max-width: 85px;
+    width: 96px;
 }
 
 .waste-queue-table th:nth-child(3),
 .waste-queue-table td:nth-child(3) {
-    width: 115px;
-    max-width: 115px;
-}
-
-.waste-queue-table th:nth-child(4),
-.waste-queue-table td:nth-child(4) {
-    width: auto;
+    width: 125px;
 }
 
 .waste-queue-table th:nth-child(5),
 .waste-queue-table td:nth-child(5) {
-    width: 90px;
-    max-width: 90px;
+    width: 100px;
 }
 
 .waste-queue-table th:nth-child(6),
 .waste-queue-table td:nth-child(6) {
-    width: 170px;
-    max-width: 170px;
+    width: 180px;
 }
 
 .waste-queue-table th:nth-child(1),

@@ -5,9 +5,8 @@ namespace Simplifiarr.Core.Services;
 
 /// <summary>
 /// Pure read-only rollup - does not scan anything itself and makes no
-/// network calls. Every number here reflects whatever the last relevant
-/// scan (on Hardlinks / Potential Waste / Books / Audiobooks / Music /
-/// Comics) already found and cached.
+/// network calls. Every number here reflects what the last scan already
+/// found and remembered.
 /// </summary>
 public class DashboardSummaryService : IDashboardSummaryService
 {
@@ -17,6 +16,9 @@ public class DashboardSummaryService : IDashboardSummaryService
     private readonly IWasteCandidateCacheService _wasteCandidateCache;
     private readonly IPromotionCandidateCacheService _promotionCandidateCache;
     private readonly IMediaPromotionService _mediaPromotion;
+    private readonly IJunkFileScannerService _junkFiles;
+    private readonly IBlockedFileCacheService _blockedFiles;
+    private readonly IScanCoordinator _scans;
     private readonly IHistoryService _historyService;
 
     public DashboardSummaryService(
@@ -25,6 +27,9 @@ public class DashboardSummaryService : IDashboardSummaryService
         IWasteCandidateCacheService wasteCandidateCache,
         IPromotionCandidateCacheService promotionCandidateCache,
         IMediaPromotionService mediaPromotion,
+        IJunkFileScannerService junkFiles,
+        IBlockedFileCacheService blockedFiles,
+        IScanCoordinator scans,
         IHistoryService historyService)
     {
         _quarantineInventoryService = quarantineInventoryService;
@@ -33,6 +38,9 @@ public class DashboardSummaryService : IDashboardSummaryService
         _wasteCandidateCache = wasteCandidateCache;
         _promotionCandidateCache = promotionCandidateCache;
         _mediaPromotion = mediaPromotion;
+        _junkFiles = junkFiles;
+        _blockedFiles = blockedFiles;
+        _scans = scans;
         _historyService = historyService;
     }
 
@@ -52,6 +60,13 @@ public class DashboardSummaryService : IDashboardSummaryService
         var quarantinedSizeBytes =
             quarantineItems.Sum(item => item.SizeBytes);
 
+        var drives =
+            enabledProfiles
+                .Select(SummarizeDrive)
+                .ToList();
+
+        // The same library file can show up under two drives when their
+        // folders overlap; count it once in the totals.
         var wasteCandidates =
             enabledProfiles
                 .SelectMany(profile =>
@@ -64,17 +79,6 @@ public class DashboardSummaryService : IDashboardSummaryService
 
         var possibleDuplicateCopyBytes =
             wasteCandidates.Sum(candidate => candidate.SizeBytes);
-
-        var healthyHardlinkCount =
-            enabledProfiles.Sum(profile =>
-                _wasteCandidateCache.GetHealthyHardlinkCount(profile.Name));
-
-        var promotionOpportunityCount =
-            enabledProfiles.Sum(profile =>
-                _promotionCandidateCache.GetCandidates(profile.Name).Count) +
-            MediaTypeDefinitions.All.Sum(definition =>
-                enabledProfiles.Sum(profile =>
-                    _mediaPromotion.GetCandidates(definition.MediaType, profile.Name).Count));
 
         var historyRecords =
             await _historyService.GetHistoryAsync();
@@ -89,10 +93,13 @@ public class DashboardSummaryService : IDashboardSummaryService
         return new DashboardSummary
         {
             HealthyHardlinkCount =
-                healthyHardlinkCount,
+                drives.Sum(drive => drive.HealthyHardlinkCount),
 
             PossibleDuplicateCopyCount =
                 wasteCandidates.Count,
+
+            PossibleDuplicateCopyBytes =
+                possibleDuplicateCopyBytes,
 
             PossibleDuplicateCopySizeFormatted =
                 SizeFormatter.FormatBytes(possibleDuplicateCopyBytes),
@@ -107,7 +114,13 @@ public class DashboardSummaryService : IDashboardSummaryService
                 SizeFormatter.FormatBytes(quarantinedSizeBytes),
 
             PromotionOpportunityCount =
-                promotionOpportunityCount,
+                drives.Sum(drive => drive.ToLinkCount),
+
+            JunkFileCount =
+                drives.Sum(drive => drive.LeftoverFileCount),
+
+            BlockedFileCount =
+                drives.Sum(drive => drive.BlockedFileCount),
 
             StorageSavedBytes =
                 storageSavedBytes,
@@ -116,7 +129,34 @@ public class DashboardSummaryService : IDashboardSummaryService
                 SizeFormatter.FormatBytes(storageSavedBytes),
 
             EnabledDriveProfileCount =
-                enabledProfiles.Count
+                enabledProfiles.Count,
+
+            Drives =
+                drives
+        };
+    }
+
+    private DriveSummary SummarizeDrive(DriveProfile profile)
+    {
+        var fullCopies =
+            _wasteCandidateCache.GetCandidates(profile.Name);
+
+        var toLink =
+            _promotionCandidateCache.GetCandidates(profile.Name).Count +
+            MediaTypeDefinitions.All.Sum(definition =>
+                _mediaPromotion.GetCandidates(definition.MediaType, profile.Name).Count);
+
+        return new DriveSummary
+        {
+            Name = profile.Name,
+            ToLinkCount = toLink,
+            FullCopyCount = fullCopies.Count,
+            FullCopyBytes = fullCopies.Sum(candidate => candidate.SizeBytes),
+            LeftoverFileCount = _junkFiles.GetCandidates(profile.Name).Count,
+            BlockedFileCount = _blockedFiles.GetBlockedFiles(profile.Name).Count,
+            HealthyHardlinkCount = _wasteCandidateCache.GetHealthyHardlinkCount(profile.Name),
+            LastScanUtc = _scans.GetLastScanUtc(profile.Name),
+            SetupProblems = DriveProfileValidator.GetProblems(profile)
         };
     }
 }

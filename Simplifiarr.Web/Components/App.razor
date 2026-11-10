@@ -74,7 +74,7 @@
 
                     var label = pref.charAt(0).toUpperCase() + pref.slice(1);
                     btn.innerHTML =
-                        '<i class="bi ' + toggleIcons[pref] + '" aria-hidden="true"></i> Theme: ' + label;
+                        '<i class="bi ' + toggleIcons[pref] + '" aria-hidden="true"></i> ' + label;
 
                     btn.removeEventListener("click", this._onToggleClick);
                     btn.addEventListener("click", this._onToggleClick);

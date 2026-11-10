@@ -1,4 +1,5 @@
 using Simplifiarr.Core.Models;
+using Simplifiarr.Core.Utilities;
 
 namespace Simplifiarr.Core.Services;
 
@@ -23,8 +24,15 @@ public class DuplicateCandidateService : IDuplicateCandidateService
         var libraryFiles = await _fileInventory.GetInventoryAsync(libraryPath, forceRefresh);
         var downloadFiles = await _fileInventory.GetInventoryAsync(downloadPath, forceRefresh);
 
+        // If the library folder contains the download folder (say the
+        // library is set to a whole drive), the downloads show up in the
+        // library listing too. Those are downloads, not library copies -
+        // counting them would pair every download with itself and report
+        // it as a wasted duplicate.
         var libraryVideos = libraryFiles
-            .Where(file => file.FileType == FileType.Video)
+            .Where(file =>
+                file.FileType == FileType.Video &&
+                !PathContainment.IsPathUnderRoot(file.FullPath, downloadPath))
             .ToList();
 
         var downloadVideosBySize = downloadFiles
@@ -45,6 +53,15 @@ public class DuplicateCandidateService : IDuplicateCandidateService
 
             foreach (var downloadFile in matchingDownloads)
             {
+                // A file is never a copy of itself.
+                if (string.Equals(
+                        libraryFile.FullPath,
+                        downloadFile.FullPath,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 candidates.Add(new DuplicateCandidate
                 {
                     LibraryPath = libraryFile.FullPath,
@@ -60,4 +77,3 @@ public class DuplicateCandidateService : IDuplicateCandidateService
         return candidates;
     }
 }
-

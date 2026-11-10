@@ -1,5 +1,6 @@
 @page "/duplicates"
 @rendermode InteractiveServer
+@implements IDisposable
 
 @using Simplifiarr.Core.Models
 @using Simplifiarr.Core.Services
@@ -11,150 +12,280 @@
 @inject IQuarantineService QuarantineService
 @inject IHistoryService HistoryService
 @inject IIgnoredItemsService IgnoredItemsService
+@inject IScanCoordinator Scans
 
-<PageTitle>Duplicates</PageTitle>
+<PageTitle>Duplicates - Simplifiarr</PageTitle>
 
-<h1>Potential Duplicates</h1>
+<PageHeader Title="Duplicates"
+            Subtitle="The same title more than once across your libraries - usually two qualities of one film or episode. Hardlinks of one file are not listed, because they don't take extra space." />
 
-<p>
-    Movies, TV episodes, books, audiobooks, music, and comics that appear more than once
-    across your libraries, based on titles already discovered by Hardlinks
-    and Potential
-    Waste scans. This page doesn't scan anything on its own - rescan a
-    library on those pages to refresh what shows up here. Copies that turn
-    out to be hardlinks of each other (the same underlying file, e.g. one
-    also linked into a Collection) are automatically excluded - they aren't
-    wasted space.
-</p>
+@if (_isScanning)
+{
+    <div class="alert alert-info">
+        A scan is running. This page will update when it finishes.
+    </div>
+}
 
-<StatusMessage Message="@_statusMessage" Severity="StatusSeverity.Info" />
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert alert-info">
+        @_statusMessage
+    </div>
+}
 
 @if (!_loaded)
 {
-    <p class="mt-3">Loading...</p>
+    <EmptyState Icon="hourglass-split" Text="Comparing your libraries..." />
 }
-else if (_totalAssetsScanned == 0)
+else if (_totalAssets == 0)
 {
-    <EmptyState Icon="search">
-        <Message>
-            No scanned library data yet. Visit Hardlinks or Potential Waste
-            and scan a drive first, then come back here.
-        </Message>
-    </EmptyState>
+    <EmptyState Icon="search" Text="Nothing has been scanned yet. Press Scan at the top of the page." />
 }
 else if (_groups.Count == 0)
 {
-    <EmptyState Icon="check-circle" Text="No potential duplicates found in the currently scanned data." />
+    <EmptyState Icon="check-circle" Text="No title appears more than once in your libraries." />
 }
 else
 {
-    <p>
-        <strong>@_groups.Count</strong> potential duplicate group(s) |
-        <strong>@SizeFormatter.FormatBytes(_groups.Sum(g => g.ReclaimableSizeBytes))</strong>
-        potentially reclaimable if the smaller copy(ies) were removed
-    </p>
+    <div class="app-tabs" role="tablist" aria-label="Media type">
+        <button type="button"
+                role="tab"
+                aria-selected="@(_activeType is null)"
+                class="app-tab @(_activeType is null ? "active" : null)"
+                @onclick="() => ShowType(null)">
+            All <span class="app-tab-count">@_groups.Count</span>
+        </button>
 
-    @foreach (var group in _groups)
+        @foreach (var type in TypesPresent)
+        {
+            <button type="button"
+                    role="tab"
+                    aria-selected="@(_activeType == type)"
+                    class="app-tab @(_activeType == type ? "active" : null)"
+                    @onclick="() => ShowType(type)">
+                @TypeLabel(type) <span class="app-tab-count">@_groups.Count(group => group.MediaType == type)</span>
+            </button>
+        }
+    </div>
+
+    <div class="toolbar">
+        <div class="toolbar-summary">
+            <strong>@Filtered.Count</strong> title(s) ·
+            <strong>@SizeFormatter.FormatBytes(Filtered.Sum(group => group.ReclaimableSizeBytes))</strong>
+            freed if you keep only the largest copy of each
+        </div>
+
+        <div class="toolbar-actions">
+            <label class="visually-hidden" for="duplicate-filter">Filter by title</label>
+            <input id="duplicate-filter"
+                   type="search"
+                   class="form-control form-control-sm"
+                   style="width: 14rem"
+                   placeholder="Filter by title"
+                   @bind="_filter"
+                   @bind:event="oninput"
+                   @bind:after="ResetPaging" />
+        </div>
+    </div>
+
+    @if (Filtered.Count == 0)
     {
-        <div class="card mb-3">
-            <div class="card-body">
-                <h5 class="card-title">
+        <EmptyState Icon="funnel" Text="No titles match that filter." />
+    }
+
+    @foreach (var group in Filtered.Take(_shown))
+    {
+        <div class="group-card" @key="group">
+            <div class="group-card-header">
+                <div class="group-card-title">
                     @GroupTitle(group)
-                    <span class="badge bg-secondary ms-2">@group.MediaType</span>
-                </h5>
 
-                <p class="text-muted mb-2">
-                    @group.Entries.Count copies |
-                    @SizeFormatter.FormatBytes(group.TotalSizeBytes) total |
-                    @SizeFormatter.FormatBytes(group.ReclaimableSizeBytes) potentially reclaimable
-                </p>
+                    @if (_activeType is null)
+                    {
+                        <span class="pill ms-1">@TypeLabel(group.MediaType)</span>
+                    }
+                </div>
 
-                <div class="table-responsive">
-                    <table class="table table-sm mb-0">
-                        <thead>
-                            <tr>
-                                <th>File</th>
-                                <th>Drive</th>
-                                <th>Size</th>
-                                <th>Resolution</th>
-                                <th>Codec</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @for (var i = 0; i < group.Entries.Count; i++)
-                            {
-                                var entry = group.Entries[i];
-                                var isConfirming =
-                                    _confirmDeletePath is not null &&
-                                    _confirmDeletePath.Equals(entry.CanonicalPath, StringComparison.OrdinalIgnoreCase);
+                <div class="group-card-meta">
+                    @group.Entries.Count copies ·
+                    @SizeFormatter.FormatBytes(group.ReclaimableSizeBytes) could be freed
+                </div>
+            </div>
 
-                                <tr>
-                                    <td>
-                                        @if (i == 0)
+            <div class="table-scroll">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>File</th>
+                            <th>Drive</th>
+                            <th class="col-num">Size</th>
+                            <th>Quality</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        @for (var index = 0; index < group.Entries.Count; index++)
+                        {
+                            var entry = group.Entries[index];
+                            var isLargest = index == 0;
+
+                            var isConfirming =
+                                string.Equals(_confirmPath, entry.CanonicalPath, StringComparison.OrdinalIgnoreCase);
+
+                            <tr @key="entry.CanonicalPath">
+                                <td>
+                                    <div class="file-name">
+                                        @Path.GetFileName(entry.CanonicalPath)
+
+                                        @if (isLargest)
                                         {
-                                            <span class="badge bg-success me-1">Largest</span>
+                                            <span class="pill ms-1" title="The biggest copy, usually the best quality">Largest</span>
                                         }
-                                        <code>@entry.CanonicalPath</code>
-                                    </td>
-                                    <td>@entry.DriveProfileName</td>
-                                    <td>@SizeFormatter.FormatBytes(entry.SizeBytes)</td>
-                                    <td>@(string.IsNullOrWhiteSpace(entry.Resolution) ? "-" : entry.Resolution)</td>
-                                    <td>@(string.IsNullOrWhiteSpace(entry.VideoCodec) ? "-" : entry.VideoCodec)</td>
-                                    <td>
+                                    </div>
+                                    <div class="cell-note">@Path.GetDirectoryName(entry.CanonicalPath)</div>
+                                </td>
+
+                                <td>@(string.IsNullOrWhiteSpace(entry.DriveProfileName) ? "-" : entry.DriveProfileName)</td>
+
+                                <td class="col-num">@SizeFormatter.FormatBytes(entry.SizeBytes)</td>
+
+                                <td>@Quality(entry)</td>
+
+                                <td>
+                                    <div class="cell-actions">
                                         @if (isConfirming)
                                         {
-                                            <BatchConfirmBanner CssClass="alert alert-danger p-2 mb-0"
-                                                                IsBusy="_isDeleting"
-                                                                ConfirmLabel="Confirm"
-                                                                BusyLabel="Moving..."
-                                                                OnConfirm="() => DeleteDuplicateAsync(group, entry)"
-                                                                OnCancel="() => _confirmDeletePath = null">
-                                                <Message>
-                                                    Move to Quarantine?
-                                                </Message>
-                                            </BatchConfirmBanner>
+                                            <button type="button"
+                                                    class="btn btn-danger btn-sm"
+                                                    disabled="@IsBusy"
+                                                    @onclick="() => QuarantineAsync(group, entry)">
+                                                @(_isWorking ? "Moving..." : "Move to Quarantine")
+                                            </button>
+
+                                            <button type="button"
+                                                    class="btn btn-secondary btn-sm"
+                                                    disabled="@_isWorking"
+                                                    @onclick="() => _confirmPath = null">
+                                                Cancel
+                                            </button>
                                         }
                                         else
                                         {
                                             <button type="button"
                                                     class="btn btn-outline-danger btn-sm"
-                                                    disabled="@_isDeleting"
-                                                    @onclick="() => _confirmDeletePath = entry.CanonicalPath">
-                                                <i class="bi bi-trash" aria-hidden="true"></i>
-                                                Delete
+                                                    title="Moves this copy to Quarantine. It can be restored from there."
+                                                    disabled="@IsBusy"
+                                                    @onclick="() => _confirmPath = entry.CanonicalPath">
+                                                Remove
                                             </button>
 
                                             <button type="button"
-                                                    class="btn btn-outline-secondary btn-sm ms-1"
-                                                    title="Not a duplicate - hide this file from this page"
-                                                    disabled="@_isDeleting"
-                                                    @onclick="() => IgnoreDuplicate(group, entry)">
-                                                <i class="bi bi-eye-slash" aria-hidden="true"></i>
-                                                Ignore
+                                                    class="btn btn-secondary btn-sm"
+                                                    title="Hide this file from this page. Undo it on the Ignored page."
+                                                    disabled="@IsBusy"
+                                                    @onclick="() => Ignore(group, entry)">
+                                                Not a duplicate
                                             </button>
                                         }
-                                    </td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
             </div>
         </div>
+    }
+
+    @if (Filtered.Count > _shown)
+    {
+        <button type="button"
+                class="btn btn-secondary"
+                @onclick="() => _shown += PageSize">
+            Show @Math.Min(PageSize, Filtered.Count - _shown) more (@(Filtered.Count - _shown) left)
+        </button>
     }
 }
 
 @code
 {
+    // Each title draws its own small table, so show them a page at a time
+    // rather than all at once on a big library.
+    private const int PageSize = 25;
+
+    private static readonly MediaType[] TypeOrder =
+    [
+        MediaType.Movie, MediaType.TvEpisode, MediaType.Book,
+        MediaType.Audiobook, MediaType.Music, MediaType.Comic
+    ];
+
     private List<DuplicateAssetGroup> _groups = [];
-    private int _totalAssetsScanned;
+    private int _totalAssets;
     private bool _loaded;
-    private string? _confirmDeletePath;
-    private bool _isDeleting;
+
+    private MediaType? _activeType;
+    private string _filter = string.Empty;
+    private int _shown = PageSize;
+
+    private string? _confirmPath;
+    private bool _isWorking;
+    private bool _isScanning;
+
     private string _statusMessage = string.Empty;
 
+    private bool IsBusy =>
+        _isWorking || _isScanning;
+
+    private List<MediaType> TypesPresent =>
+        TypeOrder
+            .Where(type => _groups.Any(group => group.MediaType == type))
+            .ToList();
+
+    private List<DuplicateAssetGroup> Filtered =>
+        _groups
+            .Where(group => _activeType is null || group.MediaType == _activeType)
+            .Where(group =>
+                string.IsNullOrWhiteSpace(_filter) ||
+                GroupTitle(group).Contains(_filter.Trim(), StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
     protected override async Task OnInitializedAsync()
+    {
+        _isScanning = Scans.Progress.IsRunning;
+
+        Scans.Changed += OnScanChanged;
+
+        await LoadAsync();
+    }
+
+    private void OnScanChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            var isRunning = Scans.Progress.IsRunning;
+
+            if (isRunning == _isScanning)
+            {
+                return;
+            }
+
+            var justFinished = _isScanning && !isRunning;
+
+            _isScanning = isRunning;
+
+            if (justFinished)
+            {
+                _confirmPath = null;
+
+                await LoadAsync();
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    private async Task LoadAsync()
     {
         var enabledProfiles =
             await SettingsService.GetEnabledDriveProfilesAsync();
@@ -162,30 +293,54 @@ else
         var assets =
             MediaCatalogService.GetAssets();
 
-        _totalAssetsScanned = assets.Count;
+        _totalAssets = assets.Count;
 
-        _groups =
+        var groups =
             await DuplicateAssetAnalysisService.FindDuplicatesAsync(
                 assets,
                 enabledProfiles);
 
-        // Files marked "not a duplicate" are dropped; a group left with a
-        // single copy is no longer a duplicate group.
-        foreach (var group in _groups)
+        // Files marked "not a duplicate" are dropped; a title left with a
+        // single copy is no longer a duplicate.
+        foreach (var group in groups)
         {
             group.Entries.RemoveAll(entry =>
                 IgnoredItemsService.IsIgnored(entry.CanonicalPath));
         }
 
-        _groups.RemoveAll(group => group.Entries.Count <= 1);
+        groups.RemoveAll(group => group.Entries.Count <= 1);
+
+        _groups = groups;
+
+        if (_activeType is not null &&
+            !_groups.Any(group => group.MediaType == _activeType))
+        {
+            _activeType = null;
+        }
 
         _loaded = true;
     }
 
-    private void IgnoreDuplicate(
+    private void ShowType(MediaType? type)
+    {
+        _activeType = type;
+        _confirmPath = null;
+
+        ResetPaging();
+    }
+
+    private void ResetPaging() =>
+        _shown = PageSize;
+
+    private void Ignore(
         DuplicateAssetGroup group,
         DuplicateAssetEntry entry)
     {
+        if (IsBusy)
+        {
+            return;
+        }
+
         IgnoredItemsService.Add(
             new IgnoredItem
             {
@@ -210,69 +365,115 @@ else
                 Reason = "Marked not a duplicate"
             });
 
+        RemoveEntry(group, entry);
+
+        _statusMessage =
+            $"\"{Path.GetFileName(entry.CanonicalPath)}\" won't be listed as a duplicate any more. Undo this on the Ignored page.";
+    }
+
+    private async Task QuarantineAsync(
+        DuplicateAssetGroup group,
+        DuplicateAssetEntry entry)
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        _isWorking = true;
+
+        var fileName = Path.GetFileName(entry.CanonicalPath);
+
+        try
+        {
+            var quarantinePath =
+                await QuarantineService.QuarantineFileAsync(entry.CanonicalPath);
+
+            var success =
+                !string.IsNullOrWhiteSpace(quarantinePath);
+
+            await HistoryService.AddRecordAsync(
+                new HistoryRecord
+                {
+                    ActionType = HistoryActionType.DuplicateQuarantined,
+                    FileName = fileName,
+                    LibraryPath = entry.CanonicalPath,
+                    QuarantinePath = quarantinePath ?? string.Empty,
+                    SizeBytes = entry.SizeBytes,
+                    Success = success,
+                    Message =
+                        success
+                            ? "Duplicate quarantined."
+                            : "Failed to quarantine duplicate."
+                });
+
+            if (success)
+            {
+                RemoveEntry(group, entry);
+            }
+
+            _statusMessage =
+                success
+                    ? $"Moved \"{fileName}\" to Quarantine. Delete it there to free the space, or restore it if you change your mind."
+                    : $"Couldn't move \"{fileName}\" to Quarantine. It was left where it is.";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Couldn't move \"{fileName}\" to Quarantine: {ex.Message}";
+        }
+        finally
+        {
+            _confirmPath = null;
+            _isWorking = false;
+        }
+    }
+
+    private void RemoveEntry(
+        DuplicateAssetGroup group,
+        DuplicateAssetEntry entry)
+    {
         group.Entries.Remove(entry);
 
         if (group.Entries.Count <= 1)
         {
             _groups.Remove(group);
         }
-
-        _statusMessage =
-            $"Ignored \"{Path.GetFileName(entry.CanonicalPath)}\" - it won't be listed as a duplicate. Un-ignore it on the Ignored Items page.";
     }
 
-    private async Task DeleteDuplicateAsync(
-        DuplicateAssetGroup group,
+    private static string Quality(
         DuplicateAssetEntry entry)
     {
-        _isDeleting = true;
+        var parts =
+            new[] { entry.Resolution, entry.VideoCodec }
+                .Where(part =>
+                    !string.IsNullOrWhiteSpace(part) &&
+                    !string.Equals(part, "UNKNOWN", StringComparison.OrdinalIgnoreCase))
+                .Select(part => part.ToLowerInvariant());
 
-        var quarantinePath =
-            await QuarantineService.QuarantineFileAsync(entry.CanonicalPath);
+        var text = string.Join(" · ", parts);
 
-        var success =
-            !string.IsNullOrWhiteSpace(quarantinePath);
-
-        await HistoryService.AddRecordAsync(
-            new HistoryRecord
-            {
-                ActionType = HistoryActionType.DuplicateQuarantined,
-                FileName = Path.GetFileName(entry.CanonicalPath),
-                LibraryPath = entry.CanonicalPath,
-                QuarantinePath = quarantinePath ?? string.Empty,
-                SizeBytes = entry.SizeBytes,
-                Success = success,
-                Message =
-                    success
-                        ? "Duplicate quarantined."
-                        : "Failed to quarantine duplicate."
-            });
-
-        _statusMessage =
-            success
-                ? $"Moved \"{Path.GetFileName(entry.CanonicalPath)}\" to Quarantine."
-                : $"Failed to quarantine \"{Path.GetFileName(entry.CanonicalPath)}\".";
-
-        if (success)
-        {
-            group.Entries.Remove(entry);
-
-            if (group.Entries.Count <= 1)
-            {
-                _groups.Remove(group);
-            }
-        }
-
-        _confirmDeletePath = null;
-        _isDeleting = false;
+        return text.Length == 0 ? "-" : text;
     }
+
+    private static string TypeLabel(MediaType type) =>
+        type switch
+        {
+            MediaType.Movie => "Movies",
+            MediaType.TvEpisode => "TV",
+            MediaType.Book => "Books",
+            MediaType.Audiobook => "Audiobooks",
+            MediaType.Music => "Music",
+            MediaType.Comic => "Comics",
+            _ => type.ToString()
+        };
 
     private static string GroupTitle(
         DuplicateAssetGroup group)
     {
         return group.MediaType switch
         {
-            MediaType.TvEpisode =>
+            MediaType.TvEpisode when group.Season.HasValue || group.Episode.HasValue =>
                 $"{group.Title} - S{group.Season ?? 0:00}E{group.Episode ?? 0:00}",
 
             MediaType.Book or MediaType.Audiobook or MediaType.Music or MediaType.Comic =>
@@ -286,4 +487,7 @@ else
                     : group.Title
         };
     }
+
+    public void Dispose() =>
+        Scans.Changed -= OnScanChanged;
 }

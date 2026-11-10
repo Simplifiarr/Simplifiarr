@@ -12,6 +12,22 @@
 <div class="scan-bar" role="status" aria-live="polite">
     @if (_progress.IsRunning)
     {
+        <button type="button"
+                class="topbar-btn"
+                disabled="@_progress.CancelRequested"
+                @onclick="Scans.Cancel">
+            @(_progress.CancelRequested ? "Stopping..." : "Cancel")
+        </button>
+
+        <div class="scan-bar-track"
+             role="progressbar"
+             aria-label="Scan progress"
+             aria-valuemin="0"
+             aria-valuemax="100"
+             aria-valuenow="@_progress.Percent">
+            <div class="scan-bar-fill" style="width: @(_progress.Percent)%"></div>
+        </div>
+
         <div class="scan-bar-text">
             <span class="scan-bar-title">
                 @if (string.IsNullOrEmpty(_progress.DriveName))
@@ -35,36 +51,25 @@
                 }
             </span>
         </div>
-
-        <div class="scan-bar-track"
-             role="progressbar"
-             aria-label="Scan progress"
-             aria-valuemin="0"
-             aria-valuemax="100"
-             aria-valuenow="@_progress.Percent">
-            <div class="scan-bar-fill" style="width: @(_progress.Percent)%"></div>
-        </div>
-
-        <button type="button"
-                class="scan-bar-btn"
-                disabled="@_progress.CancelRequested"
-                @onclick="Scans.Cancel">
-            @(_progress.CancelRequested ? "Stopping..." : "Cancel")
-        </button>
     }
     else
     {
-        <div class="scan-bar-text">
-            <span class="scan-bar-detail" title="@ProblemsTooltip">
-                @IdleText
-            </span>
-        </div>
-
         <button type="button"
-                class="scan-bar-btn scan-bar-btn-primary"
+                class="topbar-btn topbar-btn-primary"
                 @onclick="StartScan">
             <i class="bi bi-arrow-repeat" aria-hidden="true"></i> Scan
         </button>
+
+        <div class="scan-bar-text">
+            <span class="scan-bar-detail">@IdleText</span>
+
+            @if (ProblemCount > 0)
+            {
+                <a class="scan-bar-detail scan-bar-problems" href="" title="@ProblemsTooltip">
+                    @(ProblemCount == 1 ? "1 thing needs attention" : $"{ProblemCount} things need attention")
+                </a>
+            }
+        </div>
     }
 </div>
 
@@ -93,6 +98,9 @@
         });
     }
 
+    private int ProblemCount =>
+        Scans.LastSummary?.Problems.Count ?? 0;
+
     private string IdleText
     {
         get
@@ -106,17 +114,9 @@
 
             var when = HowLongAgo(summary.FinishedUtc);
 
-            if (summary.Cancelled)
-            {
-                return $"Scan cancelled {when}";
-            }
-
-            return summary.Problems.Count switch
-            {
-                0 => $"Scanned {when}",
-                1 => $"Scanned {when} - 1 problem",
-                _ => $"Scanned {when} - {summary.Problems.Count} problems"
-            };
+            return summary.Cancelled
+                ? $"Scan cancelled {when}"
+                : $"Scanned {when}";
         }
     }
 
