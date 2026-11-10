@@ -4,243 +4,239 @@
 @using Simplifiarr.Core.Models
 @using Simplifiarr.Core.Services
 @using Simplifiarr.Core.Utilities
-@using Simplifiarr.Web.Support
 
 @inject IQuarantineInventoryService QuarantineInventoryService
 @inject IQuarantineManagementService QuarantineManagementService
 @inject IHistoryService HistoryService
 
-<PageTitle>Quarantine</PageTitle>
+<PageTitle>Quarantine - Simplifiarr</PageTitle>
 
-<h1>Quarantine</h1>
+<PageHeader Title="Quarantine"
+            Subtitle="Files Simplifiarr moved out of your libraries, held here until you decide. Restore puts one back where it came from. Delete sends it to the Windows Recycle Bin, so even that can be undone." />
 
-<p>
-    Files moved out of libraries during hardlink remediation.
-</p>
-
-<div class="alert alert-info">
-    <strong>Delete</strong> here sends the file to the Windows Recycle
-    Bin, not a permanent delete - you can still recover it from there if
-    needed.
-</div>
-
-@if (_items is not null)
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
-    <p>
-        <strong>Files Held:</strong>
-        @_items.Count
-        <br />
-        <strong>Space Held:</strong>
-        @SizeFormatter.FormatBytes(_items.Sum(i => i.SizeBytes))
-    </p>
+    <div class="alert alert-info">
+        @_statusMessage
+    </div>
 }
-
-<StatusMessage Message="@_statusMessage" Severity="StatusSeverity.Info" />
 
 @if (_items is null)
 {
-    <p>Loading...</p>
+    <EmptyState Icon="hourglass-split" Text="Loading..." />
 }
-else if (!_items.Any())
+else if (_items.Count == 0)
 {
-    <EmptyState Icon="shield-check" Text="No quarantined files found." />
+    <EmptyState Icon="shield-check" Text="Quarantine is empty." />
 }
 else
 {
-    <p>
-        <strong>Selected:</strong>
-        @_selection.Count
-    </p>
+    @if (_isConfirmingBatch)
+    {
+        <BatchConfirmBanner CssClass="alert alert-danger"
+                            IsBusy="_isWorking"
+                            ConfirmLabel="Send to Recycle Bin"
+                            BusyLabel="Deleting..."
+                            OnConfirm="ConfirmBatchAsync"
+                            OnCancel="CancelBatch">
+            <Message>
+                <strong>
+                    Send @_pending.Count file(s)
+                    (@SizeFormatter.FormatBytes(_pending.Sum(item => item.SizeBytes))) to the Recycle Bin?
+                </strong>
+                The space is freed once the Recycle Bin is emptied.
+            </Message>
+        </BatchConfirmBanner>
+    }
+    else
+    {
+        <div class="toolbar">
+            <div class="toolbar-summary">
+                <strong>@_items.Count</strong> file(s) ·
+                <strong>@SizeFormatter.FormatBytes(_items.Sum(item => item.SizeBytes))</strong> held
+                @if (_selection.Count > 0)
+                {
+                    <text> · @_selection.Count selected</text>
+                }
+            </div>
 
-    <div class="d-flex flex-wrap gap-2 mb-3">
-        @if (_isConfirmingDeleteSelected)
-        {
-            <BatchConfirmBanner CssClass="alert alert-danger p-2 mb-0"
-                                IsBusy="_isDeleting"
-                                CanConfirm="_selection.Count > 0"
-                                ConfirmLabel="Confirm Delete Selected"
-                                BusyLabel="Deleting..."
-                                OnConfirm="DeleteSelectedAsync"
-                                OnCancel="CancelDeleteSelectedConfirmation">
-                <Message>
-                    Send @_selection.Count selected file(s) to the Recycle Bin?
-                </Message>
-            </BatchConfirmBanner>
-        }
-        else if (_isConfirmingDeleteAll)
-        {
-            <BatchConfirmBanner CssClass="alert alert-danger p-2 mb-0"
-                                IsBusy="_isDeleting"
-                                ConfirmLabel="Confirm Delete All"
-                                BusyLabel="Deleting..."
-                                OnConfirm="DeleteAllAsync"
-                                OnCancel="CancelDeleteAllConfirmation">
-                <Message>
-                    Send all @_items.Count quarantined file(s)
-                    (@SizeFormatter.FormatBytes(_items.Sum(i => i.SizeBytes))) to the Recycle Bin?
-                </Message>
-            </BatchConfirmBanner>
-        }
-        else
-        {
-            <button type="button"
-                    class="btn btn-danger"
-                    disabled="@(_selection.Count == 0)"
-                    @onclick="RequestDeleteSelectedConfirmation">
-                <i class="bi bi-trash" aria-hidden="true"></i>
-                Delete Selected (@_selection.Count)
-            </button>
+            <div class="toolbar-actions">
+                <button type="button"
+                        class="btn btn-outline-danger btn-sm"
+                        disabled="@_isWorking"
+                        @onclick="() => RequestBatch(_items.ToList())">
+                    Delete all
+                </button>
 
-            <button type="button"
-                    class="btn btn-outline-danger"
-                    @onclick="RequestDeleteAllConfirmation">
-                <i class="bi bi-trash3" aria-hidden="true"></i>
-                Delete All
-            </button>
-        }
-    </div>
+                <button type="button"
+                        class="btn btn-danger btn-sm"
+                        disabled="@(_isWorking || _selection.Count == 0)"
+                        @onclick="() => RequestBatch(_items.Where(_selection.IsSelected).ToList())">
+                    Delete selected (@_selection.Count)
+                </button>
+            </div>
+        </div>
+    }
 
-    <table class="table">
+    <div class="table-scroll">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th class="col-check">Select</th>
+                    <th>File</th>
+                    <th class="col-num">Size</th>
+                    <th>Quarantined</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
 
-        <thead>
-            <tr>
-                <th>
-                    <input type="checkbox"
-                           checked="@(_selection.Count > 0 && _selection.Count == _items.Count)"
-                           disabled="@_isDeleting"
-                           @onchange="() => _selection.ToggleSelectAll(_items)" />
-                </th>
-                <th>File</th>
-                <th>Size</th>
-                <th>Created</th>
-                <th>Path</th>
-                <th>Action</th>
-            </tr>
-        </thead>
+            <tbody>
+                @foreach (var item in _items.Take(_shown))
+                {
+                    var originalPath =
+                        _originalPaths.GetValueOrDefault(item.FullPath);
 
-        <tbody>
-        @foreach (var item in _items)
-        {
-            var isConfirmingDelete =
-                _confirmDeletePath is not null &&
-                _confirmDeletePath.Equals(
-                    item.FullPath,
-                    StringComparison.OrdinalIgnoreCase);
+                    var isConfirmingDelete =
+                        string.Equals(_confirmDeletePath, item.FullPath, StringComparison.OrdinalIgnoreCase);
 
-            var isConfirmingRestore =
-                _confirmRestorePath is not null &&
-                _confirmRestorePath.Equals(
-                    item.FullPath,
-                    StringComparison.OrdinalIgnoreCase);
+                    var isConfirmingRestore =
+                        string.Equals(_confirmRestorePath, item.FullPath, StringComparison.OrdinalIgnoreCase);
 
-            var originalPath =
-                _originalPaths.GetValueOrDefault(item.FullPath);
+                    <tr @key="item.FullPath">
+                        <SelectableCheckboxCell Checked="_selection.IsSelected(item)"
+                                                Disabled="_isWorking"
+                                                OnChanged="selected => _selection.SetSelected(item, selected)" />
 
-            <tr>
-                <SelectableCheckboxCell Checked="_selection.IsSelected(item)"
-                                        Disabled="_isDeleting"
-                                        OnChanged="selected => _selection.SetSelected(item, selected)" />
+                        <td>
+                            <div class="file-name">@item.FileName</div>
 
-                <td>@item.FileName</td>
-                <td>@SizeFormatter.FormatBytes(item.SizeBytes)</td>
-                <td>@item.CreatedUtc.ToLocalTime()</td>
-                <td>
-                    <code>@item.FullPath</code>
-                </td>
-                <td>
-                    @if (isConfirmingDelete)
-                    {
-                        <BatchConfirmBanner CssClass="alert alert-danger p-2 mb-0"
-                                            ConfirmLabel="Confirm Delete"
-                                            OnConfirm="async () => await DeleteAsync(item)"
-                                            OnCancel="CancelDeleteConfirmation">
-                            <Message>
-                                Send to the Recycle Bin?
-                            </Message>
-                        </BatchConfirmBanner>
-                    }
-                    else if (isConfirmingRestore)
-                    {
-                        <BatchConfirmBanner CssClass="alert alert-warning p-2 mb-0"
-                                            ConfirmLabel="Confirm Restore"
-                                            OnConfirm="async () => await RestoreAsync(item, originalPath!)"
-                                            OnCancel="CancelRestoreConfirmation">
-                            <Message>
-                                Restore to <code class="path-column">@originalPath</code>?
-                                This replaces whatever currently sits at that path (normally the
-                                hardlink that was created in its place).
-                            </Message>
-                        </BatchConfirmBanner>
-                    }
-                    else
-                    {
-                        <div class="d-flex flex-wrap gap-2">
                             @if (originalPath is not null)
                             {
-                                <button type="button"
-                                        class="btn btn-outline-secondary btn-sm"
-                                        disabled="@_isDeleting"
-                                        @onclick="() => RequestRestoreConfirmation(item.FullPath)">
-                                    <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>
-                                    Restore
-                                </button>
+                                <div class="cell-note">Came from @Path.GetDirectoryName(originalPath)</div>
+                            }
+                            else
+                            {
+                                <div class="cell-note">Original location not on record, so it can't be restored from here</div>
                             }
 
-                            <button type="button"
-                                    class="btn btn-danger btn-sm"
-                                    disabled="@_isDeleting"
-                                    @onclick="() => RequestDeleteConfirmation(item.FullPath)">
-                                <i class="bi bi-trash" aria-hidden="true"></i>
-                                Delete
-                            </button>
-                        </div>
-                    }
-                </td>
-            </tr>
-        }
-        </tbody>
+                            @if (isConfirmingRestore)
+                            {
+                                <div class="cell-note status-warn">
+                                    Restoring replaces whatever is at that path now - normally the hardlink that took this file's place.
+                                </div>
+                            }
+                        </td>
 
-    </table>
+                        <td class="col-num">@SizeFormatter.FormatBytes(item.SizeBytes)</td>
+
+                        <td style="white-space: nowrap">@item.CreatedUtc.ToLocalTime().ToString("g")</td>
+
+                        <td>
+                            <div class="cell-actions">
+                                @if (isConfirmingDelete)
+                                {
+                                    <button type="button"
+                                            class="btn btn-danger btn-sm"
+                                            disabled="@_isWorking"
+                                            @onclick="() => DeleteManyAsync([item])">
+                                        Send to Recycle Bin
+                                    </button>
+
+                                    <button type="button"
+                                            class="btn btn-secondary btn-sm"
+                                            disabled="@_isWorking"
+                                            @onclick="() => _confirmDeletePath = null">
+                                        Cancel
+                                    </button>
+                                }
+                                else if (isConfirmingRestore)
+                                {
+                                    <button type="button"
+                                            class="btn btn-primary btn-sm"
+                                            disabled="@_isWorking"
+                                            @onclick="() => RestoreAsync(item, originalPath!)">
+                                        Confirm restore
+                                    </button>
+
+                                    <button type="button"
+                                            class="btn btn-secondary btn-sm"
+                                            disabled="@_isWorking"
+                                            @onclick="() => _confirmRestorePath = null">
+                                        Cancel
+                                    </button>
+                                }
+                                else
+                                {
+                                    @if (originalPath is not null)
+                                    {
+                                        <button type="button"
+                                                class="btn btn-secondary btn-sm"
+                                                disabled="@_isWorking"
+                                                @onclick="() => AskRestore(item.FullPath)">
+                                            Restore
+                                        </button>
+                                    }
+
+                                    <button type="button"
+                                            class="btn btn-outline-danger btn-sm"
+                                            disabled="@_isWorking"
+                                            @onclick="() => AskDelete(item.FullPath)">
+                                        Delete
+                                    </button>
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (_items.Count > _shown)
+    {
+        <button type="button"
+                class="btn btn-secondary mt-3"
+                @onclick="() => _shown += PageSize">
+            Show @Math.Min(PageSize, _items.Count - _shown) more (@(_items.Count - _shown) left)
+        </button>
+    }
 }
 
-@code {
+@code
+{
+    private const int PageSize = 100;
 
     private List<QuarantineItem>? _items;
 
+    // Where each quarantined file came from, looked up from History.
     private Dictionary<string, string> _originalPaths =
         new(StringComparer.OrdinalIgnoreCase);
 
-    private string? _confirmDeletePath;
-    private string? _confirmRestorePath;
-
-    private bool _isConfirmingDeleteSelected;
-    private bool _isConfirmingDeleteAll;
-    private bool _isDeleting;
-
-    private string _statusMessage = string.Empty;
+    private List<QuarantineItem> _pending = [];
 
     private readonly CandidateSelection<QuarantineItem> _selection =
         new(item => item.FullPath);
 
-    protected override async Task OnInitializedAsync()
-    {
-        await RefreshAsync();
-    }
+    private int _shown = PageSize;
+
+    private string? _confirmDeletePath;
+    private string? _confirmRestorePath;
+
+    private bool _isConfirmingBatch;
+    private bool _isWorking;
+
+    private string _statusMessage = string.Empty;
+
+    protected override Task OnInitializedAsync() =>
+        RefreshAsync();
 
     private async Task RefreshAsync()
     {
         _items =
-            await QuarantineInventoryService.GetItemsAsync();
+            (await QuarantineInventoryService.GetItemsAsync())
+                .OrderByDescending(item => item.CreatedUtc)
+                .ToList();
 
-        await LoadOriginalPathsAsync();
-
-        _selection.Clear();
-
-        StateHasChanged();
-    }
-
-    private async Task LoadOriginalPathsAsync()
-    {
         var history =
             await HistoryService.GetHistoryAsync();
 
@@ -257,150 +253,114 @@ else
                     group => group.Key,
                     group => group.First().LibraryPath,
                     StringComparer.OrdinalIgnoreCase);
+
+        _selection.Clear();
+        _confirmDeletePath = null;
+        _confirmRestorePath = null;
     }
 
-    private void RequestDeleteConfirmation(string fullPath)
+    private void AskDelete(string fullPath)
     {
         _confirmRestorePath = null;
         _confirmDeletePath = fullPath;
     }
 
-    private void CancelDeleteConfirmation()
-    {
-        _confirmDeletePath = null;
-    }
-
-    private async Task DeleteAsync(
-        QuarantineItem item)
-    {
-        var deleted =
-            await QuarantineManagementService.DeleteAsync(
-                item.FullPath);
-
-        if (deleted)
-        {
-            _confirmDeletePath = null;
-
-            await RefreshAsync();
-        }
-    }
-
-    private void RequestRestoreConfirmation(string fullPath)
+    private void AskRestore(string fullPath)
     {
         _confirmDeletePath = null;
         _confirmRestorePath = fullPath;
     }
 
-    private void CancelRestoreConfirmation()
+    private void RequestBatch(
+        List<QuarantineItem> items)
     {
+        if (_isWorking || items.Count == 0)
+        {
+            return;
+        }
+
+        _confirmDeletePath = null;
         _confirmRestorePath = null;
+
+        _pending = items;
+        _isConfirmingBatch = true;
+    }
+
+    private void CancelBatch()
+    {
+        _isConfirmingBatch = false;
+        _pending = [];
+    }
+
+    private async Task ConfirmBatchAsync()
+    {
+        var items = _pending.ToList();
+
+        CancelBatch();
+
+        await DeleteManyAsync(items);
     }
 
     private async Task RestoreAsync(
         QuarantineItem item,
         string originalLibraryPath)
     {
-        var restored =
-            await QuarantineManagementService.RestoreAsync(
-                item.FullPath,
-                originalLibraryPath);
-
-        _confirmRestorePath = null;
-
-        _statusMessage =
-            restored
-                ? $"Restored {item.FileName} to its original library path."
-                : $"Failed to restore {item.FileName}.";
-
-        if (restored)
+        if (_isWorking)
         {
+            return;
+        }
+
+        _isWorking = true;
+
+        try
+        {
+            var restored =
+                await QuarantineManagementService.RestoreAsync(
+                    item.FullPath,
+                    originalLibraryPath);
+
+            _statusMessage =
+                restored
+                    ? $"Restored {item.FileName} to where it came from."
+                    : $"Couldn't restore {item.FileName}. It is still in Quarantine.";
+
             await RefreshAsync();
         }
-    }
-
-    private void RequestDeleteSelectedConfirmation()
-    {
-        if (_isDeleting || _selection.Count == 0)
+        catch (Exception ex)
         {
-            return;
+            _statusMessage =
+                $"Couldn't restore {item.FileName}: {ex.Message}";
         }
-
-        _isConfirmingDeleteSelected = true;
-    }
-
-    private void CancelDeleteSelectedConfirmation()
-    {
-        _isConfirmingDeleteSelected = false;
-    }
-
-    private async Task DeleteSelectedAsync()
-    {
-        if (_isDeleting || _items is null || _selection.Count == 0)
+        finally
         {
-            return;
+            _isWorking = false;
         }
-
-        var selectedPaths =
-            _selection.SelectedKeys.ToList();
-
-        var itemsToDelete =
-            _items
-                .Where(item => selectedPaths.Contains(item.FullPath))
-                .ToList();
-
-        await DeleteManyAsync(itemsToDelete);
-
-        _isConfirmingDeleteSelected = false;
-    }
-
-    private void RequestDeleteAllConfirmation()
-    {
-        if (_isDeleting || _items is null || _items.Count == 0)
-        {
-            return;
-        }
-
-        _isConfirmingDeleteAll = true;
-    }
-
-    private void CancelDeleteAllConfirmation()
-    {
-        _isConfirmingDeleteAll = false;
-    }
-
-    private async Task DeleteAllAsync()
-    {
-        if (_isDeleting || _items is null)
-        {
-            return;
-        }
-
-        await DeleteManyAsync(_items.ToList());
-
-        _isConfirmingDeleteAll = false;
     }
 
     private async Task DeleteManyAsync(
-        List<QuarantineItem> itemsToDelete)
+        List<QuarantineItem> items)
     {
-        _isDeleting = true;
+        if (_isWorking || items.Count == 0)
+        {
+            return;
+        }
+
+        _isWorking = true;
 
         await InvokeAsync(StateHasChanged);
 
         var deleted = 0;
         var failed = 0;
+        var bytes = 0L;
 
         try
         {
-            foreach (var item in itemsToDelete)
+            foreach (var item in items)
             {
-                var success =
-                    await QuarantineManagementService.DeleteAsync(
-                        item.FullPath);
-
-                if (success)
+                if (await QuarantineManagementService.DeleteAsync(item.FullPath))
                 {
                     deleted++;
+                    bytes += item.SizeBytes;
                 }
                 else
                 {
@@ -410,16 +370,21 @@ else
 
             _statusMessage =
                 failed == 0
-                    ? $"Deleted {deleted} file(s)."
-                    : $"Deleted {deleted} file(s). {failed} failed.";
+                    ? $"Sent {deleted} file(s) ({SizeFormatter.FormatBytes(bytes)}) to the Recycle Bin."
+                    : $"Sent {deleted} file(s) to the Recycle Bin; {failed} could not be deleted and are still here.";
+
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Stopped part-way: {ex.Message}";
 
             await RefreshAsync();
         }
         finally
         {
-            _isDeleting = false;
-
-            await InvokeAsync(StateHasChanged);
+            _isWorking = false;
         }
     }
 }

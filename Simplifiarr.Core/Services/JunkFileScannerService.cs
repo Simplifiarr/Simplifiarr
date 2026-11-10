@@ -100,6 +100,25 @@ public class JunkFileScannerService
         var candidates =
             new List<JunkFileCandidate>();
 
+        // The promise of this feature is that downloads are never touched,
+        // because a torrent may still be seeding them. If a library folder
+        // is set so wide that it contains a downloads folder, that promise
+        // still has to hold - so anything inside one is skipped.
+        var downloadFolders =
+            new[]
+            {
+                profile.DownloadPath,
+                profile.SeedOnlyPath,
+                profile.AudiobookDownloadPath,
+                profile.MusicDownloadPath,
+                profile.ComicDownloadPath
+            }
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .ToList();
+
+        var seenPaths =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var (libraryPath, isBookLibrary) in libraryPaths)
         {
             var files =
@@ -109,6 +128,18 @@ public class JunkFileScannerService
 
             foreach (var file in files)
             {
+                if (downloadFolders.Any(folder =>
+                        PathContainment.IsPathUnderRoot(file.FullPath, folder)))
+                {
+                    continue;
+                }
+
+                // One library folder inside another would list a file twice.
+                if (!seenPaths.Add(file.FullPath))
+                {
+                    continue;
+                }
+
                 var reason =
                     Classify(file, isBookLibrary);
 

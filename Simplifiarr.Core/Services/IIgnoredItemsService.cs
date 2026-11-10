@@ -21,4 +21,10 @@ public interface IIgnoredItemsService
 
     void Remove(
         string sourcePath);
+
+    /// <summary>
+    /// Un-ignores several items with one save. Returns how many were removed.
+    /// </summary>
+    int RemoveRange(
+        IEnumerable<string> sourcePaths);
 }

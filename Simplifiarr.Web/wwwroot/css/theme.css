@@ -1051,7 +1051,8 @@ a.stat-card:focus-visible {
     white-space: nowrap;
 }
 
-.table details > summary {
+.table details > summary,
+.table .btn {
     white-space: nowrap;
 }
 

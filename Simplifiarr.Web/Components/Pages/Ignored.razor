@@ -6,124 +6,274 @@
 
 @inject IIgnoredItemsService IgnoredItemsService
 
-<PageTitle>Ignored Items</PageTitle>
+<PageTitle>Ignored - Simplifiarr</PageTitle>
 
-<h1>Ignored Items</h1>
-
-<p>
-    Items you've chosen to dismiss from Hardlinks or Potential Duplicates.
-    They're still recognized by Simplifiarr but won't show up as promotion
-    opportunities or duplicates. Un-ignoring a promotion item makes it
-    eligible again the next time you rescan that library; an un-ignored
-    duplicate reappears on the Duplicates page right away.
-</p>
-
-<p>
-    <a href="hardlinks">Back to Hardlinks</a>
-</p>
+<PageHeader Title="Ignored"
+            Subtitle="Files you've told Simplifiarr to stop suggesting on Hardlinks or Duplicates. Un-ignore one and it can be suggested again: straight away on Duplicates, after the next scan on Hardlinks." />
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
-    <div class="alert alert-info mt-3">
+    <div class="alert alert-info">
         @_statusMessage
     </div>
 }
 
 @if (_items.Count == 0)
 {
-    <EmptyState Icon="eye-slash" Text="Nothing is currently ignored." />
+    <EmptyState Icon="eye-slash" Text="Nothing is ignored." />
 }
 else
 {
-    <p>
-        <strong>@_items.Count</strong> ignored item(s).
-    </p>
+    <div class="app-tabs" role="tablist" aria-label="Category">
+        <button type="button"
+                role="tab"
+                aria-selected="@(_activeCategory is null)"
+                class="app-tab @(_activeCategory is null ? "active" : null)"
+                @onclick="() => ShowCategory(null)">
+            All <span class="app-tab-count">@_items.Count</span>
+        </button>
 
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Category</th>
-                <th>Item</th>
-                <th>Drive</th>
-                <th>Ignored</th>
-                <th>Reason</th>
-                <th>Action</th>
-            </tr>
-        </thead>
+        @foreach (var category in CategoriesPresent)
+        {
+            <button type="button"
+                    role="tab"
+                    aria-selected="@(_activeCategory == category)"
+                    class="app-tab @(_activeCategory == category ? "active" : null)"
+                    @onclick="() => ShowCategory(category)">
+                @CategoryLabel(category) <span class="app-tab-count">@_items.Count(item => item.Category == category)</span>
+            </button>
+        }
+    </div>
 
-        <tbody>
-            @foreach (var item in _items)
-            {
-                <tr>
-                    <td>@item.Category</td>
+    @if (_isConfirmingCleanup)
+    {
+        <BatchConfirmBanner ConfirmLabel="Remove entries"
+                            OnConfirm="RemoveMissing"
+                            OnCancel="() => _isConfirmingCleanup = false">
+            <Message>
+                <strong>Remove @_missingCount entries whose file no longer exists?</strong>
+                Those files are gone (deleted, moved or renamed), so there is nothing
+                left to ignore. If a drive is unplugged or offline right now, plug it
+                in first - its files would look missing.
+            </Message>
+        </BatchConfirmBanner>
+    }
+    else
+    {
+        <div class="toolbar">
+            <div class="toolbar-summary">
+                <strong>@Filtered.Count</strong> ignored file(s)
+                @if (_missingCount > 0)
+                {
+                    <text> · @_missingCount point at a file that no longer exists</text>
+                }
+            </div>
 
-                    <td>
-                        <strong>@item.Title</strong>
+            <div class="toolbar-actions">
+                <label class="visually-hidden" for="ignored-filter">Filter by title or path</label>
+                <input id="ignored-filter"
+                       type="search"
+                       class="form-control form-control-sm"
+                       style="width: 14rem"
+                       placeholder="Filter by title or path"
+                       @bind="_filter"
+                       @bind:event="oninput"
+                       @bind:after="ResetPaging" />
 
-                        @if (item.Category == IgnoredCategory.Tv)
-                        {
-                            <div class="text-muted small">
-                                @(item.Season.HasValue ? $"Season {item.Season:00}" : "Season Unknown")
-                                @(item.Episode.HasValue ? $" · Episode {item.Episode:00}" : string.Empty)
-                            </div>
-                        }
-                        else if (item.Category == IgnoredCategory.Movie && item.Year.HasValue)
-                        {
-                            <div class="text-muted small">@item.Year</div>
-                        }
-                        else if (item.Category is IgnoredCategory.Book or IgnoredCategory.Audiobook or IgnoredCategory.Music or IgnoredCategory.Comic &&
-                                 !string.IsNullOrWhiteSpace(item.Author))
-                        {
-                            <div class="text-muted small">@item.Author</div>
-                        }
+                @if (_missingCount > 0)
+                {
+                    <button type="button"
+                            class="btn btn-secondary btn-sm"
+                            @onclick="() => _isConfirmingCleanup = true">
+                        Tidy up (@_missingCount)
+                    </button>
+                }
+            </div>
+        </div>
+    }
 
-                        <div class="text-muted small">
-                            <code>@item.SourcePath</code>
-                        </div>
-                    </td>
+    @if (Filtered.Count == 0)
+    {
+        <EmptyState Icon="funnel" Text="Nothing matches that filter." />
+    }
+    else
+    {
+        <div class="table-scroll">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>File</th>
+                        <th>Type</th>
+                        <th>Drive</th>
+                        <th>Ignored</th>
+                        <th>Why</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
 
-                    <td>@item.DriveProfileName</td>
+                <tbody>
+                    @foreach (var item in Filtered.Take(_shown))
+                    {
+                        <tr @key="item.SourcePath">
+                            <td>
+                                <div class="file-name">@item.Title</div>
 
-                    <td>@item.IgnoredUtc.ToLocalTime().ToString("g")</td>
+                                @if (!string.IsNullOrWhiteSpace(Detail(item)))
+                                {
+                                    <div class="cell-note">@Detail(item)</div>
+                                }
 
-                    <td>@item.Reason</td>
+                                <div class="cell-note">@item.SourcePath</div>
 
-                    <td>
-                        <button type="button"
-                                class="btn btn-secondary btn-sm"
-                                @onclick="() => Unignore(item.SourcePath)">
-                            <i class="bi bi-eye" aria-hidden="true"></i>
-                            Un-ignore
-                        </button>
-                    </td>
-                </tr>
-            }
-        </tbody>
-    </table>
+                                @if (_missingPaths.Contains(item.SourcePath))
+                                {
+                                    <div class="cell-note status-warn">File no longer exists</div>
+                                }
+                            </td>
+
+                            <td>@CategoryLabel(item.Category)</td>
+                            <td>@(string.IsNullOrWhiteSpace(item.DriveProfileName) ? "-" : item.DriveProfileName)</td>
+                            <td>@item.IgnoredUtc.ToLocalTime().ToString("d")</td>
+                            <td>@item.Reason</td>
+
+                            <td>
+                                <button type="button"
+                                        class="btn btn-secondary btn-sm"
+                                        @onclick="() => Unignore(item)">
+                                    Un-ignore
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (Filtered.Count > _shown)
+        {
+            <button type="button"
+                    class="btn btn-secondary mt-3"
+                    @onclick="() => _shown += PageSize">
+                Show @Math.Min(PageSize, Filtered.Count - _shown) more (@(Filtered.Count - _shown) left)
+            </button>
+        }
+    }
 }
 
 @code
 {
+    private const int PageSize = 100;
+
     private IReadOnlyList<IgnoredItem> _items = [];
+
+    // Entries whose file is gone. Worked out once per load, not per redraw -
+    // it means asking the disk about every entry.
+    private HashSet<string> _missingPaths =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private int _missingCount;
+
+    private IgnoredCategory? _activeCategory;
+    private string _filter = string.Empty;
+    private int _shown = PageSize;
+
+    private bool _isConfirmingCleanup;
 
     private string _statusMessage = string.Empty;
 
-    protected override void OnInitialized()
-    {
+    private List<IgnoredCategory> CategoriesPresent =>
+        Enum.GetValues<IgnoredCategory>()
+            .Where(category => _items.Any(item => item.Category == category))
+            .ToList();
+
+    private List<IgnoredItem> Filtered =>
+        _items
+            .Where(item => _activeCategory is null || item.Category == _activeCategory)
+            .Where(item =>
+                string.IsNullOrWhiteSpace(_filter) ||
+                item.Title.Contains(_filter.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                item.SourcePath.Contains(_filter.Trim(), StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+    protected override void OnInitialized() =>
         LoadItems();
-    }
 
     private void LoadItems()
     {
         _items = IgnoredItemsService.GetAll();
+
+        _missingPaths =
+            _items
+                .Select(item => item.SourcePath)
+                .Where(path => !File.Exists(path))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        _missingCount = _missingPaths.Count;
+
+        if (_activeCategory is not null &&
+            !_items.Any(item => item.Category == _activeCategory))
+        {
+            _activeCategory = null;
+        }
     }
 
-    private void Unignore(string sourcePath)
+    private void ShowCategory(IgnoredCategory? category)
     {
-        IgnoredItemsService.Remove(sourcePath);
+        _activeCategory = category;
+
+        ResetPaging();
+    }
+
+    private void ResetPaging() =>
+        _shown = PageSize;
+
+    private void Unignore(IgnoredItem item)
+    {
+        IgnoredItemsService.Remove(item.SourcePath);
+
         LoadItems();
 
         _statusMessage =
-            "Un-ignored. Rescan that library on Hardlinks to see it again as an opportunity.";
+            $"\"{item.Title}\" is no longer ignored. It can show up again after the next scan.";
     }
+
+    private void RemoveMissing()
+    {
+        var removed =
+            IgnoredItemsService.RemoveRange(_missingPaths.ToList());
+
+        _isConfirmingCleanup = false;
+
+        LoadItems();
+
+        _statusMessage =
+            $"Removed {removed} entries for files that no longer exist.";
+    }
+
+    private static string CategoryLabel(IgnoredCategory category) =>
+        category switch
+        {
+            IgnoredCategory.Movie => "Movies",
+            IgnoredCategory.Tv => "TV",
+            IgnoredCategory.Book => "Books",
+            IgnoredCategory.Audiobook => "Audiobooks",
+            IgnoredCategory.Music => "Music",
+            IgnoredCategory.Comic => "Comics",
+            _ => category.ToString()
+        };
+
+    // The line under the title: season/episode, year or author, by type.
+    private static string Detail(IgnoredItem item) =>
+        item.Category switch
+        {
+            IgnoredCategory.Tv =>
+                (item.Season.HasValue ? $"Season {item.Season:00}" : "Season unknown") +
+                (item.Episode.HasValue ? $" · Episode {item.Episode:00}" : string.Empty),
+
+            IgnoredCategory.Movie =>
+                item.Year?.ToString() ?? string.Empty,
+
+            _ =>
+                item.Author ?? string.Empty
+        };
 }

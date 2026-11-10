@@ -1,313 +1,241 @@
 @page "/blocked-files"
 @rendermode InteractiveServer
+@inherits ScanAwareComponent
 
 @using Simplifiarr.Core.Models
 @using Simplifiarr.Core.Services
 @using Simplifiarr.Core.Utilities
-@using Simplifiarr.Web.Support
 
 @inject ISettingsService SettingsService
 @inject IBlockedFileService BlockedFileService
 @inject IBlockedFileCacheService BlockedFileCache
 
-<PageTitle>Blocked Files</PageTitle>
+<PageTitle>Blocked Files - Simplifiarr</PageTitle>
 
-<h1>Blocked Files</h1>
-
-<p>
-    Windows attaches a hidden "Mark of the Web" (a Zone.Identifier stream)
-    to files that came from the internet or another computer, which can
-    trip security prompts and interfere with media servers. This scans
-    your already-cataloged Movies, TV episodes, Books, Audiobooks, Music,
-    and Comics for that marker - report-only, nothing is unblocked until
-    you explicitly select files (or Unblock All) below. Unblocking only
-    ever touches the specific files listed here, never a system-wide
-    policy change.
-</p>
+<PageHeader Title="Blocked Files"
+            Subtitle="Library files Windows has marked as coming from the internet or another computer. That mark can cause security prompts and trip up media servers. Unblocking removes the mark from the file and changes nothing else." />
 
 @if (_profiles.Count == 0)
 {
     <div class="alert alert-warning">
-        No enabled drive profiles are configured.
+        No drives are set up yet. <a href="settings">Add one in Settings</a>.
     </div>
+}
+else if (IsScanning)
+{
+    <div class="alert alert-info">
+        A scan is running. This page will update when it finishes.
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert alert-info">
+        @_statusMessage
+    </div>
+}
+
+@if (!_hasScanned)
+{
+    <EmptyState Icon="search" Text="No scan has checked for blocked files yet. Press Scan at the top of the page." />
+}
+else if (_files.Count == 0)
+{
+    <EmptyState Icon="shield-check" Text="No library files are blocked." />
 }
 else
 {
-    <div class="row g-3 mt-2">
-        @foreach (var profile in _profiles)
-        {
-            <div class="col-md-6">
-                <DriveScanCard DriveName="@profile.Name"
-                               Paths="BuildPaths(profile)"
-                               Rows="BuildRows(profile)"
-                               IsScanningDrive="@(_isScanningDrive == profile.Name)"
-                               OnScanDrive="() => ScanAsync(profile.Name)" />
-            </div>
-        }
-    </div>
-}
-
-<StatusMessage Message="@_statusMessage" Severity="StatusSeverity.Info" />
-
-@if (_loaded)
-{
-    @if (_files.Count == 0)
+    @if (_isConfirming)
     {
-        <EmptyState Icon="shield-check" Text="No blocked files found in the currently scanned data." />
+        <BatchConfirmBanner IsBusy="_isUnblocking"
+                            ConfirmLabel="Unblock"
+                            BusyLabel="Unblocking..."
+                            OnConfirm="ConfirmAsync"
+                            OnCancel="CancelConfirm">
+            <Message>
+                <strong>Unblock @_pending.Count file(s)?</strong>
+                Only these files are changed - no Windows security setting is touched.
+            </Message>
+        </BatchConfirmBanner>
     }
     else
     {
-        <p class="mt-3">
-            <strong>@_files.Count</strong> blocked file(s) |
-            <strong>@SizeFormatter.FormatBytes(_files.Sum(f => f.SizeBytes))</strong> total
-        </p>
+        <div class="toolbar">
+            <div class="toolbar-summary">
+                <strong>@_files.Count</strong> blocked file(s) ·
+                <strong>@SizeFormatter.FormatBytes(_files.Sum(file => file.SizeBytes))</strong>
+                @if (_selection.Count > 0)
+                {
+                    <text> · @_selection.Count selected</text>
+                }
+            </div>
 
-        <div class="d-flex flex-wrap gap-2 mb-3">
-            @if (_isConfirmingUnblockSelected)
-            {
-                <BatchConfirmBanner CssClass="alert alert-warning p-2 mb-0"
-                                    IsBusy="_isUnblocking"
-                                    CanConfirm="_selection.Count > 0"
-                                    ConfirmLabel="Confirm Unblock Selected"
-                                    BusyLabel="Unblocking..."
-                                    OnConfirm="UnblockSelectedAsync"
-                                    OnCancel="() => _isConfirmingUnblockSelected = false">
-                    <Message>
-                        Unblock @_selection.Count selected file(s)?
-                    </Message>
-                </BatchConfirmBanner>
-            }
-            else if (_isConfirmingUnblockAll)
-            {
-                <BatchConfirmBanner CssClass="alert alert-warning p-2 mb-0"
-                                    IsBusy="_isUnblocking"
-                                    ConfirmLabel="Confirm Unblock All"
-                                    BusyLabel="Unblocking..."
-                                    OnConfirm="UnblockAllAsync"
-                                    OnCancel="() => _isConfirmingUnblockAll = false">
-                    <Message>
-                        Unblock all @_files.Count listed file(s)? This only
-                        touches files scanned here - nothing else on your
-                        system is affected.
-                    </Message>
-                </BatchConfirmBanner>
-            }
-            else
-            {
+            <div class="toolbar-actions">
                 <button type="button"
-                        class="btn btn-warning"
-                        disabled="@(_selection.Count == 0 || _isUnblocking)"
-                        @onclick="() => _isConfirmingUnblockSelected = true">
-                    <i class="bi bi-unlock" aria-hidden="true"></i>
-                    Unblock Selected (@_selection.Count)
+                        class="btn btn-secondary btn-sm"
+                        disabled="@IsBusy"
+                        @onclick="() => RequestConfirm(_files.ToList())">
+                    Unblock all
                 </button>
 
                 <button type="button"
-                        class="btn btn-outline-warning"
-                        disabled="@_isUnblocking"
-                        @onclick="() => _isConfirmingUnblockAll = true">
-                    <i class="bi bi-unlock" aria-hidden="true"></i>
-                    Unblock All
+                        class="btn btn-primary btn-sm"
+                        disabled="@(IsBusy || _selection.Count == 0)"
+                        @onclick="() => RequestConfirm(_files.Where(_selection.IsSelected).ToList())">
+                    Unblock selected (@_selection.Count)
                 </button>
-            }
+            </div>
         </div>
+    }
 
-        <div class="table-responsive">
-            <table class="table table-sm">
-                <thead>
-                    <tr>
-                        <th>
-                            <input type="checkbox"
-                                   checked="@(_selection.Count > 0 && _selection.Count == _files.Count)"
-                                   @onchange="() => _selection.ToggleSelectAll(_files)" />
-                        </th>
-                        <th>Title</th>
-                        <th>Type</th>
-                        <th>Drive</th>
-                        <th>Size</th>
-                        <th>Source</th>
-                        <th>Path</th>
-                        <th></th>
+    <div class="table-scroll">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th class="col-check">Select</th>
+                    <th>File</th>
+                    <th>Type</th>
+                    <th>Drive</th>
+                    <th class="col-num">Size</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                @foreach (var file in _files.Take(_shown))
+                {
+                    <tr @key="file.CanonicalPath">
+                        <SelectableCheckboxCell Checked="_selection.IsSelected(file)"
+                                                Disabled="IsBusy"
+                                                OnChanged="selected => _selection.SetSelected(file, selected)" />
+
+                        <td>
+                            <div class="file-name">@file.Title</div>
+                            <div class="cell-note">@file.CanonicalPath</div>
+
+                            @if (!string.IsNullOrWhiteSpace(file.SourceUrl))
+                            {
+                                <div class="cell-note">Came from: @file.SourceUrl</div>
+                            }
+                        </td>
+
+                        <td>@TypeLabel(file.MediaType)</td>
+                        <td>@file.DriveProfileName</td>
+                        <td class="col-num">@SizeFormatter.FormatBytes(file.SizeBytes)</td>
+
+                        <td>
+                            <button type="button"
+                                    class="btn btn-secondary btn-sm"
+                                    disabled="@IsBusy"
+                                    @onclick="() => UnblockAsync([file])">
+                                Unblock
+                            </button>
+                        </td>
                     </tr>
-                </thead>
-                <tbody>
-                    @foreach (var file in _files)
-                    {
-                        <tr>
-                            <SelectableCheckboxCell Checked="_selection.IsSelected(file)"
-                                                    Disabled="_isUnblocking"
-                                                    OnChanged="selected => _selection.SetSelected(file, selected)" />
-                            <td>@file.Title</td>
-                            <td>@file.MediaType</td>
-                            <td>@file.DriveProfileName</td>
-                            <td>@SizeFormatter.FormatBytes(file.SizeBytes)</td>
-                            <td>@(string.IsNullOrWhiteSpace(file.SourceUrl) ? "-" : file.SourceUrl)</td>
-                            <td><code>@file.CanonicalPath</code></td>
-                            <td>
-                                <button type="button"
-                                        class="btn btn-outline-warning btn-sm"
-                                        disabled="@_isUnblocking"
-                                        @onclick="() => UnblockOneAsync(file)">
-                                    <i class="bi bi-unlock" aria-hidden="true"></i>
-                                    Unblock
-                                </button>
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (_files.Count > _shown)
+    {
+        <button type="button"
+                class="btn btn-secondary mt-3"
+                @onclick="() => _shown += PageSize">
+            Show @Math.Min(PageSize, _files.Count - _shown) more (@(_files.Count - _shown) left)
+        </button>
     }
 }
 
 @code
 {
+    private const int PageSize = 100;
+
     private List<DriveProfile> _profiles = [];
+
     private List<BlockedFile> _files = [];
-    private bool _loaded;
-    private string? _isScanningDrive;
-    private string _statusMessage = string.Empty;
-    private bool _isUnblocking;
-    private bool _isConfirmingUnblockSelected;
-    private bool _isConfirmingUnblockAll;
+
+    private List<BlockedFile> _pending = [];
 
     private readonly CandidateSelection<BlockedFile> _selection =
         new(file => file.CanonicalPath);
+
+    private int _shown = PageSize;
+
+    private string _statusMessage = string.Empty;
+
+    private bool _hasScanned;
+    private bool _isUnblocking;
+    private bool _isConfirming;
+
+    private bool IsBusy =>
+        _isUnblocking || IsScanning;
 
     protected override async Task OnInitializedAsync()
     {
         _profiles =
             await SettingsService.GetEnabledDriveProfilesAsync();
 
-        await LoadCachedAsync();
+        await LoadAsync();
     }
 
-    private async Task LoadCachedAsync()
+    protected override async Task OnScanFinishedAsync()
+    {
+        CancelConfirm();
+
+        _selection.Clear();
+        _statusMessage = string.Empty;
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
     {
         _files =
             await BlockedFileService.GetBlockedFilesAsync(forceRefresh: false);
 
-        _loaded = true;
+        _hasScanned =
+            _profiles.Any(profile =>
+                BlockedFileCache.GetLastScanUtc(profile.Name).HasValue);
     }
 
-    private static List<DriveScanCardPath> BuildPaths(
-        DriveProfile profile)
+    private void RequestConfirm(
+        List<BlockedFile> files)
     {
-        var paths = new List<DriveScanCardPath>();
-
-        void AddIfSet(string label, string path)
-        {
-            if (!string.IsNullOrWhiteSpace(path))
-            {
-                paths.Add(new DriveScanCardPath { Label = label, Path = path });
-            }
-        }
-
-        AddIfSet("Movies", profile.MovieLibraryPath);
-        AddIfSet("TV", profile.TvLibraryPath);
-        AddIfSet("Books", profile.BookLibraryPath);
-        AddIfSet("Audiobooks", profile.AudiobookLibraryPath);
-        AddIfSet("Music", profile.MusicLibraryPath);
-        AddIfSet("Comics", profile.ComicLibraryPath);
-
-        return paths;
-    }
-
-    private List<DriveScanCardRow> BuildRows(
-        DriveProfile profile)
-    {
-        return
-        [
-            new DriveScanCardRow
-            {
-                Label = "Blocked Files",
-                Count = _files.Count(file =>
-                    string.Equals(file.DriveProfileName, profile.Name, StringComparison.OrdinalIgnoreCase)),
-                LastScanText = FormatScanTime(BlockedFileCache.GetLastScanUtc(profile.Name)),
-                IsScanning = _isScanningDrive == profile.Name,
-                IsDisabled = _isScanningDrive is not null,
-                OnScanClick = () => ScanAsync(profile.Name)
-            }
-        ];
-    }
-
-    private static string FormatScanTime(
-        DateTime? lastScanUtc)
-    {
-        return lastScanUtc is null
-            ? "Never"
-            : lastScanUtc.Value.ToLocalTime().ToString("g");
-    }
-
-    private async Task ScanAsync(
-        string driveName)
-    {
-        if (_isScanningDrive is not null)
+        if (IsBusy || files.Count == 0)
         {
             return;
         }
 
-        _isScanningDrive = driveName;
-        _statusMessage = $"Scanning {driveName}...";
-        await InvokeAsync(StateHasChanged);
-
-        try
-        {
-            await BlockedFileService.GetBlockedFilesAsync(
-                driveName,
-                forceRefresh: true);
-
-            await LoadCachedAsync();
-
-            _statusMessage = $"Scan complete for {driveName}.";
-        }
-        catch (Exception ex)
-        {
-            _statusMessage = $"Scan failed: {ex.Message}";
-        }
-        finally
-        {
-            _isScanningDrive = null;
-        }
+        _pending = files;
+        _isConfirming = true;
     }
 
-    private async Task UnblockOneAsync(
-        BlockedFile file)
+    private void CancelConfirm()
     {
-        await UnblockManyAsync([file]);
+        _isConfirming = false;
+        _pending = [];
     }
 
-    private async Task UnblockSelectedAsync()
+    private async Task ConfirmAsync()
     {
-        if (_selection.Count == 0)
+        var files = _pending.ToList();
+
+        CancelConfirm();
+
+        await UnblockAsync(files);
+    }
+
+    private async Task UnblockAsync(
+        List<BlockedFile> files)
+    {
+        if (IsBusy || files.Count == 0)
         {
             return;
         }
 
-        var selectedPaths =
-            _selection.SelectedKeys.ToList();
-
-        var filesToUnblock =
-            _files
-                .Where(file => selectedPaths.Contains(file.CanonicalPath))
-                .ToList();
-
-        await UnblockManyAsync(filesToUnblock);
-
-        _isConfirmingUnblockSelected = false;
-    }
-
-    private async Task UnblockAllAsync()
-    {
-        await UnblockManyAsync(_files.ToList());
-
-        _isConfirmingUnblockAll = false;
-    }
-
-    private async Task UnblockManyAsync(
-        List<BlockedFile> filesToUnblock)
-    {
         _isUnblocking = true;
+
         await InvokeAsync(StateHasChanged);
 
         var unblocked = 0;
@@ -315,14 +243,12 @@ else
 
         try
         {
-            foreach (var file in filesToUnblock)
+            foreach (var file in files)
             {
-                var success =
-                    await BlockedFileService.UnblockAsync(file.CanonicalPath);
-
-                if (success)
+                if (await BlockedFileService.UnblockAsync(file.CanonicalPath))
                 {
                     unblocked++;
+
                     _files.Remove(file);
                     _selection.Remove(file);
                 }
@@ -335,11 +261,24 @@ else
             _statusMessage =
                 failed == 0
                     ? $"Unblocked {unblocked} file(s)."
-                    : $"Unblocked {unblocked} file(s). {failed} failed.";
+                    : $"Unblocked {unblocked} file(s); {failed} could not be changed (the file may be in use or read-only).";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Stopped part-way: {ex.Message}";
         }
         finally
         {
             _isUnblocking = false;
         }
     }
+
+    private static string TypeLabel(MediaType type) =>
+        type switch
+        {
+            MediaType.Movie => "Movie",
+            MediaType.TvEpisode => "TV",
+            _ => type.ToString()
+        };
 }

@@ -1,260 +1,307 @@
 @page "/junk-cleanup"
 @rendermode InteractiveServer
+@inherits ScanAwareComponent
 
 @using Simplifiarr.Core.Models
 @using Simplifiarr.Core.Services
 @using Simplifiarr.Core.Utilities
-@using Simplifiarr.Web.Components.Shared
 
 @inject ISettingsService SettingsService
 @inject IJunkFileScannerService JunkFileScannerService
 @inject IQuarantineService QuarantineService
 @inject IHistoryService HistoryService
 
-<PageTitle>Junk Cleanup</PageTitle>
+<PageTitle>Junk - Simplifiarr</PageTitle>
 
-<h1>Junk Cleanup</h1>
+<PageHeader Title="Junk"
+            Subtitle="Release leftovers sitting in your libraries: sample clips, checksum and tracker files, and stray images. Removing one moves it to Quarantine, so it can be put back." />
 
-<p>
-    Scans your library folders (not Downloads - an actively-seeding torrent
-    is never touched) for leftover release junk: sample video files and
-    anything left in a <code>Sample</code> folder, checksum/tracker files,
-    and images that don't match standard
-    Jellyfin/Plex/Kodi artwork naming (folder.jpg, poster.jpg, backdrop.jpg,
-    etc. are always left alone). <code>.nfo</code> files are never flagged -
-    media servers use them for real metadata. Nothing is deleted directly -
-    selected items go to Quarantine, same as everywhere else in Simplifiarr.
-</p>
+<details class="mb-3">
+    <summary>What counts as junk, and what never does</summary>
+
+    <div class="mt-2 text-muted">
+        Only library folders are checked - downloads are never touched, so a
+        torrent that is still seeding is safe. Standard artwork
+        (<code>folder.jpg</code>, <code>poster.jpg</code>, <code>backdrop.jpg</code>
+        and so on) and <code>.nfo</code> files are always left alone, because
+        Jellyfin, Plex and Kodi use them.
+    </div>
+</details>
 
 @if (_profiles.Count == 0)
 {
     <div class="alert alert-warning">
-        No enabled drive profiles are configured.
+        No drives are set up yet. <a href="settings">Add one in Settings</a>.
     </div>
 }
-else
+else if (IsScanning)
 {
-    <div class="row g-3 mt-2">
-        @foreach (var profile in _profiles)
-        {
-            <div class="col-md-6">
-                <DriveScanCard DriveName="@profile.Name"
-                               Paths="GetLibraryPaths(profile)"
-                               Rows="BuildRows(profile)"
-                               IsScanningDrive="false"
-                               OnScanDrive="() => ScanDriveAsync(profile.Name)" />
-            </div>
-        }
+    <div class="alert alert-info">
+        A scan is running. This page will update when it finishes.
     </div>
 }
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
-    <div class="alert alert-info mt-3">
+    <div class="alert alert-info">
         @_statusMessage
     </div>
 }
 
-@if (_candidates.Count == 0)
+@if (!_hasScanned)
 {
-    <EmptyState Icon="check-circle" Text="No junk found yet - scan a drive above." />
+    <EmptyState Icon="search" Text="No scan has looked for leftovers yet. Press Scan at the top of the page." />
+}
+else if (_candidates.Count == 0)
+{
+    <EmptyState Icon="check-circle" Text="No leftover files in your libraries." />
 }
 else
 {
-    <h2 class="section-header mt-4">Flagged Files</h2>
+    <div class="app-tabs" role="tablist" aria-label="Kind of leftover">
+        <button type="button"
+                role="tab"
+                aria-selected="@(_activeReason is null)"
+                class="app-tab @(_activeReason is null ? "active" : null)"
+                @onclick="() => ShowReason(null)">
+            All <span class="app-tab-count">@_candidates.Count</span>
+        </button>
 
-    <p>
-        <strong>@_candidates.Count</strong> file(s) |
-        <strong>@SizeFormatter.FormatBytes(_candidates.Sum(c => c.SizeBytes))</strong>
-    </p>
-
-    <p>
-        <strong>Selected:</strong> @_selection.Count
-    </p>
+        @foreach (var reason in Reasons)
+        {
+            <button type="button"
+                    role="tab"
+                    aria-selected="@(_activeReason == reason)"
+                    class="app-tab @(_activeReason == reason ? "active" : null)"
+                    @onclick="() => ShowReason(reason)">
+                @ShortReason(reason) <span class="app-tab-count">@_candidates.Count(candidate => candidate.Reason == reason)</span>
+            </button>
+        }
+    </div>
 
     @if (_isConfirming)
     {
         <BatchConfirmBanner IsBusy="_isProcessing"
-                            ConfirmLabel="Confirm Quarantine Selected"
-                            OnConfirm="ConfirmQuarantineSelectedAsync"
-                            OnCancel="() => _isConfirming = false">
+                            ConfirmLabel="Move to Quarantine"
+                            BusyLabel="Moving..."
+                            OnConfirm="ConfirmAsync"
+                            OnCancel="CancelConfirm">
             <Message>
-                <strong>Move @_selection.Count selected file(s) to Quarantine?</strong>
-                This doesn't affect any video/book file, only the flagged junk
-                items themselves.
+                <strong>Move @_pending.Count file(s) to Quarantine?</strong>
+                Only these leftover files are moved - no video, book or audio file is touched.
             </Message>
         </BatchConfirmBanner>
     }
     else
     {
-        <button type="button"
-                class="btn btn-secondary"
-                disabled="@_isProcessing"
-                @onclick="ToggleSelectAll">
-            @(_selection.Count == _candidates.Count ? "Deselect All" : "Select All")
-        </button>
+        <div class="toolbar">
+            <div class="toolbar-summary">
+                <strong>@Visible.Count</strong> file(s) ·
+                <strong>@SizeFormatter.FormatBytes(Visible.Sum(candidate => candidate.SizeBytes))</strong>
+                @if (_selection.Count > 0)
+                {
+                    <text> · @_selection.Count selected</text>
+                }
+            </div>
 
-        <button type="button"
-                class="btn btn-primary ms-2"
-                disabled="@(_isProcessing || _selection.Count == 0)"
-                @onclick="() => _isConfirming = true">
-            Quarantine Selected
-        </button>
+            <div class="toolbar-actions">
+                <button type="button"
+                        class="btn btn-secondary btn-sm"
+                        disabled="@IsBusy"
+                        @onclick="() => RequestConfirm(Visible)">
+                    Remove all
+                </button>
+
+                <button type="button"
+                        class="btn btn-primary btn-sm"
+                        disabled="@(IsBusy || _selection.Count == 0)"
+                        @onclick="() => RequestConfirm(Visible.Where(_selection.IsSelected).ToList())">
+                    Remove selected (@_selection.Count)
+                </button>
+            </div>
+        </div>
     }
 
-    <table class="table mt-3">
-        <thead>
-            <tr>
-                <th>Select</th>
-                <th>File</th>
-                <th>Reason</th>
-                <th>Size</th>
-                <th>Drive</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var candidate in _candidates)
-            {
+    <div class="table-scroll">
+        <table class="table">
+            <thead>
                 <tr>
-                    <SelectableCheckboxCell Checked="_selection.IsSelected(candidate)"
-                                            Disabled="_isProcessing"
-                                            OnChanged="selected => _selection.SetSelected(candidate, selected)" />
-                    <td>
-                        <code>@candidate.FilePath</code>
-                    </td>
-                    <td>@candidate.Reason</td>
-                    <td>@SizeFormatter.FormatBytes(candidate.SizeBytes)</td>
-                    <td>@candidate.DriveProfileName</td>
+                    <th class="col-check">Select</th>
+                    <th>File</th>
+                    <th>Why it's listed</th>
+                    <th>Drive</th>
+                    <th class="col-num">Size</th>
                 </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+
+            <tbody>
+                @foreach (var candidate in Visible.Take(_shown))
+                {
+                    <tr @key="candidate.FilePath">
+                        <SelectableCheckboxCell Checked="_selection.IsSelected(candidate)"
+                                                Disabled="IsBusy"
+                                                OnChanged="selected => _selection.SetSelected(candidate, selected)" />
+
+                        <td>
+                            <div class="file-name">@candidate.FileName</div>
+                            <div class="cell-note">@Path.GetDirectoryName(candidate.FilePath)</div>
+                        </td>
+
+                        <td>@candidate.Reason</td>
+                        <td>@candidate.DriveProfileName</td>
+                        <td class="col-num">@SizeFormatter.FormatBytes(candidate.SizeBytes)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (Visible.Count > _shown)
+    {
+        <button type="button"
+                class="btn btn-secondary mt-3"
+                @onclick="() => _shown += PageSize">
+            Show @Math.Min(PageSize, Visible.Count - _shown) more (@(Visible.Count - _shown) left)
+        </button>
+    }
 }
 
 @code
 {
+    private const int PageSize = 100;
+
     private List<DriveProfile> _profiles = [];
+
     private List<JunkFileCandidate> _candidates = [];
+
     private readonly CandidateSelection<JunkFileCandidate> _selection =
         new(candidate => candidate.FilePath);
 
+    private List<JunkFileCandidate> _pending = [];
+
+    private string? _activeReason;
+    private int _shown = PageSize;
+
     private string _statusMessage = string.Empty;
+
+    private bool _hasScanned;
     private bool _isConfirming;
     private bool _isProcessing;
+
+    private bool IsBusy =>
+        _isProcessing || IsScanning;
+
+    private List<string> Reasons =>
+        _candidates
+            .Select(candidate => candidate.Reason)
+            .Distinct()
+            .OrderBy(reason => reason)
+            .ToList();
+
+    private List<JunkFileCandidate> Visible =>
+        _candidates
+            .Where(candidate => _activeReason is null || candidate.Reason == _activeReason)
+            .ToList();
 
     protected override async Task OnInitializedAsync()
     {
         _profiles =
             await SettingsService.GetEnabledDriveProfilesAsync();
 
-        LoadCachedCandidates();
+        LoadCandidates();
     }
 
-    private void LoadCachedCandidates()
+    protected override Task OnScanFinishedAsync()
+    {
+        CancelConfirm();
+
+        _selection.Clear();
+        _statusMessage = string.Empty;
+
+        LoadCandidates();
+
+        return Task.CompletedTask;
+    }
+
+    private void LoadCandidates()
     {
         _candidates =
             _profiles
                 .SelectMany(profile =>
                     JunkFileScannerService.GetCandidates(profile.Name))
                 .OrderBy(candidate => candidate.DriveProfileName)
-                .ThenBy(candidate => candidate.FileName)
+                .ThenBy(candidate => candidate.FilePath)
                 .ToList();
+
+        _hasScanned =
+            _profiles.Any(profile =>
+                JunkFileScannerService.GetLastScanUtc(profile.Name).HasValue);
+
+        if (_activeReason is not null &&
+            !_candidates.Any(candidate => candidate.Reason == _activeReason))
+        {
+            _activeReason = null;
+        }
     }
 
-    private static List<DriveScanCardPath> GetLibraryPaths(
-        DriveProfile profile)
+    private void ShowReason(string? reason)
     {
-        var entries =
-            new (string Label, string Path)[]
-            {
-                ("Movie Library", profile.MovieLibraryPath),
-                ("TV Library", profile.TvLibraryPath),
-                ("Book Library", profile.BookLibraryPath),
-                ("Audiobook Library", profile.AudiobookLibraryPath),
-                ("Music Library", profile.MusicLibraryPath),
-                ("Comic Library", profile.ComicLibraryPath)
-            };
+        if (_isProcessing)
+        {
+            return;
+        }
 
-        return entries
-            .Where(entry => !string.IsNullOrWhiteSpace(entry.Path))
-            .Select(entry =>
-                new DriveScanCardPath
-                {
-                    Label = entry.Label,
-                    Path = entry.Path
-                })
-            .ToList();
+        _activeReason = reason;
+        _shown = PageSize;
+
+        // Don't carry ticks over to a tab where they can't be seen.
+        _selection.Clear();
+
+        CancelConfirm();
     }
 
-    private List<DriveScanCardRow> BuildRows(
-        DriveProfile profile)
+    // The tab label: the reason without its bracketed explanation.
+    private static string ShortReason(string reason)
     {
-        var count =
-            JunkFileScannerService.GetCandidates(profile.Name).Count;
+        var bracket = reason.IndexOf(" (", StringComparison.Ordinal);
 
-        var lastScan =
-            JunkFileScannerService.GetLastScanUtc(profile.Name);
-
-        return
-        [
-            new DriveScanCardRow
-            {
-                Label = "Junk Files",
-                Count = count,
-                LastScanText =
-                    lastScan.HasValue
-                        ? lastScan.Value.ToLocalTime().ToString("g")
-                        : "Never",
-                OnScanClick = () => ScanDriveAsync(profile.Name)
-            }
-        ];
+        return bracket > 0 ? reason[..bracket] : reason;
     }
 
-    private void ToggleSelectAll() =>
-        _selection.ToggleSelectAll(_candidates);
-
-    private async Task ScanDriveAsync(
-        string driveName)
+    private void RequestConfirm(
+        List<JunkFileCandidate> candidates)
     {
-        _statusMessage = $"Scanning {driveName}...";
+        if (IsBusy || candidates.Count == 0)
+        {
+            return;
+        }
 
-        await InvokeAsync(StateHasChanged);
-
-        var found =
-            await JunkFileScannerService.ScanAsync(driveName);
-
-        LoadCachedCandidates();
-
-        _statusMessage =
-            $"Scan complete for {driveName}. {found.Count} junk file(s) found.";
+        _pending = candidates;
+        _isConfirming = true;
     }
 
-    private async Task ConfirmQuarantineSelectedAsync()
+    private void CancelConfirm()
     {
-        if (_isProcessing || _selection.Count == 0)
+        _isConfirming = false;
+        _pending = [];
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (IsBusy || _pending.Count == 0)
         {
             return;
         }
 
         _isProcessing = true;
 
-        var selectedPaths = _selection.SelectedKeys.ToList();
-        var quarantined = 0;
+        var moved = 0;
         var failed = 0;
 
         try
         {
-            foreach (var path in selectedPaths)
+            foreach (var candidate in _pending.ToList())
             {
-                var candidate =
-                    _candidates.FirstOrDefault(c =>
-                        string.Equals(c.FilePath, path, StringComparison.OrdinalIgnoreCase));
-
-                if (candidate is null)
-                {
-                    continue;
-                }
-
                 var quarantinePath =
                     await QuarantineService.QuarantineFileAsync(candidate.FilePath);
 
@@ -277,8 +324,10 @@ else
 
                 if (success)
                 {
-                    quarantined++;
+                    moved++;
+
                     JunkFileScannerService.RemoveCandidate(candidate.FilePath);
+
                     _selection.Remove(candidate);
                 }
                 else
@@ -288,14 +337,23 @@ else
             }
 
             _statusMessage =
-                $"Quarantined {quarantined} file(s). Failed: {failed}.";
+                failed == 0
+                    ? $"Moved {moved} file(s) to Quarantine."
+                    : $"Moved {moved} file(s) to Quarantine; {failed} could not be moved and were left where they are.";
 
-            _isConfirming = false;
+            LoadCandidates();
+        }
+        catch (Exception ex)
+        {
+            _statusMessage =
+                $"Stopped part-way: {ex.Message}";
 
-            LoadCachedCandidates();
+            LoadCandidates();
         }
         finally
         {
+            CancelConfirm();
+
             _isProcessing = false;
         }
     }

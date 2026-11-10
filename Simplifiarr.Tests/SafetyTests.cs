@@ -114,6 +114,82 @@ public class DriveProfileValidatorTests
 }
 
 [TestClass]
+public class JunkScanSafetyTests : TempFolderTest
+{
+    [TestMethod]
+    public async Task Leftovers_inside_a_downloads_folder_are_never_listed()
+    {
+        // The library is set to the whole "drive", which also holds the
+        // downloads folder - a torrent there may still be seeding.
+        WriteFile(@"movies\Movie (2020)\release.sfv");
+        WriteFile(@"downloads\Movie.2020.1080p-GRP\release.sfv");
+        WriteFile(@"downloads\Movie.2020.1080p-GRP\Sample\sample.mkv");
+        WriteFile(@"seed-only\Other.2021\other.sfv");
+
+        var profile = new DriveProfile
+        {
+            Name = "F",
+            MovieLibraryPath = Folder,
+            DownloadPath = Path.Combine(Folder, "downloads"),
+            SeedOnlyPath = Path.Combine(Folder, "seed-only")
+        };
+
+        var junk =
+            new JunkFileScannerService(
+                new FixedSettingsService(profile),
+                new FileInventoryCacheService(new FileScannerService()));
+
+        var found = await junk.ScanAsync("F");
+
+        Assert.HasCount(1, found);
+        StringAssert.Contains(found[0].FilePath, @"movies\Movie (2020)");
+    }
+
+    [TestMethod]
+    public async Task A_file_under_two_overlapping_libraries_is_listed_once()
+    {
+        WriteFile(@"video\tv\Show\release.sfv");
+
+        var profile = new DriveProfile
+        {
+            Name = "D",
+            MovieLibraryPath = Path.Combine(Folder, "video"),
+            TvLibraryPath = Path.Combine(Folder, "video", "tv")
+        };
+
+        var junk =
+            new JunkFileScannerService(
+                new FixedSettingsService(profile),
+                new FileInventoryCacheService(new FileScannerService()));
+
+        Assert.HasCount(1, await junk.ScanAsync("D"));
+    }
+}
+
+[TestClass]
+public class IgnoredItemsBulkTests : TempFolderTest
+{
+    [TestMethod]
+    public void Several_items_can_be_un_ignored_at_once()
+    {
+        var service = new IgnoredItemsService();
+
+        service.AddRange(
+        [
+            new IgnoredItem { SourcePath = @"D:\dl\a.mkv" },
+            new IgnoredItem { SourcePath = @"D:\dl\b.mkv" },
+            new IgnoredItem { SourcePath = @"D:\dl\c.mkv" }
+        ]);
+
+        Assert.AreEqual(2, service.RemoveRange([@"d:\DL\A.mkv", @"D:\dl\c.mkv", @"D:\dl\never-ignored.mkv"]));
+
+        Assert.IsFalse(service.IsIgnored(@"D:\dl\a.mkv"));
+        Assert.IsTrue(service.IsIgnored(@"D:\dl\b.mkv"));
+        Assert.HasCount(1, new IgnoredItemsService().GetAll());
+    }
+}
+
+[TestClass]
 public class FullCopyDetectionTests : TempFolderTest
 {
     private DuplicateCandidateService Service() =>

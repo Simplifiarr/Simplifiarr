@@ -3,37 +3,39 @@
 
 @using Simplifiarr.Core.Models
 @using Simplifiarr.Core.Services
+@using Simplifiarr.Core.Utilities
 
 @inject IHistoryService HistoryService
 
-<PageTitle>History</PageTitle>
+<PageTitle>History - Simplifiarr</PageTitle>
 
-<h1>History</h1>
-
-@if (_loaded && Records.Count > 0)
-{
-    @if (_confirmingClear)
+<PageHeader Title="History"
+            Subtitle="Everything Simplifiarr has changed on disk, newest first.">
+    @if (_loaded && _records.Count > 0 && !_confirmingClear)
     {
-        <BatchConfirmBanner CssClass="alert alert-danger"
-                            IsBusy="_isClearing"
-                            ConfirmLabel="Confirm Clear History"
-                            BusyLabel="Clearing..."
-                            OnConfirm="ClearHistoryAsync"
-                            OnCancel="() => _confirmingClear = false">
-            <Message>
-                <strong>Permanently delete all @Records.Count history record(s)?</strong>
-                This cannot be undone.
-            </Message>
-        </BatchConfirmBanner>
-    }
-    else
-    {
-        <button class="btn btn-outline-danger mb-3"
+        <button type="button"
+                class="btn btn-outline-danger"
                 @onclick="() => _confirmingClear = true">
-            <i class="bi bi-trash" aria-hidden="true"></i>
-            Clear History
+            Clear history
         </button>
     }
+</PageHeader>
+
+@if (_confirmingClear)
+{
+    <BatchConfirmBanner CssClass="alert alert-danger"
+                        IsBusy="_isClearing"
+                        ConfirmLabel="Clear history"
+                        BusyLabel="Clearing..."
+                        OnConfirm="ClearHistoryAsync"
+                        OnCancel="() => _confirmingClear = false">
+        <Message>
+            <strong>Permanently delete all @_records.Count.ToString("N0") history record(s)?</strong>
+            This cannot be undone. It also resets "Space saved" on Home, and
+            Quarantine will no longer know where its files came from, so they
+            can't be restored to their original place.
+        </Message>
+    </BatchConfirmBanner>
 }
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
@@ -45,112 +47,222 @@
 
 @if (!_loaded)
 {
-    <p>Loading history...</p>
+    <EmptyState Icon="hourglass-split" Text="Loading history..." />
+}
+else if (_records.Count == 0)
+{
+    <EmptyState Icon="journal-text" Text="Nothing has been changed yet." />
 }
 else
 {
-    <div class="row mb-4">
-        <div class="col-md-3 mb-3">
-            <div class="card h-100">
-                <div class="card-body">
-                    <h6 class="card-title text-muted">Total Records</h6>
-                    <div class="fs-3 fw-bold">@TotalRecords</div>
-                </div>
-            </div>
+    <div class="stat-grid">
+        <StatCard Label="Space freed"
+                  Value="@SizeFormatter.FormatBytes(_spaceFreedBytes)"
+                  Note="by deleting old copies from Quarantine"
+                  Accent="true" />
+
+        <StatCard Label="Linked into libraries"
+                  Value="@Count(HistoryActionType.PromotionSucceeded).ToString("N0")"
+                  Note="downloads hardlinked, nothing copied" />
+
+        <StatCard Label="Copies converted"
+                  Value="@Count(HistoryActionType.ConversionSucceeded).ToString("N0")"
+                  Note="full copies replaced with hardlinks" />
+
+        <StatCard Label="Didn't work"
+                  Value="@_records.Count(record => !record.Success).ToString("N0")"
+                  Note="actions that failed and changed nothing" />
+    </div>
+
+    <div class="app-tabs" role="tablist" aria-label="Kind of action">
+        @foreach (var tab in Tabs)
+        {
+            <button type="button"
+                    role="tab"
+                    aria-selected="@(_activeTab == tab.Key)"
+                    class="app-tab @(_activeTab == tab.Key ? "active" : null)"
+                    @onclick="() => ShowTab(tab.Key)">
+                @tab.Label <span class="app-tab-count">@_records.Count(tab.Matches).ToString("N0")</span>
+            </button>
+        }
+    </div>
+
+    <div class="toolbar">
+        <div class="toolbar-summary">
+            <strong>@Filtered.Count.ToString("N0")</strong> record(s)
         </div>
 
-        <div class="col-md-3 mb-3">
-            <div class="card h-100">
-                <div class="card-body">
-                    <h6 class="card-title text-muted">Total Conversions</h6>
-                    <div class="fs-3 fw-bold">@TotalConversions</div>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-md-3 mb-3">
-            <div class="card h-100">
-                <div class="card-body">
-                    <h6 class="card-title text-muted">Total Deletes</h6>
-                    <div class="fs-3 fw-bold">@TotalDeletes</div>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-md-3 mb-3">
-            <div class="card h-100">
-                <div class="card-body">
-                    <h6 class="card-title text-muted">Total Reclaimed Space</h6>
-                    <div class="fs-3 fw-bold">@FormatBytes(TotalReclaimedBytes)</div>
-                </div>
-            </div>
+        <div class="toolbar-actions">
+            <label class="visually-hidden" for="history-filter">Filter by file name</label>
+            <input id="history-filter"
+                   type="search"
+                   class="form-control form-control-sm"
+                   style="width: 14rem"
+                   placeholder="Filter by file name"
+                   @bind="_filter"
+                   @bind:event="oninput"
+                   @bind:after="ResetPaging" />
         </div>
     </div>
 
-    @if (Records.Count == 0)
+    @if (Filtered.Count == 0)
     {
-        <EmptyState Icon="journal-text" Text="No history records found." />
+        <EmptyState Icon="funnel" Text="Nothing matches that filter." />
     }
     else
     {
-        <div class="table-responsive">
-            <table class="table table-striped table-hover align-middle">
+        <div class="table-scroll">
+            <table class="table">
                 <thead>
                     <tr>
-                        <th>Time</th>
-                        <th>Action</th>
+                        <th>When</th>
+                        <th>What happened</th>
                         <th>File</th>
-                        <th>Success</th>
-                        <th>Size</th>
-                        <th>Message</th>
+                        <th class="col-num">Size</th>
+                        <th>Details</th>
                     </tr>
                 </thead>
+
                 <tbody>
-                    @foreach (var record in Records.OrderByDescending(x => x.TimestampUtc))
+                    @foreach (var record in Filtered.Take(_shown))
                     {
-                        <tr>
-                            <td>@record.TimestampUtc.ToLocalTime()</td>
-                            <td>@record.ActionType</td>
-                            <td>@record.FileName</td>
-                            <td>@record.Success</td>
-                            <td>@FormatBytes(record.SizeBytes)</td>
-                            <td>@record.Message</td>
+                        <tr @key="record.Id">
+                            <td style="white-space: nowrap">@record.TimestampUtc.ToLocalTime().ToString("g")</td>
+
+                            <td>
+                                <span class="@(record.Success ? null : "status-warn")">@Describe(record)</span>
+                            </td>
+
+                            <td>
+                                <div class="file-name">@record.FileName</div>
+                            </td>
+
+                            <td class="col-num">@(record.SizeBytes > 0 ? SizeFormatter.FormatBytes(record.SizeBytes) : "-")</td>
+
+                            <td>
+                                <details>
+                                    <summary>More</summary>
+
+                                    <div class="mt-2">@record.Message</div>
+
+                                    @if (!string.IsNullOrWhiteSpace(record.LibraryPath))
+                                    {
+                                        <div class="detail-label">Library</div>
+                                        <code>@record.LibraryPath</code>
+                                    }
+
+                                    @if (!string.IsNullOrWhiteSpace(record.DownloadPath))
+                                    {
+                                        <div class="detail-label">Download</div>
+                                        <code>@record.DownloadPath</code>
+                                    }
+
+                                    @if (!string.IsNullOrWhiteSpace(record.QuarantinePath))
+                                    {
+                                        <div class="detail-label">Quarantine</div>
+                                        <code>@record.QuarantinePath</code>
+                                    }
+                                </details>
+                            </td>
                         </tr>
                     }
                 </tbody>
             </table>
         </div>
+
+        @if (Filtered.Count > _shown)
+        {
+            <button type="button"
+                    class="btn btn-secondary mt-3"
+                    @onclick="() => _shown += PageSize">
+                Show @Math.Min(PageSize, Filtered.Count - _shown) more (@((Filtered.Count - _shown).ToString("N0")) left)
+            </button>
+        }
     }
 }
 
 @code
 {
-    private List<HistoryRecord> Records = [];
+    // History runs to thousands of rows; drawing them all at once makes the
+    // page crawl, so show a page at a time.
+    private const int PageSize = 100;
+
+    private sealed record Tab(string Key, string Label, Func<HistoryRecord, bool> Matches);
+
+    private static readonly Tab[] Tabs =
+    [
+        new("all", "All", _ => true),
+        new("linked", "Linked", record =>
+            record.ActionType is HistoryActionType.PromotionSucceeded or HistoryActionType.PromotionFailed),
+        new("converted", "Converted", record =>
+            record.ActionType is HistoryActionType.ConversionSucceeded or HistoryActionType.ConversionFailed or HistoryActionType.BatchCompleted),
+        new("removed", "Moved to Quarantine", record =>
+            record.ActionType is HistoryActionType.JunkFileQuarantined or HistoryActionType.DuplicateQuarantined),
+        new("deleted", "Deleted", record =>
+            record.ActionType is HistoryActionType.QuarantineDeleted or HistoryActionType.DownloadCopyRemoved),
+        new("restored", "Restored", record =>
+            record.ActionType == HistoryActionType.QuarantineRestored),
+        new("failed", "Didn't work", record => !record.Success)
+    ];
+
+    private List<HistoryRecord> _records = [];
     private bool _loaded;
+
+    private long _spaceFreedBytes;
+
+    private string _activeTab = "all";
+    private string _filter = string.Empty;
+    private int _shown = PageSize;
 
     private bool _confirmingClear;
     private bool _isClearing;
+
     private string _statusMessage = string.Empty;
 
-    private int TotalRecords =>
-        Records.Count;
+    private List<HistoryRecord> Filtered
+    {
+        get
+        {
+            var tab = Tabs.First(candidate => candidate.Key == _activeTab);
 
-    private int TotalConversions =>
-        Records.Count(x => x.ActionType == HistoryActionType.ConversionSucceeded);
-
-    private int TotalDeletes =>
-        Records.Count(x => x.ActionType == HistoryActionType.QuarantineDeleted);
-
-    private long TotalReclaimedBytes =>
-        Records
-            .Where(x => x.ActionType == HistoryActionType.QuarantineDeleted && x.Success)
-            .Sum(x => x.SizeBytes);
+            return _records
+                .Where(tab.Matches)
+                .Where(record =>
+                    string.IsNullOrWhiteSpace(_filter) ||
+                    record.FileName.Contains(_filter.Trim(), StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
-        Records = (await HistoryService.GetHistoryAsync()).ToList();
+        _records =
+            (await HistoryService.GetHistoryAsync())
+                .OrderByDescending(record => record.TimestampUtc)
+                .ToList();
+
+        _spaceFreedBytes =
+            _records
+                .Where(record =>
+                    record.ActionType == HistoryActionType.QuarantineDeleted &&
+                    record.Success)
+                .Sum(record => record.SizeBytes);
+
         _loaded = true;
     }
+
+    private int Count(HistoryActionType type) =>
+        _records.Count(record => record.ActionType == type);
+
+    private void ShowTab(string key)
+    {
+        _activeTab = key;
+
+        ResetPaging();
+    }
+
+    private void ResetPaging() =>
+        _shown = PageSize;
 
     private async Task ClearHistoryAsync()
     {
@@ -165,14 +277,15 @@ else
         {
             await HistoryService.ClearHistoryAsync();
 
-            Records = [];
+            _records = [];
+            _spaceFreedBytes = 0;
             _confirmingClear = false;
 
             _statusMessage = "History cleared.";
         }
         catch (Exception ex)
         {
-            _statusMessage = $"Failed to clear history: {ex.Message}";
+            _statusMessage = $"Couldn't clear history: {ex.Message}";
         }
         finally
         {
@@ -180,19 +293,26 @@ else
         }
     }
 
-    private static string FormatBytes(long bytes)
-    {
-        string[] sizes = ["B", "KB", "MB", "GB", "TB"];
-
-        double len = bytes;
-        int order = 0;
-
-        while (len >= 1024 && order < sizes.Length - 1)
+    // What happened, in words rather than the internal action name.
+    private static string Describe(HistoryRecord record) =>
+        record.ActionType switch
         {
-            order++;
-            len /= 1024;
-        }
-
-        return $"{len:0.##} {sizes[order]}";
-    }
+            HistoryActionType.PromotionSucceeded => "Linked into library",
+            HistoryActionType.PromotionFailed => "Couldn't link into library",
+            HistoryActionType.ConversionSucceeded => "Copy converted to hardlink",
+            HistoryActionType.ConversionFailed => "Couldn't convert copy",
+            HistoryActionType.BatchCompleted =>
+                record.Success ? "Batch of conversions finished" : "Batch of conversions finished with failures",
+            HistoryActionType.JunkFileQuarantined =>
+                record.Success ? "Leftover moved to Quarantine" : "Couldn't move leftover to Quarantine",
+            HistoryActionType.DuplicateQuarantined =>
+                record.Success ? "Duplicate moved to Quarantine" : "Couldn't move duplicate to Quarantine",
+            HistoryActionType.QuarantineDeleted =>
+                record.Success ? "Deleted from Quarantine" : "Couldn't delete from Quarantine",
+            HistoryActionType.QuarantineRestored =>
+                record.Success ? "Restored from Quarantine" : "Couldn't restore from Quarantine",
+            HistoryActionType.DownloadCopyRemoved =>
+                record.Success ? "Download copy deleted" : "Couldn't delete download copy",
+            _ => record.ActionType.ToString()
+        };
 }

@@ -135,6 +135,34 @@ public class IgnoredItemsService
         }
     }
 
+    public int RemoveRange(
+        IEnumerable<string> sourcePaths)
+    {
+        ArgumentNullException.ThrowIfNull(sourcePaths);
+
+        var paths =
+            sourcePaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (paths.Count == 0)
+        {
+            return 0;
+        }
+
+        lock (_sync)
+        {
+            var removed =
+                _items.RemoveAll(item => paths.Contains(item.SourcePath));
+
+            if (removed > 0)
+            {
+                RebuildIndex();
+                SaveToDisk();
+            }
+
+            return removed;
+        }
+    }
+
     private void LoadFromDisk()
     {
         lock (_sync)
