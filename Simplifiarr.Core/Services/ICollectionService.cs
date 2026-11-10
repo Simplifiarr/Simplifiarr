@@ -9,9 +9,12 @@ public interface ICollectionService
     Collection? Get(
         Guid collectionId);
 
+    /// <summary>
+    /// Makes a new, empty collection. Throws if one with that name already
+    /// exists - Jellyfin identifies a collection by its name.
+    /// </summary>
     Collection Create(
-        string name,
-        string driveProfileName);
+        string name);
 
     void AddAsset(
         Guid collectionId,
@@ -25,9 +28,27 @@ public interface ICollectionService
         Guid collectionId,
         Guid assetId);
 
-    void SetLastBuiltUtc(
+    void RemoveAssets(
         Guid collectionId,
-        DateTime builtUtc);
+        IEnumerable<Guid> assetIds);
+
+    /// <summary>
+    /// Replaces a collection's member list and what each member is, after
+    /// members whose file was renamed or replaced have been found again.
+    /// </summary>
+    void SetMembers(
+        Guid collectionId,
+        IEnumerable<Guid> assetIds,
+        IReadOnlyDictionary<Guid, string> memberKeys);
+
+    /// <summary>
+    /// Records the result of sending a collection to Jellyfin.
+    /// </summary>
+    void SetJellyfinState(
+        Guid collectionId,
+        string? jellyfinCollectionId,
+        IEnumerable<string> syncedJellyfinItemIds,
+        DateTime syncedUtc);
 
     void Delete(
         Guid collectionId);

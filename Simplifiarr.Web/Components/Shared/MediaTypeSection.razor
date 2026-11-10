@@ -1,16 +1,15 @@
 @using Simplifiarr.Core.Models
 @using Simplifiarr.Core.Services
-@implements IDisposable
+@inherits ScanAwareComponent
 
 @inject IMediaPromotionService MediaPromotion
 @inject IPromotionPreviewService PromotionPreviewService
 @inject IPromotionExecuteService PromotionExecuteService
 @inject IIgnoredItemsService IgnoredItemsService
 @inject IHistoryService HistoryService
-@inject IScanCoordinator Scans
 
 @*
-    The Hardlinks section for one media type handled by the shared pipeline
+    The Hardlinks tab for one media type handled by the shared pipeline
     (books, audiobooks, music, comics). Everything here is the same for every
     type; what differs - the name and the middle columns - comes from the
     type's MediaTypeDefinition.
@@ -25,50 +24,44 @@
 
 @if (_selectedPreview is not null)
 {
-    <div class="card mb-3">
-        <div class="card-header">
-            Promotion Preview
-        </div>
+    <div class="panel mb-3">
+        <div class="action-row">
+            <div>
+                <div class="action-row-title">Link this file into the library?</div>
 
-        <div class="card-body">
-            <p>
-                <strong>Source</strong>
-            </p>
+                <div class="detail-label">Download (stays where it is)</div>
+                <code>@_selectedPreview.SourcePath</code>
 
-            <code>@_selectedPreview.SourcePath</code>
+                <div class="detail-label">Will also appear in the library as</div>
+                <code>@_selectedPreview.TargetFilePath</code>
 
-            <p class="mt-3">
-                <strong>Target File</strong>
-            </p>
+                <details class="mt-2">
+                    <summary>What will happen, step by step</summary>
 
-            <code>@_selectedPreview.TargetFilePath</code>
+                    <ul class="mt-2 mb-0">
+                        @foreach (var action in _selectedPreview.PlannedActions)
+                        {
+                            <li>@action</li>
+                        }
+                    </ul>
+                </details>
+            </div>
 
-            <p class="mt-3">
-                <strong>Actions</strong>
-            </p>
+            <div class="cell-actions">
+                <button type="button"
+                        class="btn btn-primary"
+                        disabled="@IsBusy"
+                        @onclick="ExecuteSelectedAsync">
+                    @(_isExecuting ? "Linking..." : "Link")
+                </button>
 
-            <ul>
-                @foreach (var action in _selectedPreview.PlannedActions)
-                {
-                    <li>@action</li>
-                }
-            </ul>
-
-            <button class="btn btn-success"
-                    disabled="@IsBusy"
-                    @onclick="ExecuteSelectedAsync">
-                <i class="bi bi-check-lg" aria-hidden="true"></i>
-                @(_isExecuting
-                    ? "Promoting..."
-                    : "Confirm Promotion")
-            </button>
-
-            <button class="btn btn-secondary ms-2"
-                    disabled="@_isExecuting"
-                    @onclick="CancelPreview">
-                <i class="bi bi-x-lg" aria-hidden="true"></i>
-                Cancel
-            </button>
+                <button type="button"
+                        class="btn btn-secondary"
+                        disabled="@_isExecuting"
+                        @onclick="CancelPreview">
+                    Cancel
+                </button>
+            </div>
         </div>
     </div>
 }
@@ -83,157 +76,159 @@ else if (_candidates.Count == 0)
 }
 else
 {
-    <p>
-        <strong>@_candidates.Count</strong>
-        promotable @(Definition.SingularName)(s) found.
-    </p>
-
     @if (_isConfirmingBatch)
     {
         <BatchConfirmBanner IsBusy="_isExecuting"
-                            ConfirmLabel="Confirm Promote"
-                            BusyLabel="Promoting..."
+                            ConfirmLabel="Link"
+                            BusyLabel="Linking..."
                             OnConfirm="ConfirmBatchAsync"
                             OnCancel="CancelBatchConfirm">
             <Message>
-                Promote @_pendingBatch.Count @(Definition.SingularName)(s)? This creates a hardlink for each.
+                <strong>Link @_pendingBatch.Count @(Definition.SingularName)(s) into the library?</strong>
+                Each gets a hardlink - nothing is copied or moved.
             </Message>
         </BatchConfirmBanner>
     }
     else
     {
-        <div class="mb-2">
-            <button class="btn btn-primary btn-sm"
-                    disabled="@IsBusy"
-                    @onclick="() => RequestBatchConfirm(GetPromotable())">
-                <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
-                Promote All @Definition.PluralName
-            </button>
+        <div class="toolbar">
+            <div class="toolbar-summary">
+                <strong>@_candidates.Count</strong> @(Definition.SingularName)(s) ready to link
+                @if (_selection.Count > 0)
+                {
+                    <text> · @_selection.Count selected</text>
+                }
+            </div>
 
-            <button class="btn btn-primary btn-sm ms-2"
-                    disabled="@(IsBusy || _selection.Count == 0)"
-                    @onclick="() => RequestBatchConfirm(GetSelectedPromotable())">
-                <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
-                Promote Selected (@_selection.Count)
-            </button>
+            <div class="toolbar-actions">
+                <button type="button"
+                        class="btn btn-secondary btn-sm"
+                        disabled="@(IsBusy || GetLinkable().Count == 0)"
+                        @onclick="() => RequestBatchConfirm(GetLinkable())">
+                    Link all
+                </button>
+
+                <button type="button"
+                        class="btn btn-primary btn-sm"
+                        disabled="@(IsBusy || _selection.Count == 0)"
+                        @onclick="() => RequestBatchConfirm(GetSelectedLinkable())">
+                    Link selected (@_selection.Count)
+                </button>
+            </div>
         </div>
     }
 
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Select</th>
-                <th>Title</th>
-                @foreach (var column in Definition.Columns)
-                {
-                    <th>@column.Header</th>
-                }
-                <th>Status</th>
-                <th>Actions</th>
-                <th>Details</th>
-            </tr>
-        </thead>
-
-        <tbody>
-            @foreach (var candidate in _candidates)
-            {
-                <tr @key="candidate.SourcePath" class="@_previewSelection.RowClass(candidate)">
-                    <SelectableCheckboxCell Checked="_selection.IsSelected(candidate)"
-                                            Disabled="IsBusy"
-                                            OnChanged="selected => _selection.SetSelected(candidate, selected)" />
-
-                    <td>
-                        <strong>@candidate.Title</strong>
-
-                        <div class="text-muted small">
-                            Found @HowLongAgo(candidate.DiscoveredUtc)
-                        </div>
-
-                        @if (!string.IsNullOrWhiteSpace(candidate.DriveProfileName))
-                        {
-                            <div class="text-muted small">
-                                Drive: @candidate.DriveProfileName
-                            </div>
-                        }
-                    </td>
-
+    <div class="table-scroll">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th class="col-check">Select</th>
+                    <th>Title</th>
                     @foreach (var column in Definition.Columns)
                     {
-                        <td>@column.Value(candidate)</td>
+                        <th>@column.Header</th>
                     }
+                    <th>Drive</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
 
-                    <td>
-                        @if (candidate.CanPromote)
+            <tbody>
+                @foreach (var candidate in _candidates.Take(_shown))
+                {
+                    var canLink =
+                        candidate.CanPromote && candidate.Plan is not null;
+
+                    <tr @key="candidate.SourcePath" class="@_previewSelection.RowClass(candidate)">
+                        <SelectableCheckboxCell Checked="_selection.IsSelected(candidate)"
+                                                Disabled="IsBusy || !canLink"
+                                                OnChanged="selected => _selection.SetSelected(candidate, selected)" />
+
+                        <td>
+                            <div class="file-name">@candidate.Title</div>
+                            <div class="cell-note">Found @HowLongAgo(candidate.DiscoveredUtc)</div>
+                        </td>
+
+                        @foreach (var column in Definition.Columns)
                         {
-                            <i class="bi bi-check-circle text-success" aria-hidden="true"></i> <text>READY</text>
-                        }
-                        else
-                        {
-                            <i class="bi bi-x-circle text-danger" aria-hidden="true"></i> <text>BLOCKED</text>
-                        }
-                    </td>
-
-                    <td>
-                        @if (candidate.CanPromote && candidate.Plan is not null)
-                        {
-                            <button class="@_previewSelection.ButtonClass(candidate)"
-                                    disabled="@_previewSelection.IsButtonDisabled(candidate, IsBusy)"
-                                    @onclick="() => PreviewAsync(candidate)">
-                                <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
-                                @_previewSelection.ButtonText(candidate)
-                            </button>
+                            <td>@column.Value(candidate)</td>
                         }
 
-                        <button class="btn btn-sm btn-outline-secondary ms-1"
-                                disabled="@IsBusy"
-                                @onclick="() => Ignore(candidate)">
-                            <i class="bi bi-eye-slash" aria-hidden="true"></i>
-                            Ignore
-                        </button>
-                    </td>
+                        <td>@(string.IsNullOrWhiteSpace(candidate.DriveProfileName) ? "-" : candidate.DriveProfileName)</td>
 
-                    <td>
-                        <details>
-                            <summary>View paths</summary>
+                        <td>
+                            @if (canLink)
+                            {
+                                <span class="status-ok">Ready</span>
+                            }
+                            else
+                            {
+                                <span class="status-warn">Can't link</span>
+                                <div class="cell-note">@candidate.Reason</div>
+                            }
+                        </td>
 
-                            <div class="mt-2">
-                                <div>
-                                    <strong>Reason</strong>
-                                </div>
+                        <td>
+                            <div class="cell-actions">
+                                @if (canLink)
+                                {
+                                    <button type="button"
+                                            class="@_previewSelection.ButtonClass(candidate)"
+                                            disabled="@_previewSelection.IsButtonDisabled(candidate, IsBusy)"
+                                            @onclick="() => PreviewAsync(candidate)">
+                                        @_previewSelection.ButtonText(candidate)
+                                    </button>
+                                }
 
-                                <p>
-                                    @candidate.Reason
-                                </p>
+                                <button type="button"
+                                        class="btn btn-secondary btn-sm"
+                                        disabled="@IsBusy"
+                                        @onclick="() => Ignore(candidate)">
+                                    Ignore
+                                </button>
+                            </div>
+                        </td>
 
-                                <div>
-                                    <strong>Source File</strong>
-                                </div>
+                        <td>
+                            <details>
+                                <summary>View paths</summary>
 
-                                <code>
-                                    @candidate.SourcePath
-                                </code>
+                                <div class="detail-label">Download</div>
+                                <code>@candidate.SourcePath</code>
 
                                 @if (candidate.Plan is not null)
                                 {
-                                    <div class="mt-2">
-                                        <strong>Target File</strong>
-                                    </div>
-
-                                    <code>
-                                        @candidate.Plan.TargetFilePath
-                                    </code>
+                                    <div class="detail-label">Will be linked to</div>
+                                    <code>@candidate.Plan.TargetFilePath</code>
                                 }
-                            </div>
-                        </details>
-                    </td>
-                </tr>
-            }
-        </tbody>
-    </table>
+
+                                <div class="detail-label">Why it's listed</div>
+                                <div>@candidate.Reason</div>
+                            </details>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (_candidates.Count > _shown)
+    {
+        <button type="button"
+                class="btn btn-secondary mt-3"
+                @onclick="() => _shown += PageSize">
+            Show @Math.Min(PageSize, _candidates.Count - _shown) more (@(_candidates.Count - _shown) left)
+        </button>
+    }
 }
 
 @code
 {
+    // A music download folder can hold thousands of tracks.
+    private const int PageSize = 100;
+
     [Parameter, EditorRequired]
     public MediaTypeDefinition Definition { get; set; } = default!;
 
@@ -241,7 +236,7 @@ else
     public List<DriveProfile> Profiles { get; set; } = [];
 
     /// <summary>
-    /// Raised after the list changes (something was promoted or ignored),
+    /// Raised after the list changes (something was linked or ignored),
     /// so the page can update the count on this type's tab.
     /// </summary>
     [Parameter]
@@ -261,9 +256,10 @@ else
 
     private List<MediaPromotionCandidate> _pendingBatch = [];
 
+    private int _shown = PageSize;
+
     private bool _isExecuting;
     private bool _hasScanned;
-    private bool _scanIsRunning;
 
     private string _statusMessage =
         string.Empty;
@@ -273,43 +269,24 @@ else
 
     // Nothing here may change the list while a scan is rebuilding it.
     private bool IsBusy =>
-        _isExecuting || _scanIsRunning;
-
-    protected override void OnInitialized()
-    {
-        _scanIsRunning = Scans.Progress.IsRunning;
-
-        Scans.Changed += OnScanChanged;
-    }
+        _isExecuting || IsScanning;
 
     protected override void OnParametersSet() =>
         LoadCandidates();
 
-    private void OnScanChanged()
+    protected override Task OnScanFinishedAsync()
     {
-        _ = InvokeAsync(() =>
-        {
-            var isRunning = Scans.Progress.IsRunning;
-            var justFinished = _scanIsRunning && !isRunning;
+        // The scan replaced the list, so anything previewed or ticked may
+        // no longer exist.
+        CancelPreview();
+        CancelBatchConfirm();
 
-            if (isRunning == _scanIsRunning)
-            {
-                return;
-            }
+        _selection.Clear();
+        _statusMessage = string.Empty;
 
-            _scanIsRunning = isRunning;
+        LoadCandidates();
 
-            if (justFinished)
-            {
-                // The scan replaced the list, so anything previewed or
-                // ticked may no longer exist.
-                CancelPreview();
-                CancelBatchConfirm();
-                LoadCandidates();
-            }
-
-            StateHasChanged();
-        });
+        return Task.CompletedTask;
     }
 
     private void LoadCandidates()
@@ -330,13 +307,13 @@ else
                 MediaPromotion.GetLastScanUtc(Definition.MediaType, profile.Name).HasValue);
     }
 
-    private List<MediaPromotionCandidate> GetPromotable() =>
+    private List<MediaPromotionCandidate> GetLinkable() =>
         _candidates
             .Where(candidate => candidate.CanPromote && candidate.Plan is not null)
             .ToList();
 
-    private List<MediaPromotionCandidate> GetSelectedPromotable() =>
-        GetPromotable()
+    private List<MediaPromotionCandidate> GetSelectedLinkable() =>
+        GetLinkable()
             .Where(candidate => _selection.IsSelected(candidate))
             .ToList();
 
@@ -359,7 +336,7 @@ else
         catch (Exception ex)
         {
             _statusMessage =
-                $"Preview failed: {ex.Message}";
+                $"Couldn't prepare the preview: {ex.Message}";
         }
     }
 
@@ -383,9 +360,7 @@ else
 
         try
         {
-            var result = await PromoteAsync(candidate);
-
-            _statusMessage = result.Reason;
+            var result = await LinkAsync(candidate);
 
             if (result.Success)
             {
@@ -393,15 +368,20 @@ else
                 CancelPreview();
 
                 _statusMessage =
-                    $"{result.Reason} Remaining {Definition.SingularName} opportunities: {_candidates.Count}.";
+                    $"Linked \"{candidate.Title}\" into the library. {_candidates.Count} left.";
 
                 await OnChanged.InvokeAsync();
+            }
+            else
+            {
+                _statusMessage =
+                    $"Couldn't link \"{candidate.Title}\": {result.Reason}";
             }
         }
         catch (Exception ex)
         {
             _statusMessage =
-                $"Promotion failed: {ex.Message}";
+                $"Couldn't link \"{candidate.Title}\": {ex.Message}";
         }
         finally
         {
@@ -443,7 +423,7 @@ else
         {
             foreach (var candidate in _pendingBatch.ToList())
             {
-                var result = await PromoteAsync(candidate);
+                var result = await LinkAsync(candidate);
 
                 if (result.Success)
                 {
@@ -460,15 +440,15 @@ else
 
             _statusMessage =
                 failed == 0
-                    ? $"Promoted {succeeded} {Definition.SingularName}(s)."
-                    : $"Promoted {succeeded} {Definition.SingularName}(s), {failed} failed.";
+                    ? $"Linked {succeeded} {Definition.SingularName}(s) into the library."
+                    : $"Linked {succeeded} {Definition.SingularName}(s); {failed} failed and are still listed. See History for why.";
 
             await OnChanged.InvokeAsync();
         }
         catch (Exception ex)
         {
             _statusMessage =
-                $"Batch promotion failed: {ex.Message}";
+                $"Linking stopped part-way: {ex.Message}";
         }
         finally
         {
@@ -480,7 +460,7 @@ else
     /// Creates the hardlink, records it in History either way, and on
     /// success takes the candidate off the list.
     /// </summary>
-    private async Task<PromotionExecutionResult> PromoteAsync(
+    private async Task<PromotionExecutionResult> LinkAsync(
         MediaPromotionCandidate candidate)
     {
         var plan = candidate.Plan!;
@@ -526,14 +506,6 @@ else
             return;
         }
 
-        await IgnoreCore(candidate);
-        await OnChanged.InvokeAsync();
-    }
-
-    private Task IgnoreCore(
-        MediaPromotionCandidate candidate)
-    {
-
         IgnoredItemsService.Add(
             new IgnoredItem
             {
@@ -560,9 +532,9 @@ else
         LoadCandidates();
 
         _statusMessage =
-            $"Ignored \"{candidate.Title}\". It won't reappear until un-ignored and rescanned.";
+            $"Ignored \"{candidate.Title}\". Undo this on the Ignored page.";
 
-        return Task.CompletedTask;
+        await OnChanged.InvokeAsync();
     }
 
     private static string HowLongAgo(
@@ -598,7 +570,4 @@ else
 
         return $"{days} day{(days == 1 ? string.Empty : "s")} ago";
     }
-
-    public void Dispose() =>
-        Scans.Changed -= OnScanChanged;
 }

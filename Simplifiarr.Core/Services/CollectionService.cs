@@ -34,25 +34,33 @@ public class CollectionService
     {
         lock (_sync)
         {
-            return _collections.FirstOrDefault(collection =>
-                collection.Id == collectionId);
+            return Find(collectionId);
         }
     }
 
     public Collection Create(
-        string name,
-        string driveProfileName)
+        string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentException.ThrowIfNullOrWhiteSpace(driveProfileName);
+
+        var trimmed = name.Trim();
 
         lock (_sync)
         {
+            if (_collections.Any(existing =>
+                    string.Equals(
+                        existing.Name,
+                        trimmed,
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException(
+                    $"There is already a collection called \"{trimmed}\".");
+            }
+
             var collection =
                 new Collection
                 {
-                    Name = name,
-                    DriveProfileName = driveProfileName
+                    Name = trimmed
                 };
 
             _collections.Add(collection);
@@ -65,25 +73,8 @@ public class CollectionService
 
     public void AddAsset(
         Guid collectionId,
-        Guid assetId)
-    {
-        lock (_sync)
-        {
-            var collection =
-                _collections.FirstOrDefault(collection =>
-                    collection.Id == collectionId);
-
-            if (collection is null ||
-                collection.AssetIds.Contains(assetId))
-            {
-                return;
-            }
-
-            collection.AssetIds.Add(assetId);
-
-            SaveToDisk();
-        }
-    }
+        Guid assetId) =>
+        AddAssets(collectionId, [assetId]);
 
     public void AddAssets(
         Guid collectionId,
@@ -91,26 +82,23 @@ public class CollectionService
     {
         lock (_sync)
         {
-            var collection =
-                _collections.FirstOrDefault(collection =>
-                    collection.Id == collectionId);
+            var collection = Find(collectionId);
 
             if (collection is null)
             {
                 return;
             }
 
+            var existing = collection.AssetIds.ToHashSet();
             var added = false;
 
             foreach (var assetId in assetIds)
             {
-                if (collection.AssetIds.Contains(assetId))
+                if (existing.Add(assetId))
                 {
-                    continue;
+                    collection.AssetIds.Add(assetId);
+                    added = true;
                 }
-
-                collection.AssetIds.Add(assetId);
-                added = true;
             }
 
             if (added)
@@ -122,42 +110,79 @@ public class CollectionService
 
     public void RemoveAsset(
         Guid collectionId,
-        Guid assetId)
+        Guid assetId) =>
+        RemoveAssets(collectionId, [assetId]);
+
+    public void RemoveAssets(
+        Guid collectionId,
+        IEnumerable<Guid> assetIds)
     {
         lock (_sync)
         {
-            var collection =
-                _collections.FirstOrDefault(collection =>
-                    collection.Id == collectionId);
+            var collection = Find(collectionId);
 
             if (collection is null)
             {
                 return;
             }
 
-            if (collection.AssetIds.Remove(assetId))
+            var toRemove = assetIds.ToHashSet();
+
+            if (collection.AssetIds.RemoveAll(toRemove.Contains) > 0)
             {
+                foreach (var assetId in toRemove)
+                {
+                    collection.MemberKeys.Remove(assetId);
+                }
+
                 SaveToDisk();
             }
         }
     }
 
-    public void SetLastBuiltUtc(
+    public void SetMembers(
         Guid collectionId,
-        DateTime builtUtc)
+        IEnumerable<Guid> assetIds,
+        IReadOnlyDictionary<Guid, string> memberKeys)
     {
         lock (_sync)
         {
-            var collection =
-                _collections.FirstOrDefault(collection =>
-                    collection.Id == collectionId);
+            var collection = Find(collectionId);
 
             if (collection is null)
             {
                 return;
             }
 
-            collection.LastBuiltUtc = builtUtc;
+            collection.AssetIds = assetIds.Distinct().ToList();
+
+            collection.MemberKeys =
+                memberKeys
+                    .Where(pair => collection.AssetIds.Contains(pair.Key))
+                    .ToDictionary(pair => pair.Key, pair => pair.Value);
+
+            SaveToDisk();
+        }
+    }
+
+    public void SetJellyfinState(
+        Guid collectionId,
+        string? jellyfinCollectionId,
+        IEnumerable<string> syncedJellyfinItemIds,
+        DateTime syncedUtc)
+    {
+        lock (_sync)
+        {
+            var collection = Find(collectionId);
+
+            if (collection is null)
+            {
+                return;
+            }
+
+            collection.JellyfinCollectionId = jellyfinCollectionId;
+            collection.SyncedJellyfinItemIds = syncedJellyfinItemIds.Distinct().ToList();
+            collection.LastSyncedUtc = syncedUtc;
 
             SaveToDisk();
         }
@@ -176,6 +201,10 @@ public class CollectionService
         }
     }
 
+    private Collection? Find(Guid collectionId) =>
+        _collections.FirstOrDefault(collection =>
+            collection.Id == collectionId);
+
     private void LoadFromDisk()
     {
         lock (_sync)
@@ -190,7 +219,70 @@ public class CollectionService
 
             _collections.Clear();
             _collections.AddRange(persisted);
+
+            if (MergeSameNamedCollections())
+            {
+                SaveToDisk();
+            }
         }
+    }
+
+    /// <summary>
+    /// Before 2.0 a collection was a folder of hardlinks, so "Horror" had
+    /// to exist once per drive. Now that a collection is just a list, those
+    /// are one collection: fold every same-named group into its oldest
+    /// member. Runs on every load but only ever changes old data.
+    /// </summary>
+    private bool MergeSameNamedCollections()
+    {
+        var merged = false;
+
+        var groups =
+            _collections
+                .GroupBy(
+                    collection => collection.Name.Trim(),
+                    StringComparer.OrdinalIgnoreCase)
+                .Where(group => group.Count() > 1)
+                .ToList();
+
+        foreach (var group in groups)
+        {
+            var keep =
+                group
+                    .OrderBy(collection => collection.CreatedUtc)
+                    .First();
+
+            var seen = keep.AssetIds.ToHashSet();
+
+            foreach (var other in group.Where(collection => !ReferenceEquals(collection, keep)))
+            {
+                foreach (var assetId in other.AssetIds)
+                {
+                    if (seen.Add(assetId))
+                    {
+                        keep.AssetIds.Add(assetId);
+                    }
+                }
+
+                foreach (var pair in other.MemberKeys)
+                {
+                    keep.MemberKeys.TryAdd(pair.Key, pair.Value);
+                }
+
+                keep.JellyfinCollectionId ??= other.JellyfinCollectionId;
+
+                _collections.Remove(other);
+            }
+
+            keep.DriveProfileName = string.Empty;
+
+            AppLog.Info(
+                $"Merged {group.Count()} per-drive collections called \"{keep.Name}\" into one ({keep.AssetIds.Count} items).");
+
+            merged = true;
+        }
+
+        return merged;
     }
 
     private void SaveToDisk() =>

@@ -1,0 +1,127 @@
+@*
+    The address (and API key, if it has one) of another app Simplifiarr talks
+    to, with a Test button that tries the values currently typed in - saved
+    or not.
+*@
+
+<div class="group-card">
+    <div class="group-card-header">
+        <div class="group-card-title">@Name</div>
+        <div class="group-card-meta" style="white-space: normal">@Purpose</div>
+    </div>
+
+    <div style="padding: 0 1.1rem 1.1rem">
+        <div class="row g-3">
+            <div class="@(HasApiKey ? "col-md-6" : "col-12")">
+                <label class="form-label" for="@($"{_id}-url")">Address</label>
+                <input id="@($"{_id}-url")"
+                       class="form-control"
+                       placeholder="@UrlPlaceholder"
+                       value="@Url"
+                       @oninput="args => UrlChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty)" />
+            </div>
+
+            @if (HasApiKey)
+            {
+                <div class="col-md-6">
+                    <label class="form-label" for="@($"{_id}-key")">API key</label>
+                    <input id="@($"{_id}-key")"
+                           class="form-control"
+                           type="password"
+                           autocomplete="off"
+                           value="@ApiKey"
+                           @oninput="args => ApiKeyChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty)" />
+                </div>
+            }
+        </div>
+
+        <div class="cell-actions mt-3" style="flex-wrap: wrap; align-items: center">
+            <button type="button"
+                    class="btn btn-secondary btn-sm"
+                    disabled="@_isTesting"
+                    @onclick="RunTestAsync">
+                @(_isTesting ? "Testing..." : "Test connection")
+            </button>
+
+            @ChildContent
+
+            @if (!string.IsNullOrWhiteSpace(_result))
+            {
+                <span class="@(_ok ? "status-ok" : "status-warn")" style="white-space: normal">@_result</span>
+            }
+        </div>
+    </div>
+</div>
+
+@code
+{
+    private readonly string _id = $"conn-{Guid.NewGuid():N}";
+
+    private bool _isTesting;
+    private bool _ok;
+    private string _result = string.Empty;
+
+    [Parameter, EditorRequired]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>One line on what Simplifiarr uses this app for.</summary>
+    [Parameter]
+    public string Purpose { get; set; } = string.Empty;
+
+    [Parameter]
+    public string Url { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback<string> UrlChanged { get; set; }
+
+    [Parameter]
+    public string? UrlPlaceholder { get; set; }
+
+    [Parameter]
+    public bool HasApiKey { get; set; } = true;
+
+    [Parameter]
+    public string ApiKey { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback<string> ApiKeyChanged { get; set; }
+
+    /// <summary>
+    /// Tries the connection. Returns null when it worked, or a sentence
+    /// saying what went wrong.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public Func<Task<string?>> Test { get; set; } = default!;
+
+    /// <summary>Extra buttons shown next to Test connection.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    private async Task RunTestAsync()
+    {
+        if (_isTesting)
+        {
+            return;
+        }
+
+        _isTesting = true;
+        _result = string.Empty;
+
+        try
+        {
+            var problem = await Test();
+
+            _ok = problem is null;
+            _result = problem ?? "Connected";
+        }
+        catch (Exception ex)
+        {
+            _ok = false;
+            _result = $"Couldn't connect: {ex.Message}";
+        }
+        finally
+        {
+            _isTesting = false;
+        }
+    }
+}

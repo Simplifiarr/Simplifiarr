@@ -1,718 +1,696 @@
 @page "/collections"
 @rendermode InteractiveServer
+@inherits ScanAwareComponent
 
 @using Simplifiarr.Core.Models
 @using Simplifiarr.Core.Services
-@using Simplifiarr.Core.Utilities
 
 @inject ICollectionService CollectionService
 @inject ICollectionBuilderService CollectionBuilderService
 @inject IMediaCatalogService MediaCatalogService
 @inject ISettingsService SettingsService
 
-<PageTitle>Collections</PageTitle>
+<PageTitle>Collections - Simplifiarr</PageTitle>
 
-<h1>Collections</h1>
-
-<p>
-    Curate groups of Movies, TV episodes, Books, Audiobooks, Music, and
-    Comics however you like - a Sci-Fi shelf, a Christmas collection,
-    anything.
-</p>
-
-<div class="alert alert-warning">
-    <strong>Jellyfin sync is temporarily disabled.</strong> Both ways of
-    creating a real Jellyfin collection (its REST API, and hand-writing a
-    collection.xml file) were confirmed broken/unreliable during testing,
-    including an incident where the API repeatedly spawned duplicate
-    internal library folders. Collections can still be curated here - just
-    not synced to Jellyfin right now.
-</div>
-
-@if (!string.IsNullOrWhiteSpace(_statusMessage))
+@if (_open is null)
 {
-    <div class="alert alert-info">@_statusMessage</div>
-}
+    <PageHeader Title="Collections"
+                Subtitle="Group anything in your libraries however you like - a Horror shelf, Christmas episodes, your recommendations - then send the group to Jellyfin as a collection. A collection is only a list: no files are copied, moved or linked." />
 
-@if (_selectedCollection is null)
-{
-    @if (_profiles.Count == 0)
+    @if (!_jellyfinConfigured)
     {
-        <div class="alert alert-warning">No enabled drive profiles configured.</div>
-    }
-    else
-    {
-        <div class="card mb-3">
-            <div class="card-body">
-                <h5>Create Collection</h5>
-
-                <div class="row g-2 align-items-end">
-                    <div class="col-md-5">
-                        <label class="form-label">Name</label>
-                        <input class="form-control" @bind="_newCollectionName" />
-                    </div>
-
-                    <div class="col-md-4">
-                        <label class="form-label">Drive</label>
-                        <select class="form-select" @bind="_newCollectionDrive">
-                            @foreach (var profile in _profiles)
-                            {
-                                <option value="@profile.Name">@profile.Name</option>
-                            }
-                        </select>
-                    </div>
-
-                    <div class="col-md-3">
-                        <button type="button"
-                                class="btn btn-primary"
-                                disabled="@string.IsNullOrWhiteSpace(_newCollectionName)"
-                                @onclick="CreateCollectionAsync">
-                            <i class="bi bi-plus-lg" aria-hidden="true"></i>
-                            Create
-                        </button>
-                    </div>
-                </div>
-            </div>
+        <div class="alert alert-warning">
+            Jellyfin isn't connected yet, so collections can be put together here but not sent.
+            <a href="settings">Add Jellyfin's address and API key in Settings</a>, under Connections.
         </div>
     }
 
+    @if (!string.IsNullOrWhiteSpace(_statusMessage))
+    {
+        <div class="alert alert-info">@_statusMessage</div>
+    }
+
+    <div class="toolbar">
+        <div class="toolbar-summary">
+            <strong>@_collections.Count</strong> collection(s)
+        </div>
+
+        <form class="toolbar-actions" @onsubmit="Create" @onsubmit:preventDefault="true">
+            <label class="visually-hidden" for="new-collection-name">Name for a new collection</label>
+            <input id="new-collection-name"
+                   class="form-control form-control-sm"
+                   style="width: 16rem"
+                   placeholder="Name for a new collection"
+                   @bind="_newName"
+                   @bind:event="oninput" />
+
+            <button type="submit"
+                    class="btn btn-primary btn-sm"
+                    disabled="@string.IsNullOrWhiteSpace(_newName)">
+                Create
+            </button>
+        </form>
+    </div>
+
     @if (_collections.Count == 0)
     {
-        <EmptyState Icon="collection" Text="No collections yet." />
+        <EmptyState Icon="collection" Text="No collections yet. Type a name above and press Create." />
     }
     else
     {
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>Name</th>
-                    <th>Drive</th>
-                    <th>Items</th>
-                    <th>Orphaned</th>
-                    <th>Last Built</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var collection in _collections)
-                {
-                    var orphanCount =
-                        _orphanCounts.GetValueOrDefault(collection.Id);
-
+        <div class="table-scroll">
+            <table class="table">
+                <thead>
                     <tr>
-                        <td>@collection.Name</td>
-                        <td>@collection.DriveProfileName</td>
-                        <td>@collection.AssetIds.Count</td>
-                        <td>
-                            @if (orphanCount > 0)
-                            {
-                                <span class="text-danger fw-bold">@orphanCount</span>
-                            }
-                            else
-                            {
-                                <span>0</span>
-                            }
-                        </td>
-                        <td>@(collection.LastBuiltUtc.HasValue ? collection.LastBuiltUtc.Value.ToLocalTime().ToString("g") : "Never")</td>
-                        <td>
-                            <button type="button"
-                                    class="btn btn-sm btn-outline-primary"
-                                    @onclick="() => OpenCollectionAsync(collection)">
-                                <i class="bi bi-folder2-open" aria-hidden="true"></i>
-                                Open
-                            </button>
-                        </td>
+                        <th>Collection</th>
+                        <th class="col-num">Items</th>
+                        <th>In Jellyfin</th>
+                        <th>Actions</th>
                     </tr>
-                }
-            </tbody>
-        </table>
+                </thead>
+
+                <tbody>
+                    @foreach (var collection in _collections)
+                    {
+                        var missing = _orphanCounts.GetValueOrDefault(collection.Id);
+
+                        <tr @key="collection.Id">
+                            <td>
+                                <div class="file-name">@collection.Name</div>
+
+                                @if (missing > 0)
+                                {
+                                    <div class="cell-note status-warn">@missing item(s) no longer exist on disk</div>
+                                }
+                            </td>
+
+                            <td class="col-num">@collection.AssetIds.Count</td>
+
+                            <td>
+                                @if (collection.LastSyncedUtc is null)
+                                {
+                                    <span class="status-muted">Not sent yet</span>
+                                }
+                                else
+                                {
+                                    <span class="status-ok">Sent</span>
+                                    <div class="cell-note">@HowLongAgo(collection.LastSyncedUtc)</div>
+                                }
+                            </td>
+
+                            <td>
+                                <div class="cell-actions">
+                                    <button type="button"
+                                            class="btn btn-secondary btn-sm"
+                                            @onclick="() => OpenAsync(collection)">
+                                        Open
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
     }
 }
 else
 {
-    <button type="button" class="btn btn-link ps-0" @onclick="CloseCollection">&larr; Back to Collections</button>
+    <PageHeader Title="@_open.Name"
+                Subtitle="@OpenSubtitle">
+        <button type="button"
+                class="btn btn-secondary"
+                disabled="@_isSending"
+                @onclick="Close">
+            Back
+        </button>
 
-    <h3>
-        @_selectedCollection.Name
-        <span class="text-muted">(@_selectedCollection.DriveProfileName)</span>
-    </h3>
+        <button type="button"
+                class="btn btn-primary"
+                disabled="@(_isSending || !_jellyfinConfigured || _open.AssetIds.Count == 0)"
+                title="@(!_jellyfinConfigured ? "Connect Jellyfin in Settings first" : null)"
+                @onclick="SendAsync">
+            @(_isSending ? "Sending..." : "Send to Jellyfin")
+        </button>
+    </PageHeader>
 
-    <div class="mb-3">
-        @if (!_isConfirmingDelete)
+    @if (_syncResult is not null)
+    {
+        @if (!_syncResult.Succeeded)
         {
-            <button type="button"
-                    class="btn btn-outline-danger"
-                    @onclick="() => _isConfirmingDelete = true">
-                <i class="bi bi-trash" aria-hidden="true"></i>
-                Delete Collection
-            </button>
+            <div class="alert alert-danger">
+                <strong>Not sent.</strong> @_syncResult.Error
+            </div>
         }
         else
         {
-            <BatchConfirmBanner CssClass="alert alert-danger d-inline-block mb-0 py-2"
-                                ConfirmLabel="Confirm Delete"
-                                OnConfirm="DeleteCollectionAsync"
-                                OnCancel="() => _isConfirmingDelete = false">
-                <Message>
-                    Delete this collection? This only removes the grouping
-                    in Simplifiarr - it was never synced to Jellyfin, so
-                    there's nothing else to clean up.
-                </Message>
-            </BatchConfirmBanner>
+            <div class="alert alert-info">
+                <strong>@(_syncResult.CreatedInJellyfin ? "Created in Jellyfin." : "Jellyfin is up to date.")</strong>
+                @SyncSummary(_syncResult)
+
+                @if (_syncResult.NotInJellyfin.Count > 0)
+                {
+                    <details class="mt-2">
+                        <summary>
+                            @_syncResult.NotInJellyfin.Count item(s) aren't in any Jellyfin library, so they were left out
+                        </summary>
+
+                        <div class="mt-2">
+                            Either their folder isn't part of a Jellyfin library, or Jellyfin hasn't scanned it since they arrived.
+                        </div>
+
+                        <ul class="mt-2 mb-0">
+                            @foreach (var title in _syncResult.NotInJellyfin.Take(50))
+                            {
+                                <li>@title</li>
+                            }
+                        </ul>
+                    </details>
+                }
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_syncResult.Warning))
+            {
+                <div class="alert alert-warning">
+                    <strong>Check Jellyfin.</strong> @_syncResult.Warning
+                </div>
+            }
         }
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_statusMessage))
+    {
+        <div class="alert alert-info">@_statusMessage</div>
+    }
+
+    @if (IsScanning)
+    {
+        <div class="alert alert-info">
+            A scan is running. What you can add will update when it finishes.
+        </div>
+    }
+
+    @if (_orphanCount > 0)
+    {
+        <div class="panel mb-3">
+            <div class="action-row action-row-warn">
+                <div>
+                    <div class="action-row-title">@_orphanCount item(s) in this collection no longer exist on disk</div>
+                    <div class="action-row-detail">They were deleted, moved or renamed since they were added. Nothing is sent to Jellyfin for them.</div>
+                </div>
+
+                <button type="button"
+                        class="btn btn-secondary"
+                        disabled="@_isSending"
+                        @onclick="RemoveOrphansAsync">
+                    Take them out
+                </button>
+            </div>
+        </div>
+    }
+
+    <div class="app-tabs" role="tablist" aria-label="Collection view">
+        <button type="button"
+                role="tab"
+                aria-selected="@(!_adding)"
+                class="app-tab @(!_adding ? "active" : null)"
+                @onclick="() => ShowAdding(false)">
+            In this collection <span class="app-tab-count">@_members.Count</span>
+        </button>
+
+        <button type="button"
+                role="tab"
+                aria-selected="@_adding"
+                class="app-tab @(_adding ? "active" : null)"
+                @onclick="() => ShowAdding(true)">
+            Add items
+        </button>
     </div>
 
-    @if (_orphanedMembers.Count > 0 || _orphanedCount > _orphanedMembers.Count)
+    @if (!_adding)
     {
-        <div class="alert alert-warning">
-            <strong>@_orphanedCount</strong> item(s) in this collection no
-            longer exist in your library (the original file was deleted,
-            likely from Radarr/Sonarr or manually).
+        @if (_members.Count == 0)
+        {
+            <EmptyState Icon="collection" Text="Nothing in this collection yet. Open Add items to put something in." />
+        }
+        else
+        {
+            <div class="toolbar">
+                <div class="toolbar-summary">
+                    <strong>@FilteredMembers.Count</strong> item(s)
+                </div>
 
-            @if (_orphanedMembers.Count > 0)
-            {
-                <ul class="mb-2">
-                    @foreach (var asset in _orphanedMembers)
-                    {
-                        <li>@asset.Title</li>
-                    }
-                </ul>
-            }
+                <div class="toolbar-actions">
+                    <label class="visually-hidden" for="member-filter">Filter by title</label>
+                    <input id="member-filter"
+                           type="search"
+                           class="form-control form-control-sm"
+                           style="width: 14rem"
+                           placeholder="Filter by title"
+                           @bind="_memberFilter"
+                           @bind:event="oninput"
+                           @bind:after="ResetPaging" />
+                </div>
+            </div>
 
-            @if (!_isConfirmingOrphanCleanup)
+            <div class="table-scroll">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Type</th>
+                            <th>Where</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        @foreach (var asset in FilteredMembers.Take(_shown))
+                        {
+                            <tr @key="asset.Id">
+                                <td>
+                                    <div class="file-name">@asset.Title</div>
+
+                                    @if (Detail(asset).Length > 0)
+                                    {
+                                        <div class="cell-note">@Detail(asset)</div>
+                                    }
+                                </td>
+
+                                <td>@TypeLabel(asset.MediaType)</td>
+
+                                <td class="cell-note">@Path.GetDirectoryName(asset.CanonicalPath)</td>
+
+                                <td>
+                                    <button type="button"
+                                            class="btn btn-secondary btn-sm"
+                                            disabled="@_isSending"
+                                            @onclick="() => Remove(asset)">
+                                        Take out
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            @if (FilteredMembers.Count > _shown)
             {
                 <button type="button"
-                        class="btn btn-warning btn-sm"
-                        @onclick="() => _isConfirmingOrphanCleanup = true">
-                    <i class="bi bi-trash" aria-hidden="true"></i>
-                    Remove Orphaned Item(s)
+                        class="btn btn-secondary mt-3"
+                        @onclick="() => _shown += PageSize">
+                    Show @Math.Min(PageSize, FilteredMembers.Count - _shown) more (@(FilteredMembers.Count - _shown) left)
                 </button>
+            }
+        }
+    }
+    else
+    {
+        <div class="app-tabs" role="tablist" aria-label="Media type">
+            @foreach (var type in AddTypes)
+            {
+                <button type="button"
+                        role="tab"
+                        aria-selected="@(_addType == type)"
+                        class="app-tab @(_addType == type ? "active" : null)"
+                        @onclick="() => ShowAddType(type)">
+                    @TypeLabel(type) <span class="app-tab-count">@_addable.Count(asset => asset.MediaType == type).ToString("N0")</span>
+                </button>
+            }
+        </div>
+
+        @if (_addable.Count == 0 && _members.Count == 0)
+        {
+            <EmptyState Icon="search" Text="Nothing has been scanned yet. Press Scan at the top of the page, then come back." />
+        }
+        else
+        {
+            <div class="toolbar">
+                <div class="toolbar-summary">
+                    <strong>@Matching.Count.ToString("N0")</strong> @ItemNoun(_addType) not in this collection
+                    @if (HasFilter)
+                    {
+                        <text> match</text>
+                    }
+                </div>
+
+                <div class="toolbar-actions">
+                    <label class="visually-hidden" for="add-filter">Filter by title</label>
+                    <input id="add-filter"
+                           type="search"
+                           class="form-control form-control-sm"
+                           style="width: 14rem"
+                           placeholder="Filter by title"
+                           @bind="_addFilter"
+                           @bind:event="oninput"
+                           @bind:after="ResetPaging" />
+
+                    @if (Genres.Count > 0)
+                    {
+                        <label class="visually-hidden" for="add-genre">Genre</label>
+                        <select id="add-genre"
+                                class="form-select form-select-sm"
+                                style="width: 11rem"
+                                @bind="_addGenre"
+                                @bind:after="ResetPaging">
+                            <option value="">Any genre</option>
+                            @foreach (var genre in Genres)
+                            {
+                                <option value="@genre">@genre</option>
+                            }
+                        </select>
+                    }
+
+                    <button type="button"
+                            class="btn btn-secondary btn-sm"
+                            disabled="@(_isSending || Matching.Count == 0 || (!HasFilter && Matching.Count > AddAllLimit))"
+                            title="@(!HasFilter && Matching.Count > AddAllLimit ? "Filter the list first" : null)"
+                            @onclick="() => Add(Matching)">
+                        Add all @Matching.Count.ToString("N0")
+                    </button>
+                </div>
+            </div>
+
+            @if (Matching.Count == 0)
+            {
+                <EmptyState Icon="@(HasFilter ? "funnel" : "check-circle")"
+                            Text="@(HasFilter ? "Nothing matches that filter." : $"No {ItemNoun(_addType)} to add: either none have been scanned, or they are all in this collection already.")" />
+            }
+            else if (_addType == MediaType.TvEpisode)
+            {
+                @foreach (var show in ShowGroup.GroupByShow(Matching).Take(_shown))
+                {
+                    var showOpen = _openShows.Contains(show.Title);
+
+                    <div class="group-card" @key="show.Title">
+                        <div class="group-card-header" style="align-items: center">
+                            <div class="group-card-title">
+                                @show.Title
+                                <span class="cell-note ms-1">· @show.EpisodeCount episode(s)</span>
+                            </div>
+
+                            <div class="cell-actions">
+                                <button type="button"
+                                        class="btn btn-secondary btn-sm"
+                                        aria-expanded="@showOpen"
+                                        @onclick="() => ToggleShow(show.Title)">
+                                    @(showOpen ? "Hide seasons" : "Seasons")
+                                </button>
+
+                                <button type="button"
+                                        class="btn btn-primary btn-sm"
+                                        disabled="@_isSending"
+                                        @onclick="() => Add(show.Seasons.SelectMany(season => season.Episodes).ToList())">
+                                    Add whole show
+                                </button>
+                            </div>
+                        </div>
+
+                        @if (showOpen)
+                        {
+                            @foreach (var season in show.Seasons)
+                            {
+                                <div class="action-row" style="border-top: 1px solid var(--app-border)">
+                                    <div>
+                                        <div class="action-row-title">
+                                            @(season.Season.HasValue ? $"Season {season.Season:00}" : "Season unknown")
+                                        </div>
+                                        <div class="action-row-detail">
+                                            @string.Join(", ", season.Episodes.Select(EpisodeLabel))
+                                        </div>
+                                    </div>
+
+                                    <button type="button"
+                                            class="btn btn-secondary btn-sm"
+                                            disabled="@_isSending"
+                                            @onclick="() => Add(season.Episodes)">
+                                        Add season (@season.Episodes.Count)
+                                    </button>
+                                </div>
+
+                                @if (season.Episodes.Count <= EpisodeListLimit)
+                                {
+                                    <div class="table-scroll">
+                                        <table class="table table-sm">
+                                            <tbody>
+                                                @foreach (var episode in season.Episodes)
+                                                {
+                                                    <tr @key="episode.Id">
+                                                        <td>
+                                                            <div class="file-name">@EpisodeLabel(episode)</div>
+
+                                                            @if (!string.IsNullOrWhiteSpace(episode.EpisodeTitle))
+                                                            {
+                                                                <div class="cell-note">@episode.EpisodeTitle</div>
+                                                            }
+                                                        </td>
+
+                                                        <td class="col-num">
+                                                            <button type="button"
+                                                                    class="btn btn-secondary btn-sm"
+                                                                    disabled="@_isSending"
+                                                                    @onclick="() => Add([episode])">
+                                                                Add
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                }
+                            }
+                        }
+                    </div>
+                }
+
+                @if (ShowGroup.GroupByShow(Matching).Count > _shown)
+                {
+                    <button type="button"
+                            class="btn btn-secondary mt-3"
+                            @onclick="() => _shown += PageSize">
+                        Show more shows
+                    </button>
+                }
             }
             else
             {
-                <BatchConfirmBanner CssClass="mt-2"
-                                    ConfirmLabel="Confirm Remove"
-                                    OnConfirm="RemoveOrphanedMembersAsync"
-                                    OnCancel="() => _isConfirmingOrphanCleanup = false">
-                    <Message>
-                        This removes them from this collection's membership.
-                        Your library is unaffected either way - there's
-                        nothing left there to affect.
-                    </Message>
-                </BatchConfirmBanner>
-            }
-        </div>
-    }
+                <div class="table-scroll">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Title</th>
+                                <th>Where</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
 
-    <h5 class="mt-4">Members (@GetMembers().Count)</h5>
+                        <tbody>
+                            @foreach (var asset in Matching.Take(_shown))
+                            {
+                                <tr @key="asset.Id">
+                                    <td>
+                                        <div class="file-name">@asset.Title</div>
 
-    @if (GetMembers().Count == 0)
-    {
-        <EmptyState Icon="collection" Text="No items added yet." />
-    }
-    else
-    {
-        <table class="table table-sm">
-            <thead>
-                <tr>
-                    <th>Title</th>
-                    <th>Year</th>
-                    <th>Season</th>
-                    <th>Episode</th>
-                    <th>Episode Title</th>
-                    <th>Author</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var asset in GetMembers())
-                {
-                    <tr>
-                        <td>@asset.Title</td>
-                        <td>@asset.Year</td>
-                        <td>@(asset.MediaType == MediaType.TvEpisode ? $"{asset.Season:00}" : "")</td>
-                        <td>@(asset.MediaType == MediaType.TvEpisode ? $"{asset.Episode:00}" : "")</td>
-                        <td>@(asset.MediaType == MediaType.TvEpisode ? asset.EpisodeTitle : "")</td>
-                        <td>@(asset.MediaType is MediaType.Book or MediaType.Audiobook or MediaType.Music or MediaType.Comic ? asset.Author : "")</td>
-                        <td>
-                            <button type="button"
-                                    class="btn btn-sm btn-outline-secondary"
-                                    @onclick="() => RemoveMember(asset.Id)">
-                                Remove
-                            </button>
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    }
+                                        @if (Detail(asset).Length > 0)
+                                        {
+                                            <div class="cell-note">@Detail(asset)</div>
+                                        }
+                                    </td>
 
-    <h5 class="mt-4">Add Movies</h5>
+                                    <td class="cell-note">@Path.GetDirectoryName(asset.CanonicalPath)</td>
 
-    <div class="row g-2 mb-2">
-        <div class="col-md-6">
-            <input class="form-control"
-                   placeholder="Filter by title..."
-                   @bind="_movieFilterText"
-                   @bind:event="oninput" />
-        </div>
-
-        @if (GetAvailableMovieGenres().Count > 0)
-        {
-            <div class="col-md-4">
-                <select class="form-select" @bind="_movieGenre">
-                    <option value="">All genres</option>
-                    @foreach (var genre in GetAvailableMovieGenres())
-                    {
-                        <option value="@genre">@genre</option>
-                    }
-                </select>
-            </div>
-
-            <div class="col-md-2">
-                <button type="button"
-                        class="btn btn-outline-primary w-100"
-                        disabled="@(!GetFilteredAddableMovies().Any())"
-                        @onclick="AddAllFilteredMovies">
-                    Add All (@GetFilteredAddableMovies().Count())
-                </button>
-            </div>
-        }
-    </div>
-
-    @if (GetAddableMovies().Count == 0)
-    {
-        <EmptyState Icon="film" Text="No matching movies from this drive's library to add." />
-    }
-    else
-    {
-        <table class="table table-sm">
-            <thead>
-                <tr>
-                    <th>Title</th>
-                    <th>Year</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var asset in GetAddableMovies())
-                {
-                    <tr>
-                        <td>@asset.Title</td>
-                        <td>@asset.Year</td>
-                        <td>
-                            <button type="button"
-                                    class="btn btn-sm btn-outline-primary"
-                                    @onclick="() => AddMember(asset.Id)">
-                                Add
-                            </button>
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    }
-
-    <h5 class="mt-4">Add TV Episodes</h5>
-
-    <div class="row g-2 mb-2">
-        <div class="col-md-6">
-            <input class="form-control"
-                   placeholder="Filter by show title..."
-                   @bind="_tvFilterText"
-                   @bind:event="oninput" />
-        </div>
-
-        @if (GetAvailableTvGenres().Count > 0)
-        {
-            <div class="col-md-4">
-                <select class="form-select" @bind="_tvGenre">
-                    <option value="">All genres</option>
-                    @foreach (var genre in GetAvailableTvGenres())
-                    {
-                        <option value="@genre">@genre</option>
-                    }
-                </select>
-            </div>
-
-            <div class="col-md-2">
-                <button type="button"
-                        class="btn btn-outline-primary w-100"
-                        disabled="@(!GetFilteredAddableTv().Any())"
-                        @onclick="AddAllFilteredTv">
-                    Add All (@GetFilteredAddableTv().Count())
-                </button>
-            </div>
-        }
-    </div>
-
-    @if (GetTvShowGroups().Count == 0)
-    {
-        <EmptyState Icon="tv" Text="No matching TV episodes from this drive's library to add." />
-    }
-    else
-    {
-        @foreach (var show in GetTvShowGroups())
-        {
-            <details class="mb-2">
-                <summary>
-                    <strong>@show.Title</strong> - @show.EpisodeCount episode(s)
-                    <button type="button"
-                            class="btn btn-sm btn-outline-primary ms-2"
-                            @onclick="() => AddWholeShow(show.Title)">
-                        Add whole show
-                    </button>
-                </summary>
-
-                <div class="mt-2 ps-3">
-                    @foreach (var season in show.Seasons)
-                    {
-                        <h6 class="mt-2">
-                            @(season.Season.HasValue ? $"Season {season.Season:00}" : "Season Unknown")
-                            - @season.Episodes.Count episode(s)
-                            <button type="button"
-                                    class="btn btn-sm btn-outline-primary ms-2"
-                                    @onclick="() => AddWholeSeason(show.Title, season.Season)">
-                                Add whole season
-                            </button>
-                        </h6>
-
-                        <table class="table table-sm">
-                            <thead>
-                                <tr>
-                                    <th>Episode</th>
-                                    <th>Title</th>
-                                    <th></th>
+                                    <td>
+                                        <button type="button"
+                                                class="btn btn-secondary btn-sm"
+                                                disabled="@_isSending"
+                                                @onclick="() => Add([asset])">
+                                            Add
+                                        </button>
+                                    </td>
                                 </tr>
-                            </thead>
-                            <tbody>
-                                @foreach (var episode in season.Episodes)
-                                {
-                                    <tr>
-                                        <td>@(episode.Episode.HasValue ? $"E{episode.Episode:00}" : "Unknown")</td>
-                                        <td>@(episode.EpisodeTitle ?? "")</td>
-                                        <td>
-                                            <button type="button"
-                                                    class="btn btn-sm btn-outline-primary"
-                                                    @onclick="() => AddMember(episode.Id)">
-                                                Add
-                                            </button>
-                                        </td>
-                                    </tr>
-                                }
-                            </tbody>
-                        </table>
-                    }
+                            }
+                        </tbody>
+                    </table>
                 </div>
-            </details>
+
+                @if (Matching.Count > _shown)
+                {
+                    <button type="button"
+                            class="btn btn-secondary mt-3"
+                            @onclick="() => _shown += PageSize">
+                        Show @Math.Min(PageSize, Matching.Count - _shown) more (@((Matching.Count - _shown).ToString("N0")) left)
+                    </button>
+                }
+            }
         }
     }
 
-    <h5 class="mt-4">Add Books</h5>
-
-    <div class="row g-2 mb-2">
-        <div class="col-md-6">
-            <input class="form-control"
-                   placeholder="Filter by title..."
-                   @bind="_bookFilterText"
-                   @bind:event="oninput" />
-        </div>
-
-        @if (GetAvailableBookGenres().Count > 0)
+    <div class="cell-actions mt-4" style="align-items: center; flex-wrap: wrap">
+        @if (_confirmDelete)
         {
-            <div class="col-md-4">
-                <select class="form-select" @bind="_bookGenre">
-                    <option value="">All genres</option>
-                    @foreach (var genre in GetAvailableBookGenres())
-                    {
-                        <option value="@genre">@genre</option>
-                    }
-                </select>
-            </div>
+            <button type="button"
+                    class="btn btn-danger btn-sm"
+                    @onclick="Delete">
+                Delete this collection
+            </button>
 
-            <div class="col-md-2">
-                <button type="button"
-                        class="btn btn-outline-primary w-100"
-                        disabled="@(!GetFilteredAddableBooks().Any())"
-                        @onclick="AddAllFilteredBooks">
-                    Add All (@GetFilteredAddableBooks().Count())
-                </button>
-            </div>
+            <button type="button"
+                    class="btn btn-secondary btn-sm"
+                    @onclick="() => _confirmDelete = false">
+                Cancel
+            </button>
+
+            <span class="cell-note" style="white-space: normal">
+                Removes the list from Simplifiarr only. No files are touched, and a collection already
+                sent to Jellyfin stays there until you delete it in Jellyfin.
+            </span>
+        }
+        else
+        {
+            <button type="button"
+                    class="btn btn-outline-danger btn-sm"
+                    disabled="@_isSending"
+                    @onclick="() => _confirmDelete = true">
+                Delete collection
+            </button>
         }
     </div>
-
-    @if (GetAddableBooks().Count == 0)
-    {
-        <EmptyState Icon="book" Text="No matching books from this drive's library to add." />
-    }
-    else
-    {
-        <table class="table table-sm">
-            <thead>
-                <tr>
-                    <th>Title</th>
-                    <th>Author</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var asset in GetAddableBooks())
-                {
-                    <tr>
-                        <td>@asset.Title</td>
-                        <td>@asset.Author</td>
-                        <td>
-                            <button type="button"
-                                    class="btn btn-sm btn-outline-primary"
-                                    @onclick="() => AddMember(asset.Id)">
-                                Add
-                            </button>
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    }
-
-    <h5 class="mt-4">Add Audiobooks</h5>
-
-    <div class="row g-2 mb-2">
-        <div class="col-md-6">
-            <input class="form-control"
-                   placeholder="Filter by title..."
-                   @bind="_audiobookFilterText"
-                   @bind:event="oninput" />
-        </div>
-
-        @if (GetAvailableAudiobookGenres().Count > 0)
-        {
-            <div class="col-md-4">
-                <select class="form-select" @bind="_audiobookGenre">
-                    <option value="">All genres</option>
-                    @foreach (var genre in GetAvailableAudiobookGenres())
-                    {
-                        <option value="@genre">@genre</option>
-                    }
-                </select>
-            </div>
-
-            <div class="col-md-2">
-                <button type="button"
-                        class="btn btn-outline-primary w-100"
-                        disabled="@(!GetFilteredAddableAudiobooks().Any())"
-                        @onclick="AddAllFilteredAudiobooks">
-                    Add All (@GetFilteredAddableAudiobooks().Count())
-                </button>
-            </div>
-        }
-    </div>
-
-    @if (GetAddableAudiobooks().Count == 0)
-    {
-        <EmptyState Icon="headphones" Text="No matching audiobooks from this drive's library to add." />
-    }
-    else
-    {
-        <table class="table table-sm">
-            <thead>
-                <tr>
-                    <th>Title</th>
-                    <th>Author</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var asset in GetAddableAudiobooks())
-                {
-                    <tr>
-                        <td>@asset.Title</td>
-                        <td>@asset.Author</td>
-                        <td>
-                            <button type="button"
-                                    class="btn btn-sm btn-outline-primary"
-                                    @onclick="() => AddMember(asset.Id)">
-                                Add
-                            </button>
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    }
-
-    <h5 class="mt-4">Add Music</h5>
-
-    <div class="row g-2 mb-2">
-        <div class="col-md-6">
-            <input class="form-control"
-                   placeholder="Filter by title..."
-                   @bind="_musicFilterText"
-                   @bind:event="oninput" />
-        </div>
-
-        @if (GetAvailableMusicGenres().Count > 0)
-        {
-            <div class="col-md-4">
-                <select class="form-select" @bind="_musicGenre">
-                    <option value="">All genres</option>
-                    @foreach (var genre in GetAvailableMusicGenres())
-                    {
-                        <option value="@genre">@genre</option>
-                    }
-                </select>
-            </div>
-
-            <div class="col-md-2">
-                <button type="button"
-                        class="btn btn-outline-primary w-100"
-                        disabled="@(!GetFilteredAddableMusic().Any())"
-                        @onclick="AddAllFilteredMusic">
-                    Add All (@GetFilteredAddableMusic().Count())
-                </button>
-            </div>
-        }
-    </div>
-
-    @if (GetAddableMusic().Count == 0)
-    {
-        <EmptyState Icon="music-note" Text="No matching tracks from this drive's library to add." />
-    }
-    else
-    {
-        <table class="table table-sm">
-            <thead>
-                <tr>
-                    <th>Title</th>
-                    <th>Artist</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var asset in GetAddableMusic())
-                {
-                    <tr>
-                        <td>@asset.Title</td>
-                        <td>@asset.Author</td>
-                        <td>
-                            <button type="button"
-                                    class="btn btn-sm btn-outline-primary"
-                                    @onclick="() => AddMember(asset.Id)">
-                                Add
-                            </button>
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    }
-
-    <h5 class="mt-4">Add Comics</h5>
-
-    <div class="row g-2 mb-2">
-        <div class="col-md-6">
-            <input class="form-control"
-                   placeholder="Filter by title..."
-                   @bind="_comicFilterText"
-                   @bind:event="oninput" />
-        </div>
-
-        @if (GetAvailableComicGenres().Count > 0)
-        {
-            <div class="col-md-4">
-                <select class="form-select" @bind="_comicGenre">
-                    <option value="">All genres</option>
-                    @foreach (var genre in GetAvailableComicGenres())
-                    {
-                        <option value="@genre">@genre</option>
-                    }
-                </select>
-            </div>
-
-            <div class="col-md-2">
-                <button type="button"
-                        class="btn btn-outline-primary w-100"
-                        disabled="@(!GetFilteredAddableComics().Any())"
-                        @onclick="AddAllFilteredComics">
-                    Add All (@GetFilteredAddableComics().Count())
-                </button>
-            </div>
-        }
-    </div>
-
-    @if (GetAddableComics().Count == 0)
-    {
-        <EmptyState Icon="book" Text="No matching comics from this drive's library to add." />
-    }
-    else
-    {
-        <table class="table table-sm">
-            <thead>
-                <tr>
-                    <th>Title</th>
-                    <th>Series</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var asset in GetAddableComics())
-                {
-                    <tr>
-                        <td>@asset.Title</td>
-                        <td>@asset.Album</td>
-                        <td>
-                            <button type="button"
-                                    class="btn btn-sm btn-outline-primary"
-                                    @onclick="() => AddMember(asset.Id)">
-                                Add
-                            </button>
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    }
 }
 
 @code
 {
-    private List<Collection> _collections = [];
-    private List<DriveProfile> _profiles = [];
-    private Collection? _selectedCollection;
-    private Dictionary<Guid, int> _orphanCounts = [];
-    private List<MediaAsset> _orphanedMembers = [];
-    private int _orphanedCount;
+    private const int PageSize = 50;
 
-    private string _newCollectionName = string.Empty;
-    private string _newCollectionDrive = string.Empty;
-    private string _movieFilterText = string.Empty;
-    private string _movieGenre = string.Empty;
-    private string _tvFilterText = string.Empty;
-    private string _tvGenre = string.Empty;
-    private string _bookFilterText = string.Empty;
-    private string _bookGenre = string.Empty;
-    private string _audiobookFilterText = string.Empty;
-    private string _audiobookGenre = string.Empty;
-    private string _musicFilterText = string.Empty;
-    private string _musicGenre = string.Empty;
-    private string _comicFilterText = string.Empty;
-    private string _comicGenre = string.Empty;
+    // "Add all" on an unfiltered list would put a whole library in a
+    // collection with one click; make that a deliberate, filtered act.
+    private const int AddAllLimit = 200;
+
+    // A long season's episodes are added with "Add season"; listing every
+    // one only makes the page slow.
+    private const int EpisodeListLimit = 60;
+
+    private static readonly MediaType[] AddTypes =
+    [
+        MediaType.Movie, MediaType.TvEpisode, MediaType.Book,
+        MediaType.Audiobook, MediaType.Music, MediaType.Comic
+    ];
+
+    private List<Collection> _collections = [];
+
+    private Dictionary<Guid, int> _orphanCounts = [];
+
+    private bool _jellyfinConfigured;
+
+    private string _newName = string.Empty;
+
     private string _statusMessage = string.Empty;
 
-    private bool _isConfirmingDelete;
-    private bool _isConfirmingOrphanCleanup;
+    // The collection being looked at, and what is and isn't in it.
+    private Collection? _open;
+
+    private List<MediaAsset> _members = [];
+
+    private List<MediaAsset> _addable = [];
+
+    private int _orphanCount;
+
+    private bool _adding;
+
+    private MediaType _addType = MediaType.Movie;
+
+    private string _memberFilter = string.Empty;
+    private string _addFilter = string.Empty;
+    private string _addGenre = string.Empty;
+
+    private int _shown = PageSize;
+
+    private readonly HashSet<string> _openShows =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private bool _isSending;
+    private bool _confirmDelete;
+
+    private CollectionSyncResult? _syncResult;
+
+    private bool HasFilter =>
+        !string.IsNullOrWhiteSpace(_addFilter) ||
+        !string.IsNullOrWhiteSpace(_addGenre);
+
+    private string OpenSubtitle
+    {
+        get
+        {
+            if (_open is null)
+            {
+                return string.Empty;
+            }
+
+            var items = $"{_open.AssetIds.Count:N0} item(s)";
+
+            return _open.LastSyncedUtc is null
+                ? $"{items} · not sent to Jellyfin yet"
+                : $"{items} · last sent to Jellyfin {HowLongAgo(_open.LastSyncedUtc)}";
+        }
+    }
+
+    private List<MediaAsset> FilteredMembers =>
+        _members
+            .Where(asset =>
+                string.IsNullOrWhiteSpace(_memberFilter) ||
+                asset.Title.Contains(_memberFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+    private List<MediaAsset> Matching =>
+        _addable
+            .Where(asset => asset.MediaType == _addType)
+            .Where(asset =>
+                string.IsNullOrWhiteSpace(_addFilter) ||
+                asset.Title.Contains(_addFilter.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                (asset.Author?.Contains(_addFilter.Trim(), StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (asset.Album?.Contains(_addFilter.Trim(), StringComparison.OrdinalIgnoreCase) ?? false))
+            .Where(asset =>
+                string.IsNullOrWhiteSpace(_addGenre) ||
+                asset.Genres.Contains(_addGenre, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
+    // Genres come from Radarr and Sonarr; without them there is nothing
+    // to choose from and the box isn't shown.
+    private List<string> Genres =>
+        _addable
+            .Where(asset => asset.MediaType == _addType)
+            .SelectMany(asset => asset.Genres)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(genre => genre)
+            .ToList();
 
     protected override async Task OnInitializedAsync()
     {
-        _profiles =
-            await SettingsService.GetEnabledDriveProfilesAsync();
+        var settings =
+            await SettingsService.GetSettingsAsync();
 
-        _newCollectionDrive =
-            _profiles.FirstOrDefault()?.Name ?? string.Empty;
+        _jellyfinConfigured =
+            !string.IsNullOrWhiteSpace(settings.JellyfinUrl) &&
+            !string.IsNullOrWhiteSpace(settings.JellyfinApiKey);
 
-        await LoadCollectionsAsync();
+        await LoadListAsync();
     }
 
-    private async Task LoadCollectionsAsync()
+    protected override async Task OnScanFinishedAsync()
+    {
+        // A scan can change which files exist and what there is to add.
+        await LoadListAsync();
+
+        if (_open is not null)
+        {
+            _open = CollectionService.Get(_open.Id);
+
+            await LoadOpenAsync();
+        }
+    }
+
+    private async Task LoadListAsync()
     {
         _collections = CollectionService.GetAll().ToList();
 
@@ -720,641 +698,357 @@ else
 
         foreach (var collection in _collections)
         {
+            // Re-attach anything renamed or replaced before counting what
+            // is really gone.
+            await CollectionBuilderService.RefreshMembersAsync(collection.Id);
+
             _orphanCounts[collection.Id] =
                 await CollectionBuilderService.GetOrphanedMemberCountAsync(collection.Id);
         }
     }
 
-    private async Task CreateCollectionAsync()
+    private async Task LoadOpenAsync()
     {
-        if (string.IsNullOrWhiteSpace(_newCollectionName) ||
-            string.IsNullOrWhiteSpace(_newCollectionDrive))
+        if (_open is null)
         {
             return;
         }
 
-        CollectionService.Create(_newCollectionName, _newCollectionDrive);
+        var memberIds = _open.AssetIds.ToHashSet();
 
-        _newCollectionName = string.Empty;
+        var catalog = MediaCatalogService.GetAssets();
 
-        await LoadCollectionsAsync();
+        _members =
+            catalog
+                .Where(asset => memberIds.Contains(asset.Id))
+                .OrderBy(asset => asset.Title)
+                .ThenBy(asset => asset.Season)
+                .ThenBy(asset => asset.Episode)
+                .ToList();
+
+        _addable =
+            catalog
+                .Where(asset =>
+                    !memberIds.Contains(asset.Id) &&
+                    AddTypes.Contains(asset.MediaType))
+                .OrderBy(asset => asset.Title)
+                .ThenBy(asset => asset.Year)
+                .ThenBy(asset => asset.Season)
+                .ThenBy(asset => asset.Episode)
+                .ToList();
+
+        _orphanCount =
+            await CollectionBuilderService.GetOrphanedMemberCountAsync(_open.Id);
     }
 
-    private async Task OpenCollectionAsync(Collection collection)
+    private async Task Create()
     {
-        _selectedCollection = collection;
-        _movieFilterText = string.Empty;
-        _movieGenre = string.Empty;
-        _tvFilterText = string.Empty;
-        _tvGenre = string.Empty;
-        _bookFilterText = string.Empty;
-        _bookGenre = string.Empty;
-        _audiobookFilterText = string.Empty;
-        _audiobookGenre = string.Empty;
-        _isConfirmingDelete = false;
-        _isConfirmingOrphanCleanup = false;
-
-        await RefreshOrphanedMembersAsync();
-    }
-
-    private async Task RefreshOrphanedMembersAsync()
-    {
-        if (_selectedCollection is null)
-        {
-            _orphanedMembers = [];
-            _orphanedCount = 0;
-            return;
-        }
-
-        _orphanedMembers =
-            await CollectionBuilderService.GetOrphanedMembersAsync(_selectedCollection.Id);
-
-        _orphanedCount =
-            await CollectionBuilderService.GetOrphanedMemberCountAsync(_selectedCollection.Id);
-    }
-
-    private async Task RemoveOrphanedMembersAsync()
-    {
-        if (_selectedCollection is null)
+        if (string.IsNullOrWhiteSpace(_newName))
         {
             return;
         }
 
-        var removedCount =
-            await CollectionBuilderService.RemoveOrphanedMembersAsync(_selectedCollection.Id);
+        try
+        {
+            var created = CollectionService.Create(_newName);
+
+            _newName = string.Empty;
+            _statusMessage = string.Empty;
+
+            await LoadListAsync();
+
+            // Straight into it, on the Add tab - an empty collection has
+            // nothing else to do.
+            await OpenAsync(created);
+
+            _adding = true;
+        }
+        catch (InvalidOperationException ex)
+        {
+            _statusMessage = ex.Message;
+        }
+    }
+
+    private async Task OpenAsync(Collection collection)
+    {
+        _open = CollectionService.Get(collection.Id);
+
+        _adding = false;
+        _syncResult = null;
+        _confirmDelete = false;
+        _statusMessage = string.Empty;
+        _memberFilter = string.Empty;
+        _addFilter = string.Empty;
+        _addGenre = string.Empty;
+
+        _openShows.Clear();
+
+        ResetPaging();
+
+        await LoadOpenAsync();
+    }
+
+    private async Task Close()
+    {
+        _open = null;
+        _syncResult = null;
+        _statusMessage = string.Empty;
+
+        await LoadListAsync();
+    }
+
+    private void ShowAdding(bool adding)
+    {
+        _adding = adding;
+
+        ResetPaging();
+    }
+
+    private void ShowAddType(MediaType type)
+    {
+        _addType = type;
+        _addGenre = string.Empty;
+
+        _openShows.Clear();
+
+        ResetPaging();
+    }
+
+    private void ToggleShow(string title)
+    {
+        if (!_openShows.Remove(title))
+        {
+            _openShows.Add(title);
+        }
+    }
+
+    private void ResetPaging() =>
+        _shown = PageSize;
+
+    private void Add(List<MediaAsset> assets)
+    {
+        if (_open is null || _isSending || assets.Count == 0)
+        {
+            return;
+        }
+
+        CollectionService.AddAssets(
+            _open.Id,
+            assets.Select(asset => asset.Id).ToList());
+
+        var added = assets.Select(asset => asset.Id).ToHashSet();
+
+        _members =
+            _members
+                .Concat(assets)
+                .OrderBy(asset => asset.Title)
+                .ThenBy(asset => asset.Season)
+                .ThenBy(asset => asset.Episode)
+                .ToList();
+
+        _addable.RemoveAll(asset => added.Contains(asset.Id));
+
+        _open = CollectionService.Get(_open.Id);
 
         _statusMessage =
-            $"Removed {removedCount} orphaned item(s) and their built copies.";
-
-        _isConfirmingOrphanCleanup = false;
-
-        _selectedCollection = CollectionService.Get(_selectedCollection.Id);
-
-        await RefreshOrphanedMembersAsync();
+            assets.Count == 1
+                ? $"Added \"{assets[0].Title}\". {NotSentYetHint}"
+                : $"Added {assets.Count:N0} items. {NotSentYetHint}";
     }
 
-    private async Task CloseCollection()
+    private void Remove(MediaAsset asset)
     {
-        _selectedCollection = null;
-
-        await LoadCollectionsAsync();
-    }
-
-    private async Task DeleteCollectionAsync()
-    {
-        if (_selectedCollection is null)
+        if (_open is null || _isSending)
         {
             return;
         }
 
-        var collectionName = _selectedCollection.Name;
+        CollectionService.RemoveAsset(_open.Id, asset.Id);
 
-        await CollectionBuilderService.DeleteBuiltFilesAsync(_selectedCollection.Id);
+        _members.Remove(asset);
+        _addable.Add(asset);
+
+        _addable =
+            _addable
+                .OrderBy(other => other.Title)
+                .ThenBy(other => other.Year)
+                .ThenBy(other => other.Season)
+                .ThenBy(other => other.Episode)
+                .ToList();
+
+        _open = CollectionService.Get(_open.Id);
 
         _statusMessage =
-            $"Deleted \"{collectionName}\".";
-
-        CollectionService.Delete(_selectedCollection.Id);
-
-        _selectedCollection = null;
-        _isConfirmingDelete = false;
-
-        await LoadCollectionsAsync();
+            $"Took out \"{asset.Title}\". {NotSentYetHint}";
     }
 
-    private void AddMember(Guid assetId)
+    private string NotSentYetHint =>
+        _jellyfinConfigured
+            ? "Press Send to Jellyfin when you're done."
+            : string.Empty;
+
+    private async Task RemoveOrphansAsync()
     {
-        if (_selectedCollection is null)
+        if (_open is null)
         {
             return;
         }
 
-        CollectionService.AddAsset(_selectedCollection.Id, assetId);
+        var removed =
+            await CollectionBuilderService.RemoveOrphanedMembersAsync(_open.Id);
 
-        _selectedCollection = CollectionService.Get(_selectedCollection.Id);
+        _open = CollectionService.Get(_open.Id);
+
+        await LoadOpenAsync();
+
+        _statusMessage =
+            $"Took out {removed} item(s) that no longer exist.";
     }
 
-    private void RemoveMember(Guid assetId)
+    private async Task SendAsync()
     {
-        if (_selectedCollection is null)
+        if (_open is null || _isSending)
         {
             return;
         }
 
-        CollectionService.RemoveAsset(_selectedCollection.Id, assetId);
+        _isSending = true;
+        _syncResult = null;
+        _statusMessage = string.Empty;
 
-        _selectedCollection = CollectionService.Get(_selectedCollection.Id);
-    }
-
-    private List<MediaAsset> GetMembers()
-    {
-        if (_selectedCollection is null)
+        try
         {
-            return [];
+            _syncResult =
+                await CollectionBuilderService.SyncToJellyfinAsync(_open.Id);
+
+            _open = CollectionService.Get(_open.Id);
         }
-
-        return _selectedCollection.AssetIds
-            .Select(id => MediaCatalogService.GetAsset(id))
-            .Where(asset => asset is not null)
-            .Select(asset => asset!)
-            .OrderBy(asset => asset.Title)
-            .ThenBy(asset => asset.Season)
-            .ThenBy(asset => asset.Episode)
-            .ToList();
-    }
-
-    // --- Movies ---
-
-    private List<MediaAsset> GetAddableMovies()
-    {
-        return GetFilteredAddableMovies()
-            .Take(50)
-            .ToList();
-    }
-
-    private List<string> GetAvailableMovieGenres()
-    {
-        return GetAddableMoviesForDrive()
-            .SelectMany(asset => asset.Genres)
-            .Where(genre => !string.IsNullOrWhiteSpace(genre))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(genre => genre)
-            .ToList();
-    }
-
-    private IEnumerable<MediaAsset> GetFilteredAddableMovies()
-    {
-        return GetAddableMoviesForDrive()
-            .Where(asset =>
-                (string.IsNullOrWhiteSpace(_movieFilterText) ||
-                 asset.Title.Contains(_movieFilterText, StringComparison.OrdinalIgnoreCase)) &&
-                (string.IsNullOrWhiteSpace(_movieGenre) ||
-                 asset.Genres.Contains(_movieGenre, StringComparer.OrdinalIgnoreCase)))
-            .OrderBy(asset => asset.Title);
-    }
-
-    private IEnumerable<MediaAsset> GetAddableMoviesForDrive()
-    {
-        if (_selectedCollection is null)
+        finally
         {
-            return [];
+            _isSending = false;
         }
-
-        var profile =
-            _profiles.FirstOrDefault(profile =>
-                string.Equals(
-                    profile.Name,
-                    _selectedCollection.DriveProfileName,
-                    StringComparison.OrdinalIgnoreCase));
-
-        if (profile is null ||
-            string.IsNullOrWhiteSpace(profile.MovieLibraryPath))
-        {
-            return [];
-        }
-
-        var memberIds =
-            _selectedCollection.AssetIds.ToHashSet();
-
-        return MediaCatalogService.GetAssets()
-            .Where(asset =>
-                asset.MediaType == MediaType.Movie &&
-                !memberIds.Contains(asset.Id) &&
-                PathContainment.IsPathUnderRoot(asset.CanonicalPath, profile.MovieLibraryPath));
     }
 
-    private void AddAllFilteredMovies()
+    private async Task Delete()
     {
-        if (_selectedCollection is null)
+        if (_open is null)
         {
             return;
         }
 
-        var assetIds =
-            GetFilteredAddableMovies()
-                .Select(asset => asset.Id)
-                .ToList();
+        var name = _open.Name;
 
-        CollectionService.AddAssets(_selectedCollection.Id, assetIds);
+        CollectionService.Delete(_open.Id);
 
-        _selectedCollection = CollectionService.Get(_selectedCollection.Id);
+        _confirmDelete = false;
+
+        await Close();
+
+        _statusMessage =
+            $"Deleted \"{name}\" from Simplifiarr.";
     }
 
-    // --- TV ---
-
-    private List<string> GetAvailableTvGenres()
+    private static string SyncSummary(CollectionSyncResult result)
     {
-        return GetAddableTvForDrive()
-            .SelectMany(asset => asset.Genres)
-            .Where(genre => !string.IsNullOrWhiteSpace(genre))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(genre => genre)
-            .ToList();
-    }
+        var parts = new List<string>();
 
-    private IEnumerable<MediaAsset> GetFilteredAddableTv()
-    {
-        return GetAddableTvForDrive()
-            .Where(asset =>
-                (string.IsNullOrWhiteSpace(_tvFilterText) ||
-                 asset.Title.Contains(_tvFilterText, StringComparison.OrdinalIgnoreCase)) &&
-                (string.IsNullOrWhiteSpace(_tvGenre) ||
-                 asset.Genres.Contains(_tvGenre, StringComparer.OrdinalIgnoreCase)));
-    }
-
-    private IEnumerable<MediaAsset> GetAddableTvForDrive()
-    {
-        if (_selectedCollection is null)
+        if (result.Added > 0)
         {
-            return [];
+            parts.Add($"{result.Added:N0} added");
         }
 
-        var profile =
-            _profiles.FirstOrDefault(profile =>
-                string.Equals(
-                    profile.Name,
-                    _selectedCollection.DriveProfileName,
-                    StringComparison.OrdinalIgnoreCase));
-
-        if (profile is null ||
-            string.IsNullOrWhiteSpace(profile.TvLibraryPath))
+        if (result.Removed > 0)
         {
-            return [];
+            parts.Add($"{result.Removed:N0} taken out");
         }
 
-        var memberIds =
-            _selectedCollection.AssetIds.ToHashSet();
-
-        return MediaCatalogService.GetAssets()
-            .Where(asset =>
-                asset.MediaType == MediaType.TvEpisode &&
-                !memberIds.Contains(asset.Id) &&
-                PathContainment.IsPathUnderRoot(asset.CanonicalPath, profile.TvLibraryPath));
-    }
-
-    private List<ShowGroup> GetTvShowGroups() =>
-        ShowGroup.GroupByShow(GetFilteredAddableTv());
-
-    private void AddAllFilteredTv()
-    {
-        if (_selectedCollection is null)
+        if (result.AlreadyThere > 0)
         {
-            return;
+            parts.Add($"{result.AlreadyThere:N0} already there");
         }
 
-        var assetIds =
-            GetFilteredAddableTv()
-                .Select(asset => asset.Id)
-                .ToList();
-
-        CollectionService.AddAssets(_selectedCollection.Id, assetIds);
-
-        _selectedCollection = CollectionService.Get(_selectedCollection.Id);
-    }
-
-    private void AddWholeShow(string showTitle)
-    {
-        if (_selectedCollection is null)
+        if (result.MissingFiles > 0)
         {
-            return;
+            parts.Add($"{result.MissingFiles:N0} skipped because the file is gone");
         }
 
-        var assetIds =
-            GetAddableTvForDrive()
-                .Where(asset =>
-                    string.Equals(asset.Title, showTitle, StringComparison.OrdinalIgnoreCase))
-                .Select(asset => asset.Id)
-                .ToList();
-
-        CollectionService.AddAssets(_selectedCollection.Id, assetIds);
-
-        _selectedCollection = CollectionService.Get(_selectedCollection.Id);
+        return parts.Count == 0
+            ? "Nothing needed changing."
+            : string.Join(", ", parts) + ".";
     }
 
-    private void AddWholeSeason(string showTitle, int? season)
-    {
-        if (_selectedCollection is null)
+    private static string EpisodeLabel(MediaAsset episode) =>
+        episode.Episode.HasValue
+            ? $"E{episode.Episode:00}"
+            : "E?";
+
+    // The quieter line under a title: what tells two same-named things apart.
+    private static string Detail(MediaAsset asset) =>
+        asset.MediaType switch
         {
-            return;
+            MediaType.TvEpisode =>
+                $"S{asset.Season ?? 0:00}E{asset.Episode ?? 0:00}" +
+                (string.IsNullOrWhiteSpace(asset.EpisodeTitle) ? string.Empty : $" · {asset.EpisodeTitle}"),
+
+            MediaType.Movie =>
+                asset.Year?.ToString() ?? string.Empty,
+
+            MediaType.Music =>
+                string.Join(
+                    " · ",
+                    new[] { asset.Author, asset.Album }
+                        .Where(part => !string.IsNullOrWhiteSpace(part))),
+
+            MediaType.Comic =>
+                string.Join(
+                    " · ",
+                    new[] { asset.Album, asset.TrackNumber.HasValue ? $"#{asset.TrackNumber:0.#}" : null }
+                        .Where(part => !string.IsNullOrWhiteSpace(part))),
+
+            _ =>
+                asset.Author ?? string.Empty
+        };
+
+    private static string TypeLabel(MediaType type) =>
+        type switch
+        {
+            MediaType.Movie => "Movies",
+            MediaType.TvEpisode => "TV",
+            MediaType.Book => "Books",
+            MediaType.Audiobook => "Audiobooks",
+            MediaType.Music => "Music",
+            MediaType.Comic => "Comics",
+            _ => type.ToString()
+        };
+
+    // For the middle of a sentence: "2,501 TV episodes not in this collection".
+    private static string ItemNoun(MediaType type) =>
+        type switch
+        {
+            MediaType.Movie => "movies",
+            MediaType.TvEpisode => "TV episodes",
+            MediaType.Book => "books",
+            MediaType.Audiobook => "audiobooks",
+            MediaType.Music => "tracks",
+            MediaType.Comic => "comics",
+            _ => "items"
+        };
+
+    private static string HowLongAgo(DateTime? utc)
+    {
+        if (utc is null)
+        {
+            return "never";
         }
 
-        var assetIds =
-            GetAddableTvForDrive()
-                .Where(asset =>
-                    string.Equals(asset.Title, showTitle, StringComparison.OrdinalIgnoreCase) &&
-                    asset.Season == season)
-                .Select(asset => asset.Id)
-                .ToList();
+        var age = DateTime.UtcNow - utc.Value;
 
-        CollectionService.AddAssets(_selectedCollection.Id, assetIds);
-
-        _selectedCollection = CollectionService.Get(_selectedCollection.Id);
+        return age.TotalMinutes < 1 ? "just now"
+            : age.TotalMinutes < 2 ? "a minute ago"
+            : age.TotalHours < 1 ? $"{(int)age.TotalMinutes} minutes ago"
+            : age.TotalHours < 2 ? "an hour ago"
+            : age.TotalDays < 1 ? $"{(int)age.TotalHours} hours ago"
+            : age.TotalDays < 2 ? "yesterday"
+            : $"{(int)age.TotalDays} days ago";
     }
-
-    // --- Books ---
-
-    private List<MediaAsset> GetAddableBooks()
-    {
-        return GetFilteredAddableBooks()
-            .Take(50)
-            .ToList();
-    }
-
-    private List<string> GetAvailableBookGenres()
-    {
-        return GetAddableBooksForDrive()
-            .SelectMany(asset => asset.Genres)
-            .Where(genre => !string.IsNullOrWhiteSpace(genre))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(genre => genre)
-            .ToList();
-    }
-
-    private IEnumerable<MediaAsset> GetFilteredAddableBooks()
-    {
-        return GetAddableBooksForDrive()
-            .Where(asset =>
-                (string.IsNullOrWhiteSpace(_bookFilterText) ||
-                 asset.Title.Contains(_bookFilterText, StringComparison.OrdinalIgnoreCase)) &&
-                (string.IsNullOrWhiteSpace(_bookGenre) ||
-                 asset.Genres.Contains(_bookGenre, StringComparer.OrdinalIgnoreCase)))
-            .OrderBy(asset => asset.Title);
-    }
-
-    private IEnumerable<MediaAsset> GetAddableBooksForDrive()
-    {
-        if (_selectedCollection is null)
-        {
-            return [];
-        }
-
-        var profile =
-            _profiles.FirstOrDefault(profile =>
-                string.Equals(
-                    profile.Name,
-                    _selectedCollection.DriveProfileName,
-                    StringComparison.OrdinalIgnoreCase));
-
-        if (profile is null ||
-            string.IsNullOrWhiteSpace(profile.BookLibraryPath))
-        {
-            return [];
-        }
-
-        var memberIds =
-            _selectedCollection.AssetIds.ToHashSet();
-
-        return MediaCatalogService.GetAssets()
-            .Where(asset =>
-                asset.MediaType == MediaType.Book &&
-                !memberIds.Contains(asset.Id) &&
-                PathContainment.IsPathUnderRoot(asset.CanonicalPath, profile.BookLibraryPath));
-    }
-
-    private void AddAllFilteredBooks()
-    {
-        if (_selectedCollection is null)
-        {
-            return;
-        }
-
-        var assetIds =
-            GetFilteredAddableBooks()
-                .Select(asset => asset.Id)
-                .ToList();
-
-        CollectionService.AddAssets(_selectedCollection.Id, assetIds);
-
-        _selectedCollection = CollectionService.Get(_selectedCollection.Id);
-    }
-
-    // --- Audiobooks ---
-
-    private List<MediaAsset> GetAddableAudiobooks()
-    {
-        return GetFilteredAddableAudiobooks()
-            .Take(50)
-            .ToList();
-    }
-
-    private List<string> GetAvailableAudiobookGenres()
-    {
-        return GetAddableAudiobooksForDrive()
-            .SelectMany(asset => asset.Genres)
-            .Where(genre => !string.IsNullOrWhiteSpace(genre))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(genre => genre)
-            .ToList();
-    }
-
-    private IEnumerable<MediaAsset> GetFilteredAddableAudiobooks()
-    {
-        return GetAddableAudiobooksForDrive()
-            .Where(asset =>
-                (string.IsNullOrWhiteSpace(_audiobookFilterText) ||
-                 asset.Title.Contains(_audiobookFilterText, StringComparison.OrdinalIgnoreCase)) &&
-                (string.IsNullOrWhiteSpace(_audiobookGenre) ||
-                 asset.Genres.Contains(_audiobookGenre, StringComparer.OrdinalIgnoreCase)))
-            .OrderBy(asset => asset.Title);
-    }
-
-    private IEnumerable<MediaAsset> GetAddableAudiobooksForDrive()
-    {
-        if (_selectedCollection is null)
-        {
-            return [];
-        }
-
-        var profile =
-            _profiles.FirstOrDefault(profile =>
-                string.Equals(
-                    profile.Name,
-                    _selectedCollection.DriveProfileName,
-                    StringComparison.OrdinalIgnoreCase));
-
-        if (profile is null ||
-            string.IsNullOrWhiteSpace(profile.AudiobookLibraryPath))
-        {
-            return [];
-        }
-
-        var memberIds =
-            _selectedCollection.AssetIds.ToHashSet();
-
-        return MediaCatalogService.GetAssets()
-            .Where(asset =>
-                asset.MediaType == MediaType.Audiobook &&
-                !memberIds.Contains(asset.Id) &&
-                PathContainment.IsPathUnderRoot(asset.CanonicalPath, profile.AudiobookLibraryPath));
-    }
-
-    private void AddAllFilteredAudiobooks()
-    {
-        if (_selectedCollection is null)
-        {
-            return;
-        }
-
-        var assetIds =
-            GetFilteredAddableAudiobooks()
-                .Select(asset => asset.Id)
-                .ToList();
-
-        CollectionService.AddAssets(_selectedCollection.Id, assetIds);
-
-        _selectedCollection = CollectionService.Get(_selectedCollection.Id);
-    }
-
-    // --- Music ---
-
-    private List<MediaAsset> GetAddableMusic()
-    {
-        return GetFilteredAddableMusic()
-            .Take(50)
-            .ToList();
-    }
-
-    private List<string> GetAvailableMusicGenres()
-    {
-        return GetAddableMusicForDrive()
-            .SelectMany(asset => asset.Genres)
-            .Where(genre => !string.IsNullOrWhiteSpace(genre))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(genre => genre)
-            .ToList();
-    }
-
-    private IEnumerable<MediaAsset> GetFilteredAddableMusic()
-    {
-        return GetAddableMusicForDrive()
-            .Where(asset =>
-                (string.IsNullOrWhiteSpace(_musicFilterText) ||
-                 asset.Title.Contains(_musicFilterText, StringComparison.OrdinalIgnoreCase)) &&
-                (string.IsNullOrWhiteSpace(_musicGenre) ||
-                 asset.Genres.Contains(_musicGenre, StringComparer.OrdinalIgnoreCase)))
-            .OrderBy(asset => asset.Title);
-    }
-
-    private IEnumerable<MediaAsset> GetAddableMusicForDrive()
-    {
-        if (_selectedCollection is null)
-        {
-            return [];
-        }
-
-        var profile =
-            _profiles.FirstOrDefault(profile =>
-                string.Equals(
-                    profile.Name,
-                    _selectedCollection.DriveProfileName,
-                    StringComparison.OrdinalIgnoreCase));
-
-        if (profile is null ||
-            string.IsNullOrWhiteSpace(profile.MusicLibraryPath))
-        {
-            return [];
-        }
-
-        var memberIds =
-            _selectedCollection.AssetIds.ToHashSet();
-
-        return MediaCatalogService.GetAssets()
-            .Where(asset =>
-                asset.MediaType == MediaType.Music &&
-                !memberIds.Contains(asset.Id) &&
-                PathContainment.IsPathUnderRoot(asset.CanonicalPath, profile.MusicLibraryPath));
-    }
-
-    private void AddAllFilteredMusic()
-    {
-        if (_selectedCollection is null)
-        {
-            return;
-        }
-
-        var assetIds =
-            GetFilteredAddableMusic()
-                .Select(asset => asset.Id)
-                .ToList();
-
-        CollectionService.AddAssets(_selectedCollection.Id, assetIds);
-
-        _selectedCollection = CollectionService.Get(_selectedCollection.Id);
-    }
-
-    private List<MediaAsset> GetAddableComics()
-    {
-        return GetFilteredAddableComics()
-            .Take(50)
-            .ToList();
-    }
-
-    private List<string> GetAvailableComicGenres()
-    {
-        return GetAddableComicsForDrive()
-            .SelectMany(asset => asset.Genres)
-            .Where(genre => !string.IsNullOrWhiteSpace(genre))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(genre => genre)
-            .ToList();
-    }
-
-    private IEnumerable<MediaAsset> GetFilteredAddableComics()
-    {
-        return GetAddableComicsForDrive()
-            .Where(asset =>
-                (string.IsNullOrWhiteSpace(_comicFilterText) ||
-                 asset.Title.Contains(_comicFilterText, StringComparison.OrdinalIgnoreCase)) &&
-                (string.IsNullOrWhiteSpace(_comicGenre) ||
-                 asset.Genres.Contains(_comicGenre, StringComparer.OrdinalIgnoreCase)))
-            .OrderBy(asset => asset.Title);
-    }
-
-    private IEnumerable<MediaAsset> GetAddableComicsForDrive()
-    {
-        if (_selectedCollection is null)
-        {
-            return [];
-        }
-
-        var profile =
-            _profiles.FirstOrDefault(profile =>
-                string.Equals(
-                    profile.Name,
-                    _selectedCollection.DriveProfileName,
-                    StringComparison.OrdinalIgnoreCase));
-
-        if (profile is null ||
-            string.IsNullOrWhiteSpace(profile.ComicLibraryPath))
-        {
-            return [];
-        }
-
-        var memberIds =
-            _selectedCollection.AssetIds.ToHashSet();
-
-        return MediaCatalogService.GetAssets()
-            .Where(asset =>
-                asset.MediaType == MediaType.Comic &&
-                !memberIds.Contains(asset.Id) &&
-                PathContainment.IsPathUnderRoot(asset.CanonicalPath, profile.ComicLibraryPath));
-    }
-
-    private void AddAllFilteredComics()
-    {
-        if (_selectedCollection is null)
-        {
-            return;
-        }
-
-        var assetIds =
-            GetFilteredAddableComics()
-                .Select(asset => asset.Id)
-                .ToList();
-
-        CollectionService.AddAssets(_selectedCollection.Id, assetIds);
-
-        _selectedCollection = CollectionService.Get(_selectedCollection.Id);
-    }
-
 }

@@ -1,0 +1,77 @@
+@*
+    A folder (or file) path box that says, as you type, whether that path
+    exists - so a typo shows up before Save rather than as an empty scan.
+*@
+
+<div>
+    <label class="form-label" for="@_id">@Label</label>
+
+    <input id="@_id"
+           class="form-control"
+           placeholder="@Placeholder"
+           value="@Value"
+           @oninput="OnInput" />
+
+    <div class="cell-note mt-1">
+        @if (string.IsNullOrWhiteSpace(Value))
+        {
+            <span>@EmptyText</span>
+        }
+        else if (Exists(Value))
+        {
+            <span class="status-ok">Found</span>
+        }
+        else
+        {
+            <span class="status-warn">@(IsFile ? "File not found" : "Folder not found")</span>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(Help))
+        {
+            <span> · @Help</span>
+        }
+    </div>
+</div>
+
+@code
+{
+    private readonly string _id = $"path-{Guid.NewGuid():N}";
+
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = string.Empty;
+
+    [Parameter]
+    public string Value { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback<string> ValueChanged { get; set; }
+
+    [Parameter]
+    public string? Placeholder { get; set; }
+
+    [Parameter]
+    public string? Help { get; set; }
+
+    /// <summary>What to say when the box is empty.</summary>
+    [Parameter]
+    public string EmptyText { get; set; } = "Not set";
+
+    /// <summary>The path is a file rather than a folder.</summary>
+    [Parameter]
+    public bool IsFile { get; set; }
+
+    private Task OnInput(ChangeEventArgs args) =>
+        ValueChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty);
+
+    private bool Exists(string path)
+    {
+        try
+        {
+            return IsFile ? File.Exists(path) : Directory.Exists(path);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+}

@@ -1,4 +1,5 @@
 using Simplifiarr.Core.Models;
+using Simplifiarr.Core.Utilities;
 
 namespace Simplifiarr.Core.Services;
 
@@ -31,10 +32,23 @@ public class LibraryTargetResolver
             return new LibraryTarget();
         }
 
+        // A download belongs to the drive entry whose downloads folder it
+        // is in, and goes to that entry's library. Only if no entry claims
+        // it (it was found some other way) fall back to "the first entry on
+        // the same drive letter" - which on its own would send a file to
+        // the wrong library whenever two entries share a drive.
         var profile =
+            settings.DriveProfiles
+                .Where(profile =>
+                    profile.Enabled &&
+                    PathContainment.IsPathUnderRoot(sourcePath, profile.DownloadPath))
+                .OrderByDescending(profile => profile.DownloadPath.Length)
+                .FirstOrDefault()
+            ??
             settings.DriveProfiles
                 .FirstOrDefault(profile =>
                     profile.Enabled &&
+                    !string.IsNullOrWhiteSpace(profile.DriveRoot) &&
                     string.Equals(
                         Path.GetPathRoot(profile.DriveRoot),
                         sourceRoot,

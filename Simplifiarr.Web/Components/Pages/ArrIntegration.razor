@@ -7,18 +7,12 @@
 @inject IArrEnrichmentService ArrEnrichmentService
 @inject ISettingsService SettingsService
 
-<PageTitle>Arr Integration</PageTitle>
+<PageTitle>Radarr and Sonarr details - Simplifiarr</PageTitle>
 
-<h1>Arr Integration</h1>
-
-<p>
-    Enriches your cataloged Movies and TV episodes with metadata from Radarr
-    and Sonarr - TMDB/TVDB ID, genres, quality profile, and monitored state.
-    This doesn't change anything in Radarr, Sonarr, or your library; it's a
-    one-way, on-demand sync used to build alternate collections later.
-    Rescan Movies/TV on Hardlinks or Potential Waste first so there's a
-    catalog to match against.
-</p>
+<PageHeader Title="Radarr and Sonarr details"
+            Subtitle="Fetches genres, exact titles and episode numbers for the movies and TV already in your libraries, and shows what matched. Nothing is changed in Radarr, Sonarr or your files. Scan first, so there are library files to match against.">
+    <a class="btn btn-secondary" href="settings">Back to Settings</a>
+</PageHeader>
 
 <div class="card mb-3">
     <div class="card-body">

@@ -1,11 +1,11 @@
 namespace Simplifiarr.Web.Support;
 
 /// <summary>
-/// Tracks which single candidate currently has an open Promotion Preview
-/// card, and derives the row/button styling every promotion table shows
-/// for it - shared between Hardlinks' Movies/TV track (which reuses the
-/// same instance across both, since TV episodes are MoviePromotionCandidate
-/// too) and its Books track, previously duplicated per candidate type.
+/// Tracks which single candidate currently has its preview open, and
+/// derives the row and button styling a results table shows for it.
+/// Shared by Hardlinks' Movies/TV tabs (one instance for both, since TV
+/// episodes are MoviePromotionCandidate too) and the shared media-type
+/// section.
 /// </summary>
 public sealed class PreviewSelection<TCandidate>
 {
@@ -22,24 +22,26 @@ public sealed class PreviewSelection<TCandidate>
     public void Clear() =>
         Selected = default;
 
+    /// <summary>Highlights the row whose preview is open.</summary>
     public string RowClass(
         TCandidate candidate) =>
         IsSelected(candidate)
-            ? "table-success"
+            ? "table-active"
             : string.Empty;
 
     public string ButtonClass(
         TCandidate candidate) =>
-        IsSelected(candidate)
-            ? "btn btn-sm btn-outline-success"
-            : "btn btn-sm btn-success";
+        "btn btn-sm btn-secondary";
 
     public string ButtonText(
         TCandidate candidate) =>
         IsSelected(candidate)
-            ? "Selected"
-            : "Promote";
+            ? "Previewing"
+            : "Preview";
 
+    /// <summary>
+    /// Only one preview at a time: while one is open, the others wait.
+    /// </summary>
     public bool IsButtonDisabled(
         TCandidate candidate,
         bool isBusy) =>

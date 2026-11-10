@@ -114,6 +114,104 @@ public class DriveProfileValidatorTests
 }
 
 [TestClass]
+public class LibraryTargetResolverTests : TempFolderTest
+{
+    private DriveProfile Entry(string name) =>
+        new()
+        {
+            Name = name,
+            DriveRoot = Path.GetPathRoot(Folder)!,
+            DownloadPath = Path.Combine(Folder, name, "downloads"),
+            MovieLibraryPath = Path.Combine(Folder, name, "movies"),
+            TvLibraryPath = Path.Combine(Folder, name, "tv")
+        };
+
+    private static ParsedRelease Movie() =>
+        new() { NormalizedTitle = "Some Film", Year = 2021 };
+
+    [TestMethod]
+    public async Task A_download_goes_to_the_library_of_the_entry_whose_downloads_folder_it_is_in()
+    {
+        // Two entries on the same drive letter: the second one's download
+        // must not be sent to the first one's library.
+        var first = Entry("first");
+        var second = Entry("second");
+
+        var resolver =
+            new LibraryTargetResolver(
+                new FixedSettingsService(first, second),
+                new FileScannerService());
+
+        var target =
+            await resolver.ResolveAsync(
+                Movie(),
+                Path.Combine(second.DownloadPath, "Some.Film.2021.1080p.mkv"));
+
+        Assert.AreEqual(
+            Path.Combine(second.MovieLibraryPath, "Some Film (2021)", "Some Film (2021).mkv"),
+            target.TargetFilePath);
+    }
+
+    [TestMethod]
+    public async Task A_tv_episode_goes_under_show_and_season()
+    {
+        var entry = Entry("only");
+
+        var resolver =
+            new LibraryTargetResolver(
+                new FixedSettingsService(entry),
+                new FileScannerService());
+
+        var target =
+            await resolver.ResolveAsync(
+                new ParsedRelease { NormalizedTitle = "Some Show", IsTv = true, Season = 2, Episode = 5 },
+                Path.Combine(entry.DownloadPath, "Some.Show.S02E05.mkv"));
+
+        Assert.AreEqual(
+            Path.Combine(entry.TvLibraryPath, "Some Show", "Season 02", "Some Show - S02E05.mkv"),
+            target.TargetFilePath);
+    }
+
+    [TestMethod]
+    public async Task A_file_outside_every_downloads_folder_falls_back_to_the_entry_on_its_drive()
+    {
+        var entry = Entry("only");
+
+        var resolver =
+            new LibraryTargetResolver(
+                new FixedSettingsService(entry),
+                new FileScannerService());
+
+        var target =
+            await resolver.ResolveAsync(
+                Movie(),
+                Path.Combine(Folder, "elsewhere", "Some.Film.2021.mkv"));
+
+        StringAssert.StartsWith(target.TargetFilePath, entry.MovieLibraryPath);
+    }
+
+    [TestMethod]
+    public async Task A_turned_off_entry_is_never_used()
+    {
+        var off = Entry("off");
+
+        off.Enabled = false;
+
+        var resolver =
+            new LibraryTargetResolver(
+                new FixedSettingsService(off),
+                new FileScannerService());
+
+        var target =
+            await resolver.ResolveAsync(
+                Movie(),
+                Path.Combine(off.DownloadPath, "Some.Film.2021.mkv"));
+
+        Assert.AreEqual(string.Empty, target.TargetFilePath);
+    }
+}
+
+[TestClass]
 public class JunkScanSafetyTests : TempFolderTest
 {
     [TestMethod]

@@ -79,50 +79,44 @@ else if (_isScanning)
 
 @if (_selectedPreview is not null)
 {
-    <div class="card mt-4">
-        <div class="card-header">
-            Promotion Preview
-        </div>
+    <div class="panel mb-3">
+        <div class="action-row">
+            <div>
+                <div class="action-row-title">Link this file into the library?</div>
 
-        <div class="card-body">
-            <p>
-                <strong>Source</strong>
-            </p>
+                <div class="detail-label">Download (stays where it is)</div>
+                <code>@_selectedPreview.SourcePath</code>
 
-            <code>@_selectedPreview.SourcePath</code>
+                <div class="detail-label">Will also appear in the library as</div>
+                <code>@_selectedPreview.TargetFilePath</code>
 
-            <p class="mt-3">
-                <strong>Target File</strong>
-            </p>
+                <details class="mt-2">
+                    <summary>What will happen, step by step</summary>
 
-            <code>@_selectedPreview.TargetFilePath</code>
+                    <ul class="mt-2 mb-0">
+                        @foreach (var action in _selectedPreview.PlannedActions)
+                        {
+                            <li>@action</li>
+                        }
+                    </ul>
+                </details>
+            </div>
 
-            <p class="mt-3">
-                <strong>Actions</strong>
-            </p>
+            <div class="cell-actions">
+                <button type="button"
+                        class="btn btn-primary"
+                        disabled="@(_isExecuting || _isScanning)"
+                        @onclick="ExecuteSelectedAsync">
+                    @(_isExecuting ? "Linking..." : "Link")
+                </button>
 
-            <ul>
-                @foreach (var action in _selectedPreview.PlannedActions)
-                {
-                    <li>@action</li>
-                }
-            </ul>
-
-            <button class="btn btn-success"
-                    disabled="@_isExecuting"
-                    @onclick="ExecuteSelectedAsync">
-                <i class="bi bi-check-lg" aria-hidden="true"></i>
-                @(_isExecuting
-                    ? "Promoting..."
-                    : "Confirm Promotion")
-            </button>
-
-            <button class="btn btn-secondary ms-2"
-                    disabled="@_isExecuting"
-                    @onclick="CancelPreview">
-                <i class="bi bi-x-lg" aria-hidden="true"></i>
-                Cancel
-            </button>
+                <button type="button"
+                        class="btn btn-secondary"
+                        disabled="@_isExecuting"
+                        @onclick="CancelPreview">
+                    Cancel
+                </button>
+            </div>
         </div>
     </div>
 }
@@ -146,201 +140,186 @@ else if (_activeTab == MoviesTab)
     }
     else
     {
-        <p>
-            <strong>@GetMovieCandidates().Count</strong>
-            promotable movie(s) found.
-        </p>
-
         @if (_isConfirmingMovieBatch)
         {
             <BatchConfirmBanner IsBusy="_isExecuting"
-                                ConfirmLabel="Confirm Promote"
-                                BusyLabel="Promoting..."
+                                ConfirmLabel="Link"
+                                BusyLabel="Linking..."
                                 OnConfirm="ConfirmMovieBatchAsync"
                                 OnCancel="CancelMovieBatchConfirm">
                 <Message>
-                    Promote @_pendingMovieBatch.Count movie(s)? This creates a hardlink for each.
+                    <strong>Link @_pendingMovieBatch.Count movie(s) into the library?</strong>
+                    Each gets a hardlink - nothing is copied or moved.
                 </Message>
             </BatchConfirmBanner>
         }
         else
         {
-            <div class="mb-2">
-                <button class="btn btn-primary btn-sm"
-                        disabled="@(_isScanning || _isExecuting)"
-                        @onclick="() => RequestMovieBatchConfirm(GetPromotableMovieCandidates())">
-                    <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
-                    Promote All Movies
-                </button>
+            <div class="toolbar">
+                <div class="toolbar-summary">
+                    <strong>@GetMovieCandidates().Count</strong> movie(s) ready to link
+                    @if (_movieSelection.Count > 0)
+                    {
+                        <text> · @_movieSelection.Count selected</text>
+                    }
+                </div>
 
-                <button class="btn btn-primary btn-sm ms-2"
-                        disabled="@(_isScanning || _isExecuting || _movieSelection.Count == 0)"
-                        @onclick="() => RequestMovieBatchConfirm(GetSelectedPromotableMovieCandidates())">
-                    <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
-                    Promote Selected (@_movieSelection.Count)
-                </button>
+                <div class="toolbar-actions">
+                    <button type="button"
+                            class="btn btn-secondary btn-sm"
+                            disabled="@(_isScanning || _isExecuting || GetPromotableMovieCandidates().Count == 0)"
+                            @onclick="() => RequestMovieBatchConfirm(GetPromotableMovieCandidates())">
+                        Link all
+                    </button>
+
+                    <button type="button"
+                            class="btn btn-primary btn-sm"
+                            disabled="@(_isScanning || _isExecuting || _movieSelection.Count == 0)"
+                            @onclick="() => RequestMovieBatchConfirm(GetSelectedPromotableMovieCandidates())">
+                        Link selected (@_movieSelection.Count)
+                    </button>
+                </div>
             </div>
         }
 
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>Select</th>
-                    <th>Movie</th>
-                    <th>Year</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                    <th>Details</th>
-                </tr>
-            </thead>
+        <div class="table-scroll">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th class="col-check">Select</th>
+                        <th>Movie</th>
+                        <th>Drive</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
 
-            <tbody>
-                @foreach (var candidate in GetMovieCandidates())
-                {
-                    <tr class="@_moviePreviewSelection.RowClass(candidate)">
-                        <SelectableCheckboxCell Checked="_movieSelection.IsSelected(candidate)"
-                                                Disabled="_isScanning || _isExecuting"
-                                                OnChanged="selected => _movieSelection.SetSelected(candidate, selected)" />
+                <tbody>
+                    @foreach (var candidate in GetMovieCandidates())
+                    {
+                        var canLink =
+                            candidate.CanPromote && candidate.Plan is not null;
 
-                        <td>
-                            <strong>@candidate.Title</strong>
+                        <tr @key="candidate.SourcePath" class="@_moviePreviewSelection.RowClass(candidate)">
+                            <SelectableCheckboxCell Checked="_movieSelection.IsSelected(candidate)"
+                                                    Disabled="_isScanning || _isExecuting || !canLink"
+                                                    OnChanged="selected => _movieSelection.SetSelected(candidate, selected)" />
 
-                            @if (candidate.WasPreviouslyPromoted)
-                            {
-                                <div>
-                                    <span class="badge bg-warning text-dark">
-                                        Previously promoted - library copy missing
-                                    </span>
+                            <td>
+                                <div class="file-name">
+                                    @candidate.Title
+                                    @if (candidate.Year.HasValue)
+                                    {
+                                        <text> (@candidate.Year)</text>
+                                    }
                                 </div>
-                            }
 
-                            <div class="text-muted small">
-                                Found @GetCandidateAgeText(candidate.DiscoveredUtc)
-                            </div>
-
-                            @if (!string.IsNullOrWhiteSpace(candidate.DriveProfileName))
-                            {
-                                <div class="text-muted small">
-                                    Drive: @candidate.DriveProfileName
-                                </div>
-                            }
-                        </td>
-
-                        <td>
-                            @(candidate.Year?.ToString() ?? "Unknown")
-                        </td>
-
-                        <td>
-                            @if (candidate.CanPromote)
-                            {
-                                <i class="bi bi-check-circle text-success" aria-hidden="true"></i> <text>READY</text>
-                            }
-                            else
-                            {
-                                <i class="bi bi-x-circle text-danger" aria-hidden="true"></i> <text>BLOCKED</text>
-                            }
-                        </td>
-
-                        <td>
-                            @if (_confirmingDownloadDelete.Contains(candidate.SourcePath))
-                            {
-                                <div class="alert alert-warning p-2 mb-0">
-                                    Move the download copy to Quarantine? Your
-                                    torrent client may still list this as
-                                    seeding/missing until you remove the
-                                    torrent there too - Simplifiarr doesn't
-                                    touch qBittorrent's torrent list.
-
-                                    <div class="mt-1">
-                                        <button class="btn btn-danger btn-sm"
-                                                disabled="@_isExecuting"
-                                                @onclick="() => DeleteDownloadCopyAsync(candidate)">
-                                            <i class="bi bi-check-lg" aria-hidden="true"></i>
-                                            Confirm
-                                        </button>
-
-                                        <button class="btn btn-secondary btn-sm ms-1"
-                                                disabled="@_isExecuting"
-                                                @onclick="() => _confirmingDownloadDelete.Remove(candidate.SourcePath)">
-                                            <i class="bi bi-x-lg" aria-hidden="true"></i>
-                                            Cancel
-                                        </button>
-                                    </div>
-                                </div>
-                            }
-                            else
-                            {
-                                @if (candidate.CanPromote && candidate.Plan is not null)
-                                {
-                                    <button class="@_moviePreviewSelection.ButtonClass(candidate)"
-                                            disabled="@_moviePreviewSelection.IsButtonDisabled(candidate, _isScanning || _isExecuting)"
-                                            @onclick="() => PreviewAsync(candidate)">
-                                        <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
-                                        @(candidate.WasPreviouslyPromoted ? "Re-promote" : _moviePreviewSelection.ButtonText(candidate))
-                                    </button>
-                                }
-                                else if (candidate.CanPromote && candidate.Plan is null)
-                                {
-                                    <span class="text-muted small">No plan available</span>
-                                }
+                                <div class="cell-note">Found @GetCandidateAgeText(candidate.DiscoveredUtc)</div>
 
                                 @if (candidate.WasPreviouslyPromoted)
                                 {
-                                    <button class="btn btn-sm btn-outline-danger ms-1"
-                                            disabled="@(_isScanning || _isExecuting)"
-                                            @onclick="() => _confirmingDownloadDelete.Add(candidate.SourcePath)">
-                                        <i class="bi bi-trash" aria-hidden="true"></i>
-                                        Delete Download Copy
-                                    </button>
+                                    <div class="cell-note status-warn">
+                                        Linked before, but the library copy has since gone missing
+                                    </div>
                                 }
+                            </td>
 
-                                <button class="btn btn-sm btn-outline-secondary ms-1"
-                                        disabled="@(_isScanning || _isExecuting)"
-                                        @onclick="() => IgnoreMovieCandidate(candidate)">
-                                    <i class="bi bi-eye-slash" aria-hidden="true"></i>
-                                    Ignore
-                                </button>
-                            }
-                        </td>
+                            <td>@(string.IsNullOrWhiteSpace(candidate.DriveProfileName) ? "-" : candidate.DriveProfileName)</td>
 
-                        <td>
-                            <details>
-                                <summary>View paths</summary>
+                            <td>
+                                @if (canLink)
+                                {
+                                    <span class="status-ok">Ready</span>
+                                }
+                                else
+                                {
+                                    <span class="status-warn">Can't link</span>
+                                    <div class="cell-note">@candidate.Reason</div>
+                                }
+                            </td>
 
-                                <div class="mt-2">
-                                    <div>
-                                        <strong>Reason</strong>
+                            <td>
+                                @if (_confirmingDownloadDelete.Contains(candidate.SourcePath))
+                                {
+                                    <div class="cell-note mb-1" style="white-space: normal; max-width: 22rem">
+                                        Move the download to Quarantine? qBittorrent may still list
+                                        the torrent until you remove it there too.
                                     </div>
 
-                                    <p>
-                                        @candidate.Reason
-                                    </p>
+                                    <div class="cell-actions">
+                                        <button type="button"
+                                                class="btn btn-danger btn-sm"
+                                                disabled="@_isExecuting"
+                                                @onclick="() => DeleteDownloadCopyAsync(candidate)">
+                                            Move to Quarantine
+                                        </button>
 
-                                    <div>
-                                        <strong>Source File</strong>
+                                        <button type="button"
+                                                class="btn btn-secondary btn-sm"
+                                                disabled="@_isExecuting"
+                                                @onclick="() => _confirmingDownloadDelete.Remove(candidate.SourcePath)">
+                                            Cancel
+                                        </button>
                                     </div>
+                                }
+                                else
+                                {
+                                    <div class="cell-actions">
+                                        @if (canLink)
+                                        {
+                                            <button type="button"
+                                                    class="@_moviePreviewSelection.ButtonClass(candidate)"
+                                                    disabled="@_moviePreviewSelection.IsButtonDisabled(candidate, _isScanning || _isExecuting)"
+                                                    @onclick="() => PreviewAsync(candidate)">
+                                                @(candidate.WasPreviouslyPromoted && !_moviePreviewSelection.IsSelected(candidate)
+                                                    ? "Link again"
+                                                    : _moviePreviewSelection.ButtonText(candidate))
+                                            </button>
+                                        }
 
-                                    <code>
-                                        @candidate.SourcePath
-                                    </code>
+                                        @if (candidate.WasPreviouslyPromoted)
+                                        {
+                                            <button type="button"
+                                                    class="btn btn-outline-danger btn-sm"
+                                                    disabled="@(_isScanning || _isExecuting)"
+                                                    @onclick="() => _confirmingDownloadDelete.Add(candidate.SourcePath)">
+                                                Remove download
+                                            </button>
+                                        }
+
+                                        <button type="button"
+                                                class="btn btn-secondary btn-sm"
+                                                disabled="@(_isScanning || _isExecuting)"
+                                                @onclick="() => IgnoreMovieCandidate(candidate)">
+                                            Ignore
+                                        </button>
+                                    </div>
+                                }
+                            </td>
+
+                            <td>
+                                <details>
+                                    <summary>View paths</summary>
+
+                                    <div class="detail-label">Download</div>
+                                    <code>@candidate.SourcePath</code>
 
                                     @if (candidate.Plan is not null)
                                     {
-                                        <div class="mt-2">
-                                            <strong>Target File</strong>
-                                        </div>
-
-                                        <code>
-                                            @candidate.Plan.TargetFilePath
-                                        </code>
+                                        <div class="detail-label">Will be linked to</div>
+                                        <code>@candidate.Plan.TargetFilePath</code>
                                     }
-                                </div>
-                            </details>
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
+
+                                    <div class="detail-label">Why it's listed</div>
+                                    <div>@candidate.Reason</div>
+                                </details>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
     }
 }
 else if (_activeTab == TvTab)
@@ -351,155 +330,150 @@ else if (_activeTab == TvTab)
     }
     else
     {
-        <p>
-            <strong>@GetTvGroups().Sum(group => group.Count())</strong>
-            promotable episode(s) found across
-            <strong>@GetTvGroups().Count</strong>
-            show/season group(s).
-        </p>
+        <div class="toolbar">
+            <div class="toolbar-summary">
+                <strong>@GetTvGroups().Sum(group => group.Count())</strong> episode(s) ready to link,
+                in <strong>@GetTvGroups().Count</strong> season(s)
+            </div>
+        </div>
 
         @foreach (var group in GetTvGroups())
         {
             var key = group.Key;
+
             var episodes =
                 group
                     .OrderBy(episode => episode.Episode)
                     .ToList();
 
-            var episodeList =
-                string.Join(
-                    ", ",
-                    episodes.Select(episode =>
-                        episode.Episode.HasValue
-                            ? $"E{episode.Episode:00}"
-                            : "E?"));
+            var showEpisodes =
+                GetTvGroups()
+                    .Where(otherGroup =>
+                        string.Equals(otherGroup.Key.Title, key.Title, StringComparison.OrdinalIgnoreCase))
+                    .SelectMany(otherGroup => otherGroup)
+                    .ToList();
 
-            <div class="card mb-3">
-                <div class="card-body">
-                    <h5 class="card-title">
-                        @key.Title
-                        @(key.Season.HasValue ? $" — Season {key.Season:00}" : " — Season Unknown")
-                    </h5>
+            var seasonText =
+                key.Season.HasValue ? $"Season {key.Season:00}" : "Season unknown";
 
-                    <p class="card-text">
-                        <strong>@episodes.Count</strong> missing episode(s): @episodeList
-                    </p>
+            <div class="group-card" @key="key">
+                <div class="group-card-header">
+                    <div class="group-card-title">@key.Title · @seasonText</div>
 
+                    <div class="group-card-meta">
+                        @episodes.Count episode(s):
+                        @string.Join(", ", episodes.Select(episode => episode.Episode.HasValue ? $"E{episode.Episode:00}" : "E?"))
+                    </div>
+                </div>
+
+                <div class="action-row" style="border-top: 1px solid var(--app-border)">
                     @if (_confirmingGroups.Contains(key))
                     {
-                        <div class="alert alert-warning">
-                            Promote all @episodes.Count episode(s) for @key.Title Season @(key.Season?.ToString("00") ?? "Unknown")?
-                            This creates a hardlink for each missing episode.
+                        <div>
+                            <div class="action-row-title">Link all @episodes.Count episode(s) of @key.Title @seasonText?</div>
+                            <div class="action-row-detail">Each gets a hardlink - nothing is copied or moved.</div>
+                        </div>
 
-                            <div class="mt-2">
-                                <button class="btn btn-success btn-sm"
-                                        disabled="@_isExecuting"
-                                        @onclick="() => PromoteGroupAsync(key, episodes)">
-                                    <i class="bi bi-check-lg" aria-hidden="true"></i>
-                                    @(_isExecuting ? "Promoting..." : "Confirm Promote All")
-                                </button>
+                        <div class="cell-actions">
+                            <button type="button"
+                                    class="btn btn-primary btn-sm"
+                                    disabled="@(_isExecuting || _isScanning)"
+                                    @onclick="() => PromoteGroupAsync(key, episodes)">
+                                @(_isExecuting ? "Linking..." : "Link")
+                            </button>
 
-                                <button class="btn btn-secondary btn-sm ms-2"
-                                        disabled="@_isExecuting"
-                                        @onclick="() => CancelGroupConfirm(key)">
-                                    <i class="bi bi-x-lg" aria-hidden="true"></i>
-                                    Cancel
-                                </button>
-                            </div>
+                            <button type="button"
+                                    class="btn btn-secondary btn-sm"
+                                    disabled="@_isExecuting"
+                                    @onclick="() => CancelGroupConfirm(key)">
+                                Cancel
+                            </button>
                         </div>
                     }
-                    else
+                    else if (_confirmingIgnoreSeason.Contains(key))
                     {
-                        <button class="btn btn-primary btn-sm"
-                                disabled="@_isExecuting"
-                                @onclick="() => RequestGroupConfirm(key)">
-                            <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
-                            Promote All @episodes.Count Episode(s)
-                        </button>
-                    }
+                        <div>
+                            <div class="action-row-title">Ignore all @episodes.Count episode(s) of @key.Title @seasonText?</div>
+                            <div class="action-row-detail">They won't be suggested again until you un-ignore them on the Ignored page.</div>
+                        </div>
 
-                    @{
-                        var showEpisodes =
-                            GetTvGroups()
-                                .Where(otherGroup =>
-                                    string.Equals(otherGroup.Key.Title, key.Title, StringComparison.OrdinalIgnoreCase))
-                                .SelectMany(otherGroup => otherGroup)
-                                .ToList();
-                    }
+                        <div class="cell-actions">
+                            <button type="button"
+                                    class="btn btn-secondary btn-sm"
+                                    disabled="@(_isExecuting || _isScanning)"
+                                    @onclick="() => IgnoreEpisodes(episodes, SeasonLabel(key))">
+                                Ignore season
+                            </button>
 
-                    @if (_confirmingIgnoreSeason.Contains(key))
-                    {
-                        <div class="alert alert-secondary mt-2 mb-0">
-                            Ignore all @episodes.Count episode(s) of @key.Title Season @(key.Season?.ToString("00") ?? "Unknown")?
-                            They won't reappear until un-ignored (see Ignored Items) and rescanned.
-
-                            <div class="mt-2">
-                                <button class="btn btn-secondary btn-sm"
-                                        disabled="@_isExecuting"
-                                        @onclick="() => IgnoreEpisodes(episodes, SeasonLabel(key))">
-                                    <i class="bi bi-eye-slash" aria-hidden="true"></i>
-                                    Confirm Ignore Season
-                                </button>
-
-                                <button class="btn btn-outline-secondary btn-sm ms-2"
-                                        @onclick="() => _confirmingIgnoreSeason.Remove(key)">
-                                    Cancel
-                                </button>
-                            </div>
+                            <button type="button"
+                                    class="btn btn-secondary btn-sm"
+                                    @onclick="() => _confirmingIgnoreSeason.Remove(key)">
+                                Cancel
+                            </button>
                         </div>
                     }
                     else if (_confirmingIgnoreShow.Contains(key.Title))
                     {
-                        <div class="alert alert-secondary mt-2 mb-0">
-                            Ignore all @showEpisodes.Count episode(s) of @key.Title across every season listed?
-                            They won't reappear until un-ignored (see Ignored Items) and rescanned.
+                        <div>
+                            <div class="action-row-title">Ignore all @showEpisodes.Count episode(s) of @key.Title, every season listed?</div>
+                            <div class="action-row-detail">They won't be suggested again until you un-ignore them on the Ignored page.</div>
+                        </div>
 
-                            <div class="mt-2">
-                                <button class="btn btn-secondary btn-sm"
-                                        disabled="@_isExecuting"
-                                        @onclick="() => IgnoreEpisodes(showEpisodes, key.Title)">
-                                    <i class="bi bi-eye-slash" aria-hidden="true"></i>
-                                    Confirm Ignore Entire Show
-                                </button>
+                        <div class="cell-actions">
+                            <button type="button"
+                                    class="btn btn-secondary btn-sm"
+                                    disabled="@(_isExecuting || _isScanning)"
+                                    @onclick="() => IgnoreEpisodes(showEpisodes, key.Title)">
+                                Ignore whole show
+                            </button>
 
-                                <button class="btn btn-outline-secondary btn-sm ms-2"
-                                        @onclick="() => _confirmingIgnoreShow.Remove(key.Title)">
-                                    Cancel
-                                </button>
-                            </div>
+                            <button type="button"
+                                    class="btn btn-secondary btn-sm"
+                                    @onclick="() => _confirmingIgnoreShow.Remove(key.Title)">
+                                Cancel
+                            </button>
                         </div>
                     }
                     else
                     {
-                        <div class="mt-2">
-                            <button class="btn btn-outline-secondary btn-sm"
-                                    disabled="@_isExecuting"
+                        <div class="cell-actions" style="flex-wrap: wrap">
+                            <button type="button"
+                                    class="btn btn-primary btn-sm"
+                                    disabled="@(_isExecuting || _isScanning)"
+                                    @onclick="() => RequestGroupConfirm(key)">
+                                Link all @episodes.Count
+                            </button>
+
+                            <button type="button"
+                                    class="btn btn-secondary btn-sm"
+                                    disabled="@(_isExecuting || _isScanning)"
                                     @onclick="() => _confirmingIgnoreSeason.Add(key)">
-                                <i class="bi bi-eye-slash" aria-hidden="true"></i>
-                                Ignore All @episodes.Count Episode(s)
+                                Ignore season
                             </button>
 
                             @if (showEpisodes.Count > episodes.Count)
                             {
-                                <button class="btn btn-outline-secondary btn-sm ms-1"
-                                        disabled="@_isExecuting"
+                                <button type="button"
+                                        class="btn btn-secondary btn-sm"
+                                        disabled="@(_isExecuting || _isScanning)"
                                         @onclick="() => _confirmingIgnoreShow.Add(key.Title)">
-                                    <i class="bi bi-eye-slash" aria-hidden="true"></i>
-                                    Ignore Entire Show (@showEpisodes.Count)
+                                    Ignore whole show (@showEpisodes.Count)
                                 </button>
                             }
                         </div>
                     }
+                </div>
 
-                    <details class="mt-3">
-                        <summary>View individual episodes</summary>
+                <details style="border-top: 1px solid var(--app-border)">
+                    <summary style="padding: .7rem 1.1rem">Episodes one by one</summary>
 
-                        <table class="table table-sm mt-2">
+                    <div class="table-scroll">
+                        <table class="table table-sm">
                             <thead>
                                 <tr>
                                     <th>Episode</th>
                                     <th>Status</th>
-                                    <th>Action</th>
+                                    <th>Actions</th>
                                     <th>Details</th>
                                 </tr>
                             </thead>
@@ -507,65 +481,70 @@ else if (_activeTab == TvTab)
                             <tbody>
                                 @foreach (var episode in episodes)
                                 {
-                                    <tr class="@_moviePreviewSelection.RowClass(episode)">
+                                    var canLink =
+                                        episode.CanPromote && episode.Plan is not null;
+
+                                    <tr @key="episode.SourcePath" class="@_moviePreviewSelection.RowClass(episode)">
                                         <td>
-                                            @(episode.Episode.HasValue
-                                                ? $"E{episode.Episode:00}"
-                                                : "Unknown")
+                                            <div class="file-name">
+                                                @(episode.Episode.HasValue ? $"Episode {episode.Episode:00}" : "Episode unknown")
+                                            </div>
+                                            <div class="cell-note">@Path.GetFileName(episode.SourcePath)</div>
                                         </td>
 
                                         <td>
-                                            @if (episode.CanPromote)
+                                            @if (canLink)
                                             {
-                                                <i class="bi bi-check-circle text-success" aria-hidden="true"></i> <text>READY</text>
+                                                <span class="status-ok">Ready</span>
                                             }
                                             else
                                             {
-                                                <i class="bi bi-x-circle text-danger" aria-hidden="true"></i> <text>BLOCKED</text>
+                                                <span class="status-warn">Can't link</span>
+                                                <div class="cell-note">@episode.Reason</div>
                                             }
                                         </td>
 
                                         <td>
-                                            @if (episode.CanPromote && episode.Plan is not null)
-                                            {
-                                                <button class="@_moviePreviewSelection.ButtonClass(episode)"
-                                                        disabled="@_moviePreviewSelection.IsButtonDisabled(episode, _isScanning || _isExecuting)"
-                                                        @onclick="() => PreviewAsync(episode)">
-                                                    <i class="bi bi-arrow-up-right" aria-hidden="true"></i>
-                                                    @_moviePreviewSelection.ButtonText(episode)
-                                                </button>
-                                            }
+                                            <div class="cell-actions">
+                                                @if (canLink)
+                                                {
+                                                    <button type="button"
+                                                            class="@_moviePreviewSelection.ButtonClass(episode)"
+                                                            disabled="@_moviePreviewSelection.IsButtonDisabled(episode, _isScanning || _isExecuting)"
+                                                            @onclick="() => PreviewAsync(episode)">
+                                                        @_moviePreviewSelection.ButtonText(episode)
+                                                    </button>
+                                                }
 
-                                            <button class="btn btn-sm btn-outline-secondary ms-1"
-                                                    disabled="@_isExecuting"
-                                                    @onclick="() => IgnoreMovieCandidate(episode)">
-                                                <i class="bi bi-eye-slash" aria-hidden="true"></i>
-                                                Ignore
-                                            </button>
+                                                <button type="button"
+                                                        class="btn btn-secondary btn-sm"
+                                                        disabled="@(_isExecuting || _isScanning)"
+                                                        @onclick="() => IgnoreMovieCandidate(episode)">
+                                                    Ignore
+                                                </button>
+                                            </div>
                                         </td>
 
                                         <td>
                                             <details>
                                                 <summary>View paths</summary>
 
-                                                <div class="mt-2">
-                                                    <code>@episode.SourcePath</code>
+                                                <div class="detail-label">Download</div>
+                                                <code>@episode.SourcePath</code>
 
-                                                    @if (episode.Plan is not null)
-                                                    {
-                                                        <div class="mt-2">
-                                                            <code>@episode.Plan.TargetFilePath</code>
-                                                        </div>
-                                                    }
-                                                </div>
+                                                @if (episode.Plan is not null)
+                                                {
+                                                    <div class="detail-label">Will be linked to</div>
+                                                    <code>@episode.Plan.TargetFilePath</code>
+                                                }
                                             </details>
                                         </td>
                                     </tr>
                                 }
                             </tbody>
                         </table>
-                    </details>
-                </div>
+                    </div>
+                </details>
             </div>
         }
     }
@@ -891,13 +870,13 @@ else if (_activeTab == TvTab)
                 _selectedPreview = null;
 
                 _statusMessage =
-                    $"{result.Reason} Remaining opportunities: {_candidates.Count}.";
+                    $"Linked \"{promotedCandidate.Title}\" into the library. {_candidates.Count} left.";
             }
         }
         catch (Exception ex)
         {
             _statusMessage =
-                $"Promotion failed: {ex.Message}";
+                $"Couldn't link it: {ex.Message}";
         }
         finally
         {
@@ -973,13 +952,13 @@ else if (_activeTab == TvTab)
 
             _statusMessage =
                 failed == 0
-                    ? $"{key.Title} Season {key.Season?.ToString("00") ?? "Unknown"}: promoted {succeeded} episode(s)."
-                    : $"{key.Title} Season {key.Season?.ToString("00") ?? "Unknown"}: promoted {succeeded} episode(s), {failed} failed.";
+                    ? $"{key.Title} Season {key.Season?.ToString("00") ?? "Unknown"}: linked {succeeded} episode(s) into the library."
+                    : $"{key.Title} Season {key.Season?.ToString("00") ?? "Unknown"}: linked {succeeded} episode(s); {failed} failed and are still listed.";
         }
         catch (Exception ex)
         {
             _statusMessage =
-                $"Batch promotion failed: {ex.Message}";
+                $"Linking stopped part-way: {ex.Message}";
         }
         finally
         {
@@ -1057,13 +1036,13 @@ else if (_activeTab == TvTab)
 
             _statusMessage =
                 failed == 0
-                    ? $"Promoted {succeeded} movie(s)."
-                    : $"Promoted {succeeded} movie(s), {failed} failed.";
+                    ? $"Linked {succeeded} movie(s) into the library."
+                    : $"Linked {succeeded} movie(s); {failed} failed and are still listed. See History for why.";
         }
         catch (Exception ex)
         {
             _statusMessage =
-                $"Batch promotion failed: {ex.Message}";
+                $"Linking stopped part-way: {ex.Message}";
         }
         finally
         {
