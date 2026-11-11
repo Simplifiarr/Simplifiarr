@@ -367,11 +367,30 @@ else
                           Test="@(() => TestArrAsync(_settings.ProwlarrUrl, _settings.ProwlarrApiKey, "/api/v1/system/status"))" />
 
         <ConnectionFields Name="Jellyfin"
-                          Purpose="Optional, and not used yet. Collections will use it once that is reworked"
+                          Purpose="Optional. Collections are sent to it, and Posters changes its artwork"
                           UrlPlaceholder="http://localhost:8096"
                           @bind-Url="_settings.JellyfinUrl"
                           @bind-ApiKey="_settings.JellyfinApiKey"
                           Test="TestJellyfinAsync" />
+
+        <div class="group-card">
+            <div class="group-card-header">
+                <div class="group-card-title">fanart.tv</div>
+                <div class="group-card-meta" style="white-space: normal">Optional. Adds fanart.tv's posters to the Posters page</div>
+            </div>
+
+            <div style="padding: 0 1.1rem 1.1rem">
+                <label class="form-label" for="fanart-key">Personal API key</label>
+                <input id="fanart-key"
+                       class="form-control"
+                       type="password"
+                       autocomplete="off"
+                       @bind="_settings.FanartApiKey" />
+                <div class="cell-note mt-1">
+                    Free from your fanart.tv account page. Leave blank to use only the posters Jellyfin finds itself.
+                </div>
+            </div>
+        </div>
     }
     else
     {

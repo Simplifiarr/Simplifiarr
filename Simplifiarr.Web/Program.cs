@@ -28,6 +28,7 @@ builder.Services.AddHttpClient<IRadarrClient, RadarrClient>();
 builder.Services.AddHttpClient<ISonarrClient, SonarrClient>();
 builder.Services.AddHttpClient<IProwlarrClient, ProwlarrClient>();
 builder.Services.AddHttpClient<IJellyfinClient, JellyfinClient>();
+builder.Services.AddHttpClient<IPosterService, PosterService>();
 
 builder.Services.AddSingleton<IFileScannerService, FileScannerService>();
 builder.Services.AddSingleton<IHardlinkService, HardlinkService>();
@@ -124,6 +125,33 @@ app.UseHttpsRedirection();
 app.UseAntiforgery();
 
 app.MapStaticAssets();
+
+// An item's current poster, fetched from Jellyfin by Simplifiarr. The
+// browser can't be sent to Jellyfin for it: the address in Settings is
+// often "localhost", which means something else on a phone.
+app.MapGet(
+    "/poster-image/{itemId}",
+    async (string itemId, IJellyfinClient jellyfin) =>
+    {
+        if (!Guid.TryParse(itemId, out _))
+        {
+            return Results.NotFound();
+        }
+
+        try
+        {
+            var image =
+                await jellyfin.GetPosterAsync(itemId, maxWidth: 400);
+
+            return image is null
+                ? Results.NotFound()
+                : Results.File(image.Bytes, image.ContentType);
+        }
+        catch (InvalidOperationException)
+        {
+            return Results.NotFound();
+        }
+    });
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

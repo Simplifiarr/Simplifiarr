@@ -125,6 +125,15 @@ else
             Back
         </button>
 
+        @if (_jellyfinConfigured && !string.IsNullOrWhiteSpace(_open.JellyfinCollectionId))
+        {
+            @* Only once it exists in Jellyfin: that is where the poster lives. *@
+            <a class="btn btn-secondary" href="@($"posters?item={Uri.EscapeDataString(_open.JellyfinCollectionId)}")">
+                <i class="bi bi-image" aria-hidden="true"></i>
+                Choose poster
+            </a>
+        }
+
         <button type="button"
                 class="btn btn-primary"
                 disabled="@(_isSending || !_jellyfinConfigured || _open.AssetIds.Count == 0)"

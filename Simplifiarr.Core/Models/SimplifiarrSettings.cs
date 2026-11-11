@@ -32,6 +32,13 @@ public class SimplifiarrSettings
         string.Empty;
 
     /// <summary>
+    /// A personal fanart.tv API key. Optional: with it, the Posters page
+    /// also offers fanart.tv's posters.
+    /// </summary>
+    public string FanartApiKey { get; set; } =
+        string.Empty;
+
+    /// <summary>
     /// Where ffprobe.exe is (the file or its folder). Leave blank to have
     /// Simplifiarr look in the usual install locations itself.
     /// </summary>

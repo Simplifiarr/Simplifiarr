@@ -241,6 +241,204 @@ public class JellyfinClient : IJellyfinClient
         }
     }
 
+    // ------------------------------------------------------------- Posters
+
+    private const string PosterFields =
+        "&Fields=ProviderIds,ProductionYear&EnableTotalRecordCount=true";
+
+    public async Task<JellyfinPosterPage> FindPosterItemsAsync(
+        string itemType,
+        string? search,
+        int start,
+        int limit)
+    {
+        var query =
+            $"/Items?Recursive=true&IncludeItemTypes={Uri.EscapeDataString(itemType)}" +
+            "&CollapseBoxSetItems=false&SortBy=SortName&SortOrder=Ascending" +
+            $"&StartIndex={start}&Limit={limit}{PosterFields}";
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            query += $"&SearchTerm={Uri.EscapeDataString(search.Trim())}";
+        }
+
+        return await GetPosterItemsAsync(query);
+    }
+
+    public async Task<JellyfinPosterItem?> GetPosterItemAsync(
+        string itemId)
+    {
+        var page =
+            await GetPosterItemsAsync(
+                $"/Items?Ids={Uri.EscapeDataString(itemId)}{PosterFields}");
+
+        return page.Items.FirstOrDefault();
+    }
+
+    public async Task<IReadOnlyList<JellyfinPosterItem>> GetCollectionPosterItemsAsync(
+        string collectionId)
+    {
+        var userId = await GetAdministratorIdAsync();
+
+        var page =
+            await GetPosterItemsAsync(
+                $"/Items?ParentId={Uri.EscapeDataString(collectionId)}" +
+                $"&UserId={Uri.EscapeDataString(userId)}{PosterFields}");
+
+        return page.Items;
+    }
+
+    public async Task<IReadOnlyList<JellyfinRemoteImage>> GetRemotePostersAsync(
+        string itemId)
+    {
+        using var document =
+            await SendAsync(
+                HttpMethod.Get,
+                $"/Items/{Uri.EscapeDataString(itemId)}/RemoteImages?type=Primary&includeAllLanguages=true");
+
+        var images = new List<JellyfinRemoteImage>();
+
+        if (document is null ||
+            !document.RootElement.TryGetProperty("Images", out var array) ||
+            array.ValueKind != JsonValueKind.Array)
+        {
+            return images;
+        }
+
+        foreach (var element in array.EnumerateArray())
+        {
+            var url = Text(element, "Url");
+
+            if (url.Length == 0)
+            {
+                continue;
+            }
+
+            images.Add(
+                new JellyfinRemoteImage(
+                    url,
+                    Text(element, "ThumbnailUrl"),
+                    Text(element, "ProviderName"),
+                    Text(element, "Language"),
+                    Number(element, "Width") is { } width ? (int)width : null,
+                    Number(element, "Height") is { } height ? (int)height : null,
+                    Number(element, "CommunityRating")));
+        }
+
+        return images;
+    }
+
+    public async Task<JellyfinImage?> GetPosterAsync(
+        string itemId,
+        int? maxWidth = null)
+    {
+        var path =
+            $"/Items/{Uri.EscapeDataString(itemId)}/Images/Primary";
+
+        if (maxWidth is { } width)
+        {
+            path += $"?maxWidth={width}&quality=90";
+        }
+
+        using var response =
+            await SendRawAsync(HttpMethod.Get, path, null, notFoundIsFine: true);
+
+        if (response is null)
+        {
+            return null;
+        }
+
+        return new JellyfinImage(
+            await response.Content.ReadAsByteArrayAsync(),
+            response.Content.Headers.ContentType?.MediaType ?? "image/jpeg");
+    }
+
+    public async Task SetPosterAsync(
+        string itemId,
+        byte[] image,
+        string contentType)
+    {
+        // Jellyfin takes the picture as base64 text, labelled with the
+        // picture's own type.
+        var content =
+            new StringContent(Convert.ToBase64String(image));
+
+        content.Headers.ContentType =
+            new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+
+        using var _ =
+            await SendRawAsync(
+                HttpMethod.Post,
+                $"/Items/{Uri.EscapeDataString(itemId)}/Images/Primary",
+                content);
+    }
+
+    private async Task<JellyfinPosterPage> GetPosterItemsAsync(
+        string pathAndQuery)
+    {
+        using var document =
+            await SendAsync(HttpMethod.Get, pathAndQuery);
+
+        var items = new List<JellyfinPosterItem>();
+
+        if (document is null ||
+            !document.RootElement.TryGetProperty("Items", out var array) ||
+            array.ValueKind != JsonValueKind.Array)
+        {
+            return new JellyfinPosterPage(items, 0);
+        }
+
+        foreach (var element in array.EnumerateArray())
+        {
+            var id = Text(element, "Id");
+
+            if (id.Length == 0)
+            {
+                continue;
+            }
+
+            var hasPoster =
+                element.TryGetProperty("ImageTags", out var tags) &&
+                tags.ValueKind == JsonValueKind.Object &&
+                tags.TryGetProperty("Primary", out _);
+
+            var providerIds =
+                element.TryGetProperty("ProviderIds", out var ids) &&
+                ids.ValueKind == JsonValueKind.Object
+                    ? ids
+                    : default;
+
+            items.Add(
+                new JellyfinPosterItem(
+                    id,
+                    Text(element, "Name"),
+                    Text(element, "Type"),
+                    Number(element, "ProductionYear") is { } year ? (int)year : null,
+                    hasPoster,
+                    ProviderId(providerIds, "Tmdb"),
+                    ProviderId(providerIds, "Tvdb"),
+                    ProviderId(providerIds, "Imdb")));
+        }
+
+        var total =
+            Number(document.RootElement, "TotalRecordCount") is { } count
+                ? (int)count
+                : items.Count;
+
+        return new JellyfinPosterPage(items, Math.Max(total, items.Count));
+    }
+
+    private static string ProviderId(JsonElement providerIds, string name) =>
+        providerIds.ValueKind == JsonValueKind.Object
+            ? Text(providerIds, name)
+            : string.Empty;
+
+    private static double? Number(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value) &&
+        value.ValueKind == JsonValueKind.Number
+            ? value.GetDouble()
+            : null;
+
     private async Task<List<JellyfinItem>> GetItemsAsync(
         string pathAndQuery)
     {
@@ -293,6 +491,27 @@ public class JellyfinClient : IJellyfinClient
         HttpMethod method,
         string pathAndQuery)
     {
+        using var response =
+            await SendRawAsync(method, pathAndQuery, null);
+
+        var body =
+            await response!.Content.ReadAsStringAsync();
+
+        return string.IsNullOrWhiteSpace(body)
+            ? null
+            : JsonDocument.Parse(body);
+    }
+
+    /// <summary>
+    /// The request itself. The caller reads the reply and disposes it.
+    /// Returns null only for a "not found" the caller said was fine.
+    /// </summary>
+    private async Task<HttpResponseMessage?> SendRawAsync(
+        HttpMethod method,
+        string pathAndQuery,
+        HttpContent? content,
+        bool notFoundIsFine = false)
+    {
         var settings =
             await _settingsService.GetSettingsAsync();
 
@@ -313,7 +532,7 @@ public class JellyfinClient : IJellyfinClient
         }
 
         using var request =
-            new HttpRequestMessage(method, uri);
+            new HttpRequestMessage(method, uri) { Content = content };
 
         AddKey(request, settings.JellyfinApiKey);
 
@@ -330,23 +549,25 @@ public class JellyfinClient : IJellyfinClient
                 exception);
         }
 
-        using (response)
+        if (response.IsSuccessStatusCode)
         {
-            if (!response.IsSuccessStatusCode)
-            {
-                throw new InvalidOperationException(
-                    (int)response.StatusCode is 401 or 403
-                        ? "Jellyfin refused the request. Check the API key in Settings."
-                        : $"Jellyfin answered with an error ({(int)response.StatusCode} {response.ReasonPhrase}).");
-            }
-
-            var body =
-                await response.Content.ReadAsStringAsync();
-
-            return string.IsNullOrWhiteSpace(body)
-                ? null
-                : JsonDocument.Parse(body);
+            return response;
         }
+
+        var status = (int)response.StatusCode;
+        var reason = response.ReasonPhrase;
+
+        response.Dispose();
+
+        if (status == 404 && notFoundIsFine)
+        {
+            return null;
+        }
+
+        throw new InvalidOperationException(
+            status is 401 or 403
+                ? "Jellyfin refused the request. Check the API key in Settings."
+                : $"Jellyfin answered with an error ({status} {reason}).");
     }
 
     private static void AddKey(

@@ -1,0 +1,654 @@
+@page "/posters"
+@rendermode InteractiveServer
+
+@using Simplifiarr.Core.Services
+
+@inject IJellyfinClient Jellyfin
+@inject IPosterService PosterService
+@inject ISettingsService SettingsService
+@inject NavigationManager Navigation
+
+<PageTitle>Posters - Simplifiarr</PageTitle>
+
+@if (_open is null)
+{
+    <PageHeader Title="Posters"
+                Subtitle="Pick anything in Jellyfin and choose its poster. Click a poster and it is set in Jellyfin straight away." />
+
+    @if (!_isSetUp)
+    {
+        <div class="alert alert-warning">
+            Jellyfin isn't set up yet. <a href="settings">Add its address and API key in Settings</a>, under Connections.
+        </div>
+    }
+    else
+    {
+        <div class="app-tabs" role="tablist" aria-label="Kind of item">
+            @foreach (var kind in Kinds)
+            {
+                <button type="button"
+                        role="tab"
+                        aria-selected="@(_kind == kind.Type)"
+                        class="app-tab @(_kind == kind.Type ? "active" : null)"
+                        @onclick="() => ShowKindAsync(kind.Type)">
+                    @kind.Label
+                </button>
+            }
+        </div>
+
+        <form class="toolbar" @onsubmit="() => LoadItemsAsync(reset: true)">
+            <div class="d-flex flex-wrap gap-2 fill-row">
+                <input class="form-control fill-row"
+                       aria-label="Search by name"
+                       placeholder="Search by name"
+                       @bind="_search" />
+
+                <button type="submit" class="btn btn-secondary" disabled="@_isLoadingItems">
+                    <i class="bi bi-search" aria-hidden="true"></i>
+                    Search
+                </button>
+            </div>
+
+            <div class="toolbar-summary">
+                @if (!_isLoadingItems)
+                {
+                    <text><strong>@_total</strong> @KindLabel(_kind).ToLowerInvariant()</text>
+                }
+            </div>
+        </form>
+
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <div class="alert alert-warning">@_error</div>
+        }
+        else if (_isLoadingItems && _items.Count == 0)
+        {
+            <p class="cell-note" role="status">Loading...</p>
+        }
+        else if (_items.Count == 0)
+        {
+            <EmptyState Icon="image" Text="@(string.IsNullOrWhiteSpace(_search) ? "Jellyfin has nothing of this kind." : "Nothing matches that search.")" />
+        }
+        else
+        {
+            <div class="poster-grid">
+                @foreach (var item in _items)
+                {
+                    <button type="button" class="poster-card" @key="item.Id" @onclick="() => OpenAsync(item)">
+                        @if (item.HasPoster)
+                        {
+                            <img loading="lazy" alt="" src="@CurrentPosterUrl(item.Id)" />
+                        }
+                        else
+                        {
+                            <span class="poster-missing">
+                                <i class="bi bi-image" aria-hidden="true"></i>
+                                No poster
+                            </span>
+                        }
+
+                        <span class="poster-card-title">@item.Name</span>
+
+                        @if (item.Year is not null)
+                        {
+                            <span class="cell-note">@item.Year</span>
+                        }
+                    </button>
+                }
+            </div>
+
+            @if (_items.Count < _total)
+            {
+                <button type="button"
+                        class="btn btn-secondary mt-3"
+                        disabled="@_isLoadingItems"
+                        @onclick="() => LoadItemsAsync(reset: false)">
+                    @(_isLoadingItems ? "Loading..." : $"Show more ({_total - _items.Count} left)")
+                </button>
+            }
+        }
+    }
+}
+else
+{
+    <PageHeader Title="@_open.Name"
+                Subtitle="@(_open.Year is null ? "Choose a poster. Clicking one sets it in Jellyfin straight away." : $"{_open.Year} · Choose a poster. Clicking one sets it in Jellyfin straight away.")">
+        <button type="button" class="btn btn-secondary" disabled="@_isSetting" @onclick="Close">
+            <i class="bi bi-arrow-left" aria-hidden="true"></i>
+            Back
+        </button>
+    </PageHeader>
+
+    @if (!string.IsNullOrWhiteSpace(_message))
+    {
+        <div class="alert @(_messageIsProblem ? "alert-warning" : "alert-info")" role="status">
+            @_message
+
+            @if (_previous is not null && !_messageIsProblem)
+            {
+                <button type="button"
+                        class="btn btn-secondary btn-sm ms-2"
+                        disabled="@_isSetting"
+                        @onclick="UndoAsync">
+                    Undo
+                </button>
+            }
+        </div>
+    }
+
+    <div class="poster-detail">
+        <div class="poster-current">
+            <div class="detail-label mt-0">Current poster</div>
+
+            @if (_open.HasPoster)
+            {
+                <img alt="Current poster" src="@CurrentPosterUrl(_open.Id)" />
+            }
+            else
+            {
+                <span class="poster-missing">
+                    <i class="bi bi-image" aria-hidden="true"></i>
+                    No poster
+                </span>
+            }
+        </div>
+
+        <div class="poster-own">
+            <div class="detail-label mt-0">Use your own picture</div>
+
+            <label class="poster-drop @(_isSetting ? "disabled" : null)">
+                <i class="bi bi-upload" aria-hidden="true"></i>
+                <span>Drop a picture here, or click to choose one</span>
+                <span class="cell-note">JPEG, PNG or WebP, up to 25 MB</span>
+                <InputFile accept="image/jpeg,image/png,image/webp"
+                           disabled="@_isSetting"
+                           OnChange="UseFileAsync" />
+            </label>
+
+            <form class="d-flex flex-wrap gap-2 mt-3" @onsubmit="UseLinkAsync">
+                <input class="form-control fill-row"
+                       aria-label="Web address of a picture"
+                       placeholder="Or paste a picture's web address"
+                       @bind="_link" />
+
+                <button type="submit"
+                        class="btn btn-secondary"
+                        disabled="@(_isSetting || string.IsNullOrWhiteSpace(_link))">
+                    Use this
+                </button>
+            </form>
+
+            <div class="cell-note mt-1">
+                For sites such as ThePosterDB: copy the poster's own image address there and paste it here.
+            </div>
+        </div>
+    </div>
+
+    @if (_inside.Count > 0)
+    {
+        <section class="section">
+            <h2 class="section-title">Posters of what's inside this collection</h2>
+
+            <div class="poster-grid">
+                @foreach (var member in _inside)
+                {
+                    <button type="button"
+                            class="poster-card"
+                            disabled="@_isSetting"
+                            @key="member.Id"
+                            @onclick="() => UseItemAsync(member)">
+                        <img loading="lazy" alt="" src="@CurrentPosterUrl(member.Id)" />
+                        <span class="poster-card-title">@member.Name</span>
+                    </button>
+                }
+            </div>
+        </section>
+    }
+
+    <section class="section">
+        <h2 class="section-title">Posters found online</h2>
+
+        @foreach (var note in _notes)
+        {
+            <div class="alert alert-warning">@note</div>
+        }
+
+        @if (_isLoadingOptions)
+        {
+            <p class="cell-note" role="status">Looking for posters...</p>
+        }
+        else if (_options.Count == 0)
+        {
+            <EmptyState Icon="image"
+                        Text="@(_open.Type == "BoxSet"
+                                  ? "No posters were found online for this collection. That is normal for a collection you made up yourself - use one from above, or your own picture."
+                                  : "No posters were found online for this. You can still use your own picture.")" />
+        }
+        else
+        {
+            <div class="toolbar">
+                <div class="toolbar-summary">
+                    <strong>@VisibleOptions.Count</strong> poster(s)
+                </div>
+
+                <div class="toolbar-actions">
+                    @if (Sources.Count > 1)
+                    {
+                        <select class="form-select form-select-sm w-auto"
+                                aria-label="Source"
+                                value="@_source"
+                                @onchange="e => SetSource(e.Value?.ToString())">
+                            <option value="">Every source</option>
+                            @foreach (var source in Sources)
+                            {
+                                <option value="@source">@source</option>
+                            }
+                        </select>
+                    }
+
+                    @if (Languages.Count > 1)
+                    {
+                        <select class="form-select form-select-sm w-auto"
+                                aria-label="Language"
+                                value="@_language"
+                                @onchange="e => SetLanguage(e.Value?.ToString())">
+                            <option value="">Any language</option>
+                            @foreach (var language in Languages)
+                            {
+                                <option value="@language">@LanguageLabel(language)</option>
+                            }
+                        </select>
+                    }
+                </div>
+            </div>
+
+            <div class="poster-grid">
+                @foreach (var option in VisibleOptions.Take(_shown))
+                {
+                    <button type="button"
+                            class="poster-card"
+                            disabled="@_isSetting"
+                            @key="option.Url"
+                            @onclick="() => UseOptionAsync(option)">
+                        <img loading="lazy" alt="" referrerpolicy="no-referrer" src="@option.ThumbnailUrl" />
+                        <span class="cell-note">
+                            @option.Source
+                            @if (option.Language.Length > 0)
+                            {
+                                <text> · @LanguageLabel(option.Language)</text>
+                            }
+                            @if (option.Width is not null && option.Height is not null)
+                            {
+                                <text> · @option.Width×@option.Height</text>
+                            }
+                        </span>
+                    </button>
+                }
+            </div>
+
+            @if (VisibleOptions.Count > _shown)
+            {
+                <button type="button" class="btn btn-secondary mt-3" @onclick="() => _shown += PageSize">
+                    Show more (@(VisibleOptions.Count - _shown) left)
+                </button>
+            }
+        }
+    </section>
+}
+
+@code
+{
+    private const int PageSize = 60;
+
+    private static readonly (string Type, string Label)[] Kinds =
+    [
+        ("Movie", "Movies"),
+        ("Series", "Shows"),
+        ("BoxSet", "Collections")
+    ];
+
+    /// <summary>
+    /// Opens straight onto one item, e.g. a collection from its own page.
+    /// </summary>
+    [SupplyParameterFromQuery(Name = "item")]
+    public string? ItemId { get; set; }
+
+    private bool _isSetUp;
+
+    // The list.
+    private string _kind = "Movie";
+    private string _search = string.Empty;
+    private List<JellyfinPosterItem> _items = [];
+    private int _total;
+    private bool _isLoadingItems;
+    private string? _error;
+
+    // The open item.
+    private JellyfinPosterItem? _open;
+    private List<PosterOption> _options = [];
+    private List<string> _notes = [];
+    private List<JellyfinPosterItem> _inside = [];
+    private bool _isLoadingOptions;
+    private string _source = string.Empty;
+    private string _language = string.Empty;
+    private int _shown = PageSize;
+    private string _link = string.Empty;
+
+    private bool _isSetting;
+    private string? _message;
+    private bool _messageIsProblem;
+
+    /// <summary>The poster the last change replaced, kept so it can be undone.</summary>
+    private JellyfinImage? _previous;
+
+    // Changes whenever a poster is set, so the browser fetches the new one
+    // rather than showing the one it remembers.
+    private long _version = DateTime.UtcNow.Ticks;
+
+    private List<string> Sources =>
+        _options
+            .Select(option => option.Source)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private List<string> Languages =>
+        _options
+            .Select(option => LanguageKey(option.Language))
+            .Where(language => language.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(LanguageLabel, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private List<PosterOption> VisibleOptions =>
+        _options
+            .Where(option =>
+                (_source.Length == 0 ||
+                 string.Equals(option.Source, _source, StringComparison.OrdinalIgnoreCase)) &&
+                (_language.Length == 0 ||
+                 string.Equals(LanguageKey(option.Language), _language, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var settings =
+            await SettingsService.GetSettingsAsync();
+
+        _isSetUp =
+            !string.IsNullOrWhiteSpace(settings.JellyfinUrl) &&
+            !string.IsNullOrWhiteSpace(settings.JellyfinApiKey);
+
+        if (!_isSetUp)
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(ItemId))
+        {
+            try
+            {
+                if (await Jellyfin.GetPosterItemAsync(ItemId) is { } item)
+                {
+                    _kind = Kinds.Any(kind => kind.Type == item.Type) ? item.Type : _kind;
+
+                    await OpenAsync(item);
+                }
+            }
+            catch (InvalidOperationException exception)
+            {
+                _error = exception.Message;
+            }
+        }
+
+        await LoadItemsAsync(reset: true);
+    }
+
+    // ---------------------------------------------------------------- List
+
+    private async Task ShowKindAsync(string kind)
+    {
+        if (kind == _kind)
+        {
+            return;
+        }
+
+        _kind = kind;
+        _search = string.Empty;
+
+        await LoadItemsAsync(reset: true);
+    }
+
+    private async Task LoadItemsAsync(bool reset)
+    {
+        if (_isLoadingItems)
+        {
+            return;
+        }
+
+        _isLoadingItems = true;
+        _error = null;
+
+        if (reset)
+        {
+            _items = [];
+            _total = 0;
+        }
+
+        try
+        {
+            var page =
+                await Jellyfin.FindPosterItemsAsync(_kind, _search, _items.Count, PageSize);
+
+            _items = [.. _items, .. page.Items];
+            _total = page.Total;
+        }
+        catch (InvalidOperationException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _isLoadingItems = false;
+        }
+    }
+
+    // ---------------------------------------------------------------- Open
+
+    private async Task OpenAsync(JellyfinPosterItem item)
+    {
+        _open = item;
+        _options = [];
+        _notes = [];
+        _inside = [];
+        _source = string.Empty;
+        _language = string.Empty;
+        _shown = PageSize;
+        _link = string.Empty;
+        _message = null;
+        _previous = null;
+        _isLoadingOptions = true;
+
+        StateHasChanged();
+
+        try
+        {
+            if (item.Type == "BoxSet")
+            {
+                _inside =
+                    (await Jellyfin.GetCollectionPosterItemsAsync(item.Id))
+                        .Where(member => member.HasPoster)
+                        .ToList();
+            }
+
+            var found =
+                await PosterService.GetOptionsAsync(item);
+
+            _options = found.Options.ToList();
+            _notes = found.Notes.ToList();
+
+            // Start on English when there is any, since that is what most
+            // posters are; "Any language" is one click away.
+            if (_options.Any(option => LanguageKey(option.Language) == "en"))
+            {
+                _language = "en";
+            }
+        }
+        catch (InvalidOperationException exception)
+        {
+            _notes = [exception.Message];
+        }
+        finally
+        {
+            _isLoadingOptions = false;
+        }
+    }
+
+    private void Close()
+    {
+        _open = null;
+
+        // Drop "?item=..." so a refresh shows the list.
+        if (!string.IsNullOrWhiteSpace(ItemId))
+        {
+            Navigation.NavigateTo("posters", replace: true);
+        }
+    }
+
+    private void SetSource(string? source)
+    {
+        _source = source ?? string.Empty;
+        _shown = PageSize;
+    }
+
+    private void SetLanguage(string? language)
+    {
+        _language = language ?? string.Empty;
+        _shown = PageSize;
+    }
+
+    // ----------------------------------------------------------------- Set
+
+    private Task UseOptionAsync(PosterOption option) =>
+        SetAsync(() => PosterService.SetFromUrlAsync(_open!.Id, option.Url));
+
+    private Task UseItemAsync(JellyfinPosterItem member) =>
+        SetAsync(() => PosterService.SetFromItemAsync(_open!.Id, member.Id));
+
+    private async Task UseLinkAsync()
+    {
+        var link = _link;
+
+        if (await SetAsync(() => PosterService.SetFromUrlAsync(_open!.Id, link)))
+        {
+            _link = string.Empty;
+        }
+    }
+
+    private Task UseFileAsync(InputFileChangeEventArgs args) =>
+        SetAsync(async () =>
+        {
+            if (args.File.Size > Simplifiarr.Core.Services.PosterService.MaxImageBytes)
+            {
+                throw new InvalidOperationException("That picture is too big (over 25 MB).");
+            }
+
+            await using var stream =
+                args.File.OpenReadStream(Simplifiarr.Core.Services.PosterService.MaxImageBytes);
+
+            using var buffer = new MemoryStream();
+
+            await stream.CopyToAsync(buffer);
+
+            return await PosterService.SetFromImageAsync(_open!.Id, buffer.ToArray());
+        });
+
+    private async Task UndoAsync()
+    {
+        if (_previous is not { } previous)
+        {
+            return;
+        }
+
+        if (await SetAsync(() => PosterService.SetFromImageAsync(_open!.Id, previous.Bytes)))
+        {
+            _message = "Put the earlier poster back.";
+            _previous = null;
+        }
+    }
+
+    /// <summary>
+    /// Runs one poster change. True when Jellyfin took it.
+    /// </summary>
+    private async Task<bool> SetAsync(Func<Task<JellyfinImage?>> change)
+    {
+        if (_isSetting || _open is null)
+        {
+            return false;
+        }
+
+        _isSetting = true;
+        _message = "Setting the poster...";
+        _messageIsProblem = false;
+
+        StateHasChanged();
+
+        try
+        {
+            _previous = await change();
+
+            _open = _open with { HasPoster = true };
+
+            var index = _items.FindIndex(item => item.Id == _open.Id);
+
+            if (index >= 0)
+            {
+                _items[index] = _open;
+            }
+
+            _version = DateTime.UtcNow.Ticks;
+            _message = "Poster changed in Jellyfin.";
+
+            return true;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException)
+        {
+            _message = exception.Message;
+            _messageIsProblem = true;
+
+            return false;
+        }
+        finally
+        {
+            _isSetting = false;
+        }
+    }
+
+    // -------------------------------------------------------------- Labels
+
+    private string CurrentPosterUrl(string itemId) =>
+        $"poster-image/{itemId}?v={_version}";
+
+    private static string KindLabel(string kind) =>
+        Kinds.First(entry => entry.Type == kind).Label;
+
+    // "en-US" and "en" are the same choice in the language picker.
+    private static string LanguageKey(string language) =>
+        language.Split('-', '_')[0].ToLowerInvariant();
+
+    private static string LanguageLabel(string language)
+    {
+        if (language.Length == 0)
+        {
+            return "No text";
+        }
+
+        try
+        {
+            return System.Globalization.CultureInfo.GetCultureInfo(LanguageKey(language)).EnglishName;
+        }
+        catch (System.Globalization.CultureNotFoundException)
+        {
+            return language;
+        }
+    }
+}
