@@ -1,175 +1,244 @@
 @page "/help"
 
-<PageTitle>Help</PageTitle>
+@using Simplifiarr.Core.Utilities
 
-<h1>Help</h1>
+<PageTitle>Help - Simplifiarr</PageTitle>
 
-<p class="lead">
-    Store once. Seed everywhere. Waste nothing.
-</p>
+<PageHeader Title="Help"
+            Subtitle="Store once. Seed everywhere. Waste nothing. What each page is for, and how Simplifiarr keeps your files safe." />
 
-<p>
-    Simplifiarr finds duplicate copies of your media between your download
-    folders and your libraries, and lets you replace the wasted copy with an
-    NTFS hardlink instead - so the file exists once on disk but shows up in
-    both places. It also finds completed downloads that haven't been added to
-    a library yet ("promotion opportunities") and can hardlink them in.
-    Nothing is ever copied between drives, and nothing is deleted without
-    going through Quarantine first.
-</p>
+@* Scrolled by hand: Blazor's own navigation doesn't scroll to a #section. *@
+<nav class="help-contents" aria-label="On this page">
+    <a href="help#start" onclick="document.getElementById('start').scrollIntoView({behavior:'smooth'}); return false;">Getting started</a>
+    <a href="help#scan" onclick="document.getElementById('scan').scrollIntoView({behavior:'smooth'}); return false;">Scanning</a>
+    <a href="help#link" onclick="document.getElementById('link').scrollIntoView({behavior:'smooth'}); return false;">Link</a>
+    <a href="help#clean" onclick="document.getElementById('clean').scrollIntoView({behavior:'smooth'}); return false;">Clean up</a>
+    <a href="help#safety" onclick="document.getElementById('safety').scrollIntoView({behavior:'smooth'}); return false;">Safety net</a>
+    <a href="help#settings" onclick="document.getElementById('settings').scrollIntoView({behavior:'smooth'}); return false;">Settings</a>
+    <a href="help#questions" onclick="document.getElementById('questions').scrollIntoView({behavior:'smooth'}); return false;">Questions</a>
+</nav>
 
-<div class="card mb-3">
-    <div class="card-body">
-        <h3>Home</h3>
+@* ------------------------------------------------------------------ Start *@
 
+<section class="section" id="start">
+    <h2 class="section-title">Getting started</h2>
+
+    <div class="panel help-panel">
         <p>
-            The dashboard is read-only - it doesn't scan anything itself. Every
-            number on it reflects whatever the Hardlinks and Potential Waste
-            pages last found. Click a card to jump to the page that
-            produced that number and run a fresh scan there.
-        </p>
-    </div>
-</div>
-
-<div class="card mb-3">
-    <div class="card-body">
-        <h3>Drive Profiles (Settings)</h3>
-
-        <p>
-            Before scanning anything, set up a Drive Profile for each physical
-            drive you use. A profile groups together the paths that live on
-            one drive: its download folder, and its Movie/TV/Book/Audiobook/Music/Comic
-            library folders. This matters because hardlinks only work between two
-            paths on the <strong>same</strong> drive - Simplifiarr will never
-            copy a file across drives to "fix" this.
+            A <strong>hardlink</strong> lets one file appear in two folders while taking up the
+            space of one. Simplifiarr uses that so a download can keep seeding while the same
+            file sits in your library - no second copy.
         </p>
 
-        <p>
-            Go to <strong>Settings</strong>, click <strong>Add Drive Profile</strong>,
-            and fill in:
-        </p>
-
-        <ul>
-            <li><strong>Drive Root</strong> - e.g. <code>C:\</code> or <code>E:\</code></li>
-            <li><strong>Download Path</strong> - where completed torrents land</li>
-            <li><strong>Movie Library / TV Library / Book Library / Audiobook Library / Music Library / Comic Library</strong> - your organized library folders (leave any blank if you don't use that library on this drive)</li>
-            <li><strong>Audiobook Download Path / Music Download Path / Comic Download Path</strong> - dedicated download-side folders for audiobooks, music, and comics. Audiobook and music files share the same formats (MP3/M4A/M4B/FLAC) and can't be told apart by content alone, so each needs its own download subfolder to scan; comics get a dedicated folder too so classification never depends on guesswork - leave blank to skip scanning for that type</li>
-            <li><strong>Seed Only Path</strong> - optional, for torrents you only keep for seeding</li>
-        </ul>
-
-        <p>
-            Each path shows <span style="color:green">Exists</span> or
-            <span style="color:red">Missing</span> as you type, so you can
-            catch typos before saving. Click <strong>Save Settings</strong> when done -
-            if the save fails (usually a file-permission issue on
-            <code>@Simplifiarr.Core.Utilities.AppPaths.SettingsFile</code>), you'll see a red
-            banner explaining why.
-        </p>
-    </div>
-</div>
-
-<div class="card mb-3">
-    <div class="card-body">
-        <h3>Hardlinks (Promotion Opportunities)</h3>
-
-        <p>
-            This page finds completed downloads that aren't in a library yet
-            and lets you hardlink them in. Each drive gets its own card:
-        </p>
-
-        <ul>
-            <li><strong>Scan Drive</strong> - scans Movies, then TV, then Books, then Audiobooks, then Music, then Comics for that drive, one after another</li>
-            <li><strong>Scan Movies / Scan TV / Scan Books / Scan Audiobooks / Scan Music / Scan Comics</strong> - scan just that one library. Scanning one never touches the cached results of the others, so you can refresh just what changed.</li>
-        </ul>
-
-        <p>
-            <strong>Movies</strong>, <strong>Books</strong>,
-            <strong>Audiobooks</strong>, <strong>Music</strong>, and <strong>Comics</strong> show one row per
-            item. <strong>TV</strong> groups episodes by show and season -
-            if you have a season pack sitting in your downloads and only some
-            episodes are missing from your library, you'll see one card per
-            show/season with a "Promote All N Episode(s)" button, plus an
-            expandable list to promote individual episodes instead.
-        </p>
-
-        <p>
-            Clicking <strong>Promote</strong> shows a preview of exactly what
-            will happen (source file, target path, planned actions) before
-            anything is touched - nothing happens until you click
-            <strong>Confirm Promotion</strong>.
-        </p>
-    </div>
-</div>
-
-<div class="card mb-3">
-    <div class="card-body">
-        <h3>Potential Waste</h3>
-
-        <p>
-            This page finds files that already exist in <em>both</em> your
-            download folder and your library as separate copies - storage
-            being wasted on a duplicate. It uses the same per-drive,
-            per-library (Movies/TV) scan buttons as Hardlinks.
-        </p>
-
-        <p>
-            Each result can be converted individually, or you can check
-            several and click <strong>Convert Selected</strong> to batch-process
-            them one at a time. Converting a file:
-        </p>
-
-        <ol>
-            <li>Moves the existing library copy to Quarantine (nothing is deleted yet)</li>
-            <li>Creates an NTFS hardlink in its place pointing at the download copy</li>
-            <li>Verifies the hardlink actually took effect before calling it a success</li>
+        <ol class="help-steps">
+            <li>
+                <strong>Add your drives.</strong>
+                In <a href="settings">Settings</a>, add one entry per drive with its downloads folder
+                and whichever library folders it has. Hardlinks only work within one drive, so each
+                drive is set up on its own.
+            </li>
+            <li>
+                <strong>Connect your apps (optional).</strong>
+                qBittorrent, Radarr, Sonarr, Prowlarr and Jellyfin each unlock more. Simplifiarr
+                works without any of them.
+            </li>
+            <li>
+                <strong>Press Scan.</strong>
+                It's at the top of every page.
+            </li>
+            <li>
+                <strong>Look at Home.</strong>
+                It shows what the scan found and links to anything that needs you.
+            </li>
         </ol>
+    </div>
+</section>
 
+@* ------------------------------------------------------------------- Scan *@
+
+<section class="section" id="scan">
+    <h2 class="section-title">Scanning</h2>
+
+    <div class="panel help-panel">
         <p>
-            Files already hardlinked (no waste) don't show up in this list at
-            all - that count feeds the "Healthy Hardlinks" number on Home
-            instead.
+            There is one <strong>Scan</strong> button, at the top of every page. It reads every drive
+            in Settings and refreshes every list in Simplifiarr at once. It runs on the server, so you
+            can move between pages or close the browser and it carries on. <strong>Stop</strong>
+            ends it early; lists keep what they had.
+        </p>
+
+        <p class="mb-0">
+            The first scan of a large library takes a while, because each video's resolution is read
+            once. Later scans only look at what changed and are much quicker.
         </p>
     </div>
-</div>
 
-<div class="card mb-3">
-    <div class="card-body">
-        <h3>Quarantine</h3>
+    <p class="cell-note">
+        A few pages search elsewhere and have their own button instead:
+        Size Reduction and Cross-Seed (your indexers) and Posters (Jellyfin).
+    </p>
+</section>
 
-        <p>
-            Every file a conversion displaces lands here instead of being
-            deleted immediately. Review what's in Quarantine and delete it
-            permanently once you're confident the hardlink is working
-            correctly - that's the point where the space is actually
-            reclaimed (and shows up as "Storage Saved" on Home).
-        </p>
+@* ------------------------------------------------------------------- Link *@
+
+<section class="section" id="link">
+    <h2 class="section-title">Link</h2>
+
+    <div class="panel">
+        @foreach (var page in LinkPages)
+        {
+            <HelpRow Page="page" />
+        }
     </div>
-</div>
+</section>
 
-<div class="card mb-3">
-    <div class="card-body">
-        <h3>History</h3>
+@* ---------------------------------------------------------------- Clean up *@
 
-        <p>
-            An audit log of every conversion, promotion, and permanent
-            deletion Simplifiarr has performed, with totals for conversions,
-            deletes, and reclaimed space. <strong>Clear History</strong> permanently
-            erases this log - it asks for confirmation first, and it does not
-            undo any conversions or deletions themselves, only the record of
-            them.
-        </p>
+<section class="section" id="clean">
+    <h2 class="section-title">Clean up</h2>
+
+    <div class="panel">
+        @foreach (var page in CleanPages)
+        {
+            <HelpRow Page="page" />
+        }
     </div>
-</div>
+</section>
 
-<div class="card mb-3">
-    <div class="card-body">
-        <h3>Tips</h3>
+@* -------------------------------------------------------------- Safety net *@
+
+<section class="section" id="safety">
+    <h2 class="section-title">Safety net</h2>
+
+    <div class="panel help-panel">
+        <p>Simplifiarr is built so a mistake can be undone:</p>
 
         <ul>
-            <li>Scans read every file in the folders you configure, so the first scan of a large library can take a while - later scans of the same folder within a page reuse what was already found where possible.</li>
-            <li>If a scan button seems stuck, give it a bit longer before assuming something's wrong - real disk scanning takes real time.</li>
-            <li>Hardlinks require the source and target to be on the same NTFS volume. If a path is on the wrong drive for its profile, promotion/conversion will be blocked rather than silently copying the file.</li>
-            <li>Quarantine is your safety net - nothing is permanently deleted until you delete it from Quarantine yourself.</li>
+            <li>It never copies a file from one drive to another, and never deletes a file outright.</li>
+            <li>Anything taken out of a library goes to <a href="quarantine">Quarantine</a> first. Restore puts it back; Delete sends it to the Windows Recycle Bin.</li>
+            <li>A hardlink is only counted as done once Simplifiarr has checked it really is the same file.</li>
+            <li>Cross-seeds and rebuilt torrents are only offered once every piece has been checked against your files, and are added to qBittorrent stopped.</li>
+            <li>Anything that changes files asks you to confirm first.</li>
         </ul>
     </div>
-</div>
+
+    <div class="panel mt-3">
+        @foreach (var page in SafetyPages)
+        {
+            <HelpRow Page="page" />
+        }
+    </div>
+</section>
+
+@* --------------------------------------------------------------- Settings *@
+
+<section class="section" id="settings">
+    <h2 class="section-title">Settings</h2>
+
+    <div class="panel help-panel">
+        <dl class="help-terms">
+            <dt>Drives</dt>
+            <dd>
+                One entry per drive. <em>Downloads folder</em> is where finished torrents land;
+                the library folders are where your organised Movies, TV, Books, Audiobooks, Music and
+                Comics live. Leave out any you don't have. Audiobooks, music and comics each need their
+                own downloads folder, because their files can't be told apart by content alone.
+                Each path says whether it exists as you type.
+            </dd>
+
+            <dt>Connections</dt>
+            <dd>
+                qBittorrent (what is still seeding), Radarr and Sonarr (exact titles, genres and episode
+                numbers), Prowlarr (searching your indexers), Jellyfin (Collections and Posters) and an
+                optional fanart.tv key (more posters). Each has a Test button.
+            </dd>
+
+            <dt>Storage</dt>
+            <dd class="mb-0">
+                Where Quarantine, History and cross-seed links are kept, and where to find ffprobe.
+                Simplifiarr's own settings are in <code>@AppPaths.SettingsFile</code>.
+            </dd>
+        </dl>
+    </div>
+</section>
+
+@* -------------------------------------------------------------- Questions *@
+
+<section class="section" id="questions">
+    <h2 class="section-title">Questions</h2>
+
+    <div class="panel">
+        @foreach (var (question, answer) in Questions)
+        {
+            <details class="help-question">
+                <summary>@question</summary>
+                <p>@answer</p>
+            </details>
+        }
+    </div>
+</section>
+
+@code
+{
+    public sealed record HelpPage(
+        string Href,
+        string Icon,
+        string Name,
+        string Text);
+
+    private static readonly HelpPage[] LinkPages =
+    [
+        new("hardlinks", "link-45deg", "Hardlinks",
+            "Finished downloads that aren't in your library yet. Preview where each one will go, then link it in - it keeps seeding and costs no extra space. TV is grouped by show and season."),
+        new("potential-waste", "arrow-repeat", "Potential Waste",
+            "Library files that are full copies of a download. Converting swaps the copy for a hardlink; the old copy goes to Quarantine."),
+        new("cross-seed", "share", "Cross-Seed",
+            "Finds other torrents of files you already seed, so you can seed them on more trackers without downloading anything."),
+        new("torrent-rebuilder", "hammer", "Torrent Rebuilder",
+            "Rebuilds one torrent from files already in your library, even renamed ones, so it can seed straight away."),
+        new("collections", "collection", "Collections",
+            "Group anything in your libraries and send the group to Jellyfin as a collection. Sending again only changes what changed."),
+        new("posters", "image", "Posters",
+            "Choose the poster for any film, show or collection in Jellyfin from every poster found online, or drop in your own.")
+    ];
+
+    private static readonly HelpPage[] CleanPages =
+    [
+        new("duplicates", "copy", "Duplicates",
+            "The same title more than once in your libraries, usually two qualities. Pick the one to keep."),
+        new("junk-cleanup", "trash3", "Junk",
+            "Sample clips, checksum and tracker files, and stray images left in your libraries."),
+        new("download-cleanup", "folder-x", "Downloads",
+            "Downloads your library already has and qBittorrent is no longer seeding."),
+        new("blocked-files", "shield-lock", "Blocked Files",
+            "Files Windows has marked as from the internet, which can upset media servers. Unblocking only removes the mark."),
+        new("size-reduction", "file-earmark-zip", "Size Reduction",
+            "Smaller releases of films and episodes you have, found on your indexers. Report only.")
+    ];
+
+    private static readonly HelpPage[] SafetyPages =
+    [
+        new("quarantine", "box-seam", "Quarantine",
+            "Everything Simplifiarr took out of a library, waiting for you to restore or delete it."),
+        new("history", "clock-history", "History",
+            "Every change Simplifiarr has made on disk, newest first."),
+        new("ignored", "eye-slash", "Ignored",
+            "Things you've told Simplifiarr to stop suggesting. Un-ignore one to see it again.")
+    ];
+
+    private static readonly (string Question, string Answer)[] Questions =
+    [
+        ("Why can't Simplifiarr link a download on one drive into a library on another?",
+         "Hardlinks only work within one drive. Linking across drives would mean copying the file, which is exactly what Simplifiarr exists to avoid. Download to the drive the library is on."),
+        ("I deleted the download - is my library copy gone too?",
+         "No. Both names point at the same data, and it stays until the last name is deleted. Deleting either one leaves the other working."),
+        ("Something I expected isn't on a list.",
+         "Lists show what the last scan found. Press Scan, and check the item isn't on the Ignored page and its folder is in Settings."),
+        ("Why does a film show 'resolution not known'?",
+         "Simplifiarr reads it with ffprobe. If ffprobe isn't installed or can't be found, set its location under Settings, Storage."),
+        ("Does Simplifiarr change Radarr, Sonarr or Jellyfin?",
+         "It only reads Radarr and Sonarr. In Jellyfin it only changes collections it made and posters you choose."),
+        ("Where are the logs?",
+         $"In {AppPaths.LogsDirectory}. They are the first place to look if something goes wrong.")
+    ];
+}

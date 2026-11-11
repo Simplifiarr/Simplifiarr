@@ -1,0 +1,17 @@
+@* One page in the Help list: its icon and name (a link to it), and what it is for. *@
+
+<div class="action-row">
+    <div>
+        <a class="action-row-title" href="@Page.Href">
+            <i class="bi bi-@Page.Icon" aria-hidden="true"></i>
+            @Page.Name
+        </a>
+        <div class="action-row-detail">@Page.Text</div>
+    </div>
+</div>
+
+@code
+{
+    [Parameter, EditorRequired]
+    public Simplifiarr.Web.Components.Pages.Help.HelpPage Page { get; set; } = default!;
+}

@@ -1108,6 +1108,95 @@ a.stat-card:focus-visible {
     border-radius: 0;
 }
 
+/* Help. */
+
+.help-contents {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem;
+    margin-bottom: 1.75rem;
+}
+
+.help-contents a {
+    padding: .3rem .75rem;
+    border: 1px solid var(--app-border);
+    border-radius: 999px;
+    background: var(--app-surface);
+    color: var(--app-text);
+    font-size: .8125rem;
+    text-decoration: none;
+}
+
+.help-contents a:hover {
+    border-color: var(--app-accent);
+    color: var(--app-accent);
+}
+
+.help-panel {
+    padding: 1.1rem 1.25rem;
+}
+
+.help-panel ul,
+.help-panel ol {
+    margin-bottom: 0;
+    padding-left: 1.25rem;
+}
+
+.help-panel li + li {
+    margin-top: .4rem;
+}
+
+.help-steps strong {
+    display: block;
+}
+
+.help-terms dt {
+    margin-top: .9rem;
+}
+
+.help-terms dt:first-child {
+    margin-top: 0;
+}
+
+.help-terms dd {
+    color: var(--app-muted);
+}
+
+a.action-row-title {
+    color: var(--app-text);
+    text-decoration: none;
+}
+
+a.action-row-title:hover {
+    color: var(--app-accent);
+}
+
+a.action-row-title .bi {
+    margin-right: .35rem;
+    color: var(--app-muted);
+}
+
+.help-question {
+    padding: .85rem 1.25rem;
+}
+
+.help-question + .help-question {
+    border-top: 1px solid var(--app-border);
+}
+
+.help-question > summary {
+    font-weight: 600;
+}
+
+.help-question p {
+    margin: .6rem 0 0;
+    color: var(--app-muted);
+}
+
+.section[id] {
+    scroll-margin-top: 5rem;
+}
+
 /* Posters: a wall of pictures to click. */
 
 .poster-grid {

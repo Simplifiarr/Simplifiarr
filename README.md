@@ -1,676 +1,173 @@
-\# Simplifiarr
-
-
-
-\*\*Store once. Seed everywhere. Waste nothing.\*\*
-
-
-
-Simplifiarr is a storage intelligence and hardlink remediation tool for self-hosted media libraries.
-
-Whilst building my media server stack, I kept experiencing issues with the automated hardlink creation built into the Sonar/Radar servers. If I was actively seeding a torrent file, the server wouldn't move the media over to the media library or it would copy the file instead of creating the hard link, creating doubled storage. So I built a PowerShell app that would create them manually when I wanted to move the files to the library, but this required me to be present and actively on the computer, which was annoying.
-
-
-
-Simplifiarr is designed for users who run media stacks with tools like Jellyfin, Sonarr, Radarr, Lidarr, qBittorrent, Prowlarr, Jackett, and long-term torrent seeding workflows where hardlinks are preferred over duplicate file copies. 
-
-
-
-\---
-
-
-
-\## Mission Statement
-
-
-
-Simplifiarr exists to help self-hosted media users keep seeding, protect their media libraries, and reclaim wasted storage by identifying when library files and torrent download files should be hardlinks instead of duplicate copies.
-
-
-
-The goal is simple:
-
-
-
-\---
-
-Store once.
-
-Seed everywhere.
-
-Waste nothing.
-
-\---
-
-
-
-Simplifiarr is being built as a practical utility first. The priority is a working, understandable tool that solves real storage problems before adding unnecessary complexity.
-
-
-
-\---
-
-
-
-\## Project Philosophy
-
-
-
-Simplifiarr follows these principles:
-
-
-
-\- Build the simplest thing that works.
-
-\- Prefer hardlinks over copies.
-
-\- Preserve existing library paths.
-
-\- Preserve torrent seeding.
-
-\- Make storage waste visible.
-
-\- Make remediation deliberate and reviewable.
-
-\- Avoid automatic destructive actions without user control.
-
-\- Keep users in control of quarantined files.
-
-\- Add larger architecture only after the core workflow works.
-
-
-
-\---
-
-
-
-\## Current Status
-
-
-
-```
-
-Phase 1.5 Prototype Complete
-
-```
-
-
-
-Simplifiarr currently has a working prototype that can:
-
-
-
-\- discover configured media and download locations
-
-\- scan movie and TV libraries
-
-\- identify duplicate media candidates
-
-\- detect whether candidates are already healthy hardlinks
-
-\- calculate potential storage waste
-
-\- show a prioritized Potential Waste Queue
-
-\- generate hardlink conversion plans
-
-\- move duplicate library files to Quarantine
-
-\- create hardlinks at the original library path
-
-\- verify hardlink creation
-
-\- show quarantined files
-
-\- delete quarantined files after verification
-
-
-
-\---
-
-
-
-\## Current Workflow
-
-
-
-```text
-
-Media Library File
-
-&#x20;       +
-
-Torrent Download File
-
-&#x20;       ↓
-
-Duplicate Candidate Detection
-
-&#x20;       ↓
-
-Hardlink Status Check
-
-&#x20;       ↓
-
-Potential Waste Calculation
-
-&#x20;       ↓
-
-Remediation Plan
-
-&#x20;       ↓
-
-Move Original Library Copy To Quarantine
-
-&#x20;       ↓
-
-Create Hardlink At Original Library Path
-
-&#x20;       ↓
-
-Verify Hardlink Count
-
-&#x20;       ↓
-
-Review Quarantine
-
-&#x20;       ↓
-
-Delete Quarantined Copy To Reclaim Space
-
-```
-
-
-
-\---
-
-
-
-\## Core Features
-
-
-
-\### Dashboard
-
-
-
-\- Media candidate count
-
-\- Healthy hardlink count
-
-\- Duplicate copy count
-
-\- Potential waste calculation
-
-\- Candidate media size
-
-\- Torrent count
-
-\- Storage location count
-
-\- Storage overview table
-
-\- Potential Waste Queue
-
-
-
-\---
-
-
-
-\### Storage Overview
-
-
-
-Simplifiarr displays configured storage roots with:
-
-
-
-\- path
-
-\- role
-
-\- online/offline status
-
-\- file count
-
-\- video count
-
-\- total size
-
-
-
-\---
-
-
-
-\### Duplicate Detection
-
-
-
-Simplifiarr currently detects duplicate media by comparing media library files against torrent download files.
-
-
-
-Current supported categories:
-
-
-
-\- Movies
-
-\- TV Shows
-
-
-
-\---
-
-
-
-\### Hardlink Detection
-
-
-
-Simplifiarr checks whether matching files are already hardlinked.
-
-
-
-A healthy hardlink means:
-
-
-
-```text
-
-Library path and download path point to the same NTFS file record.
-
-```
-
-
-
-\---
-
-
-
-\### Remediation Planning
-
-
-
-Before remediation, Simplifiarr generates a plan that verifies:
-
-
-
-\- library file exists
-
-\- download file exists
-
-\- both files are on the same volume
-
-\- file is not already hardlinked
-
-
-
-\---
-
-
-
-\### Quarantine Workflow
-
-
-
-Instead of permanently deleting the duplicate library copy immediately, Simplifiarr moves the original duplicate file into Quarantine.
-
-
-
-This gives the user a safety buffer before final deletion.
-
-
-
-Current Quarantine behavior:
-
-
-
-```text
-
-Move duplicate library file to:
-
-C:\\ProgramData\\Simplifiarr\\Quarantine
-
-
-
-Create hardlink at original library path.
-
-
-
-Let the user review Quarantine before deleting.
-
-```
-
-
-
-\---
-
-
-
-\## Technology Stack
-
-
-
-\- C#
-
-\- .NET 10
-
-\- ASP.NET Core
-
-\- Blazor Server
-
-\- PowerShell
-
-\- Windows
-
-\- NTFS hardlinks
-
-
-
-\---
-
-
-
-\## Current Requirements
-
-
-
-Simplifiarr currently assumes:
-
-
-
-\- Windows
-
-\- NTFS volumes
-
-\- local or mounted media paths
-
-\- hardlink-compatible library/download locations
-
-\- qBittorrent running locally
-
-\- media libraries managed outside Simplifiarr
-
-
-
-\---
-
-
-
-\## Current Limitations
-
-
-
-Simplifiarr is still a prototype.
-
-
-
-Known limitations:
-
-
-
-\- paths are currently hardcoded in early services
-
-\- no settings page yet
-
-\- no persistent database yet
-
-\- no conversion history database yet
-
-\- no Sonarr/Radarr API integration yet
-
-\- no batch conversion UI yet
-
-\- no scheduled scans yet
-
-\- no authentication yet
-
-\- no multi-user support
-
-\- no containerized deployment yet
-
-\- no cross-platform hardlink abstraction yet
-
-\- no cross-seed discovery yet
-
-
-
-\---
-
-
-
-\# Roadmap
-
-
-
-This section used to contain Simplifiarr's phase-by-phase roadmap. That
-
-content has moved to \[SIMPLIFIARR\_BIBLE.md\](SIMPLIFIARR\_BIBLE.md), which
-
-is now the single canonical source for project phase status - it
-
-reconciles this file's old numbering with a couple of other divergent
-
-roadmap documents that had drifted out of sync with each other and with
-
-the actual commit history.
-
-
-
-If you're looking for "what phase are we in" or "what's next," read that
-
-file instead. Update it, not this section, when phase status changes.
-
-
-\# Long-Term Vision
-
-
-
-The long-term goal of Simplifiarr is to become a storage and seeding intelligence platform for self-hosted media environments.
-
-
-
-The finished application should help answer questions like:
-
-
-
-```text
-
-Where am I wasting storage?
-
-
-
-Which files should already be hardlinked?
-
-
-
-Which library files are safe to convert?
-
-
-
-How much space can I reclaim?
-
-
-
-What has already been remediated?
-
-
-
-What is still sitting in Quarantine?
-
-
-
-Which releases are good cross-seed candidates?
-
-
-
-Can I seed on additional trackers without downloading another copy?
-
-
-
-Can I promote downloads into my library without duplicating data?
-
-```
-
-
-
-Simplifiarr is not intended to replace:
-
-
-
-\- Sonarr
-
-\- Radarr
-
-\- Lidarr
-
-\- Prowlarr
-
-\- Jackett
-
-\- qBittorrent
-
-\- Jellyfin
-
-\- cross-seed
-
-
-
-Instead, Simplifiarr aims to become the intelligence layer between these systems:
-
-
-
-```text
-
-Arr Applications
-
-&#x20;       ↓
-
-Media Acquisition
-
-
-
-qBittorrent
-
-&#x20;       ↓
-
-Torrent Management
-
-
-
-Jellyfin
-
-&#x20;       ↓
-
-Media Consumption
-
-
-
-cross-seed
-
-&#x20;       ↓
-
-Tracker Expansion
-
-
-
-Simplifiarr
-
-&#x20;       ↓
-
-Storage + Seeding Intelligence
-
-```
-
-
-
-The ultimate goal is simple:
-
-
-
-```text
-
-Store once.
-
-Seed everywhere.
-
-Waste nothing.
-
-```
-
-
-
-\---
-
-
-
-\## Development
-
-
-
-Build:
-
-
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.png">
+    <img src="assets/logo-light.png" alt="Simplifiarr" width="320">
+  </picture>
+</h1>
+
+**Store once. Seed everywhere. Waste nothing.**
+
+Simplifiarr is a Windows web app for self-hosted media servers. It gets your
+torrent downloads into your libraries as **hardlinks** instead of copies, so a
+file can keep seeding and sit in your library while taking up the space of one.
+It also finds the space you're already wasting and helps you get it back
+safely.
+
+## Why it exists
+
+While building my media server, I kept running into problems with the hardlinks
+Sonarr and Radarr are supposed to make. If a torrent was still seeding, the file
+either wasn't moved into the library at all or was copied instead of linked,
+which doubled the storage. I wrote a PowerShell script to make the links by
+hand, but that meant being at the computer every time. Simplifiarr is the tool I
+wanted instead: one place that shows where storage is being wasted and fixes it,
+with nothing happening until I say so.
+
+## What it does
+
+The pages are grouped the same way they are in the app's menu.
+
+### Link
+
+| Page | What it's for |
+|---|---|
+| **Hardlinks** | Finished downloads that aren't in your library yet. Preview where each will go, then link it in. TV is grouped by show and season. |
+| **Potential Waste** | Library files that are full copies of a download. Converting swaps the copy for a hardlink; the old copy goes to Quarantine first. |
+| **Cross-Seed** | Finds other torrents of files you already seed, so you can seed them on more trackers without downloading anything. Every piece is checked against your files before a match is offered. |
+| **Torrent Rebuilder** | Rebuilds one torrent from files already in your library, even renamed ones, so it can seed straight away. |
+| **Collections** | Group anything in your libraries, across drives, and send it to Jellyfin as a collection. Sending again only changes what changed. |
+| **Posters** | Choose the poster for any film, show or collection in Jellyfin from every poster found online, or drop in your own. |
+
+### Clean up
+
+| Page | What it's for |
+|---|---|
+| **Duplicates** | The same title more than once in your libraries, usually two qualities of one film or episode. |
+| **Junk** | Sample clips, checksum and tracker files, and stray images left in your libraries. |
+| **Downloads** | Downloads your library already has that qBittorrent is no longer seeding. |
+| **Blocked Files** | Files Windows has marked as coming from the internet, which can trip up media servers. Unblocking only removes the mark. |
+| **Size Reduction** | Smaller releases of films and episodes you already have, found on your indexers. Report only; nothing is downloaded. |
+
+### Safety net
+
+| Page | What it's for |
+|---|---|
+| **Quarantine** | Everything Simplifiarr took out of a library, waiting for you to restore it or delete it. |
+| **History** | Every change Simplifiarr has made on disk. |
+| **Ignored** | Things you've told Simplifiarr to stop suggesting. |
+
+There is one **Scan** button at the top of every page. It reads every drive and
+refreshes every list at once, runs on the server, and keeps going if you close
+the browser.
+
+## How it keeps your files safe
+
+- It never copies a file from one drive to another, and never deletes a file
+  outright.
+- Anything taken out of a library goes to **Quarantine** first. Restoring puts
+  it back; deleting sends it to the Windows Recycle Bin.
+- A hardlink only counts as done once Simplifiarr has checked it really is the
+  same file.
+- Cross-seeds and rebuilt torrents are only offered once every piece has been
+  checked, and they are added to qBittorrent **stopped**.
+- Anything that changes files asks you to confirm first.
+- Radarr and Sonarr are only read. In Jellyfin, Simplifiarr only changes the
+  collections it made and the posters you choose.
+
+## Requirements
+
+- **Windows** with **NTFS** drives. A hardlink only works within one drive, so
+  each download folder must be on the same drive as the libraries it feeds.
+- **.NET 10 SDK** to build and run it.
+- **ffprobe** (part of [FFmpeg](https://ffmpeg.org/)) for reading video
+  resolution. Simplifiarr looks in the usual install locations, or you can set
+  its path in Settings.
+
+### Optional connections
+
+Simplifiarr works on its own. Each of these adds more:
+
+| App | Adds |
+|---|---|
+| qBittorrent | What is still seeding; adding cross-seeds and rebuilt torrents |
+| Radarr / Sonarr | Exact titles, years, genres and episode numbers |
+| Prowlarr | Searching your indexers for Cross-Seed, Torrent Rebuilder and Size Reduction |
+| Jellyfin | Collections and Posters |
+| fanart.tv | More poster choices (needs your own free API key) |
+
+## Getting started
+
+### Try it
 
 ```powershell
-
-dotnet build
-
-```
-
-
-
-Run:
-
-
-
-```powershell
-
 dotnet run --project Simplifiarr.Web
-
 ```
 
+Then open <http://localhost:6481>.
 
+### Install it as a Windows service
 
-Default local URL:
+From an **administrator** PowerShell in the repository folder:
 
-
-
-```text
-
-http://localhost:6481
-
+```powershell
+.\scripts\install-service.ps1
 ```
 
+This runs the tests (and stops if any fail), publishes the app to
+`C:\Services\Simplifiarr`, creates a service that starts with Windows, and
+waits for it to answer on port 6481. To update after pulling new code:
 
+```powershell
+.\scripts\update-service.ps1
+```
 
-\---
+Your data folder is never touched by either script. Both take `-ServiceName`,
+and the installer also takes `-Port`, `-InstallDir` and `-DataPath`, so a
+second copy can run side by side with its own data.
 
+### First steps
 
+1. Open **Settings**. Add one entry per drive, with its downloads folder and
+   whichever library folders it has (Movies, TV, Books, Audiobooks, Music,
+   Comics).
+2. Under **Connections**, add any of the apps above and press **Test**.
+3. Press **Scan**.
+4. Look at **Home**. It shows what the scan found and links to anything that
+   needs you.
 
-\## Repository Status
+The **Help** page in the app explains every page.
 
+## Where it keeps its data
 
+Settings, history, caches and logs go in `%ProgramData%\Simplifiarr`, or the
+folder given with `-DataPath`. Quarantine and the cross-seed folder can be moved
+in Settings.
 
-This repository is currently private and experimental.
+## Development
 
+```powershell
+dotnet build Simplifiarr.slnx
+dotnet test Simplifiarr.slnx
+```
 
+| Project | Contents |
+|---|---|
+| `Simplifiarr.Core` | Scanning, matching, hardlinks, Quarantine, and the qBittorrent, Arr, Prowlarr and Jellyfin clients |
+| `Simplifiarr.Web` | The Blazor Server app (.NET 10) |
+| `Simplifiarr.Tests` | MSTest tests. They work in temporary folders and talk to stand-in servers, never real ones. |
 
-Simplifiarr is under active personal development.
+There are no third-party NuGet packages in the app itself.
 
+## Logo
 
+The logo is a rounded purple square (`#7c3aed`) beside the name in bold. The
+files are in [`assets`](assets): `mark.svg` and large PNGs of the square on its
+own, and `logo-light.png` / `logo-dark.png` with the name for light and dark
+backgrounds.
 
-\---
+## License
 
-
-
-\## License
-
-
-
-Private project.
-
-
+Simplifiarr is free software, released under the
+[GNU General Public License v3.0](LICENSE). You can use, study, change and
+share it. If you share a changed version, it must stay under the same license
+with its source code available.
