@@ -158,6 +158,11 @@ dotnet test Simplifiarr.slnx
 
 There are no third-party NuGet packages in the app itself.
 
+## Support
+
+Simplifiarr is free. If it saves you space, you can buy me a coffee on
+[Ko-fi](https://ko-fi.com/simplifiarr).
+
 ## Logo
 
 The logo is a rounded purple square (`#7c3aed`) beside the name in bold. The
