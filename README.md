@@ -125,6 +125,35 @@ Your data folder is never touched by either script. Both take `-ServiceName`,
 and the installer also takes `-Port`, `-InstallDir` and `-DataPath`, so a
 second copy can run side by side with its own data.
 
+### Set up your folders
+
+Each drive needs a downloads folder and its library folders side by side, so
+files can be hardlinked between them. If you're starting fresh, this script
+creates them for one drive and tells you what to put in Settings:
+
+```powershell
+.\scripts\new-media-folders.ps1 -Drive D
+```
+
+That gives:
+
+```text
+D:\Torrents               finished movies, TV and books
+D:\Torrents\Audiobooks    finished audiobooks
+D:\Torrents\Music         finished music
+D:\Torrents\Comics        finished comics
+D:\Movies   D:\TV   D:\Books   D:\Audiobooks   D:\Music   D:\Comics
+```
+
+Add `-Root Media` to put everything under `D:\Media`, `-Types Movies,TV` to
+create only some libraries, `-SeedOnly` for a folder of torrents you only keep
+for seeding, and `-WhatIf` to see what it would do first. It only creates
+folders that are missing and never moves or deletes anything. Run it once per
+drive.
+
+Audiobooks, music and comics need their own download folders because their
+files can't be told apart by content alone.
+
 ### First steps
 
 1. Open **Settings**. Add one entry per drive, with its downloads folder and
