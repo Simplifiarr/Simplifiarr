@@ -507,6 +507,27 @@ else
                                EmptyText="Not set - found automatically"
                                @bind-Value="_settings.FfprobePath" />
                 </div>
+
+                <div class="mt-3">
+                    <PathInput Label="7-Zip, for unpacking packed releases"
+                               IsFile="true"
+                               Placeholder="C:\Program Files\7-Zip\7z.exe"
+                               EmptyText="Not set - found automatically"
+                               @bind-Value="_settings.SevenZipPath" />
+                </div>
+
+                <div class="mt-3">
+                    <label class="form-label" for="media-server-account">Media server's Windows account</label>
+                    <input id="media-server-account"
+                           class="form-control"
+                           placeholder="Found from the Jellyfin, Emby or Plex service"
+                           @bind="_settings.MediaServerAccount" />
+                    <div class="cell-note mt-1">
+                        Playback Errors checks this account can read each file. Leave blank to use the account the
+                        Jellyfin, Emby or Plex Windows service runs as. If your media server runs as a normal program,
+                        enter your Windows user name, e.g. <code>@(Environment.MachineName)\you</code>.
+                    </div>
+                </div>
             </div>
         </div>
     }

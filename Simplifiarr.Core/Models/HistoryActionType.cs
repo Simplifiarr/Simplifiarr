@@ -11,6 +11,8 @@ public enum HistoryActionType
     DownloadCopyRemoved,
     JunkFileQuarantined,
     QuarantineRestored,
-    DuplicateQuarantined
+    DuplicateQuarantined,
+    PlaybackErrorFixed,
+    PermissionsRestored
 }
 

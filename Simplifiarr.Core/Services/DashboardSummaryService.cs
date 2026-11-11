@@ -17,7 +17,7 @@ public class DashboardSummaryService : IDashboardSummaryService
     private readonly IPromotionCandidateCacheService _promotionCandidateCache;
     private readonly IMediaPromotionService _mediaPromotion;
     private readonly IJunkFileScannerService _junkFiles;
-    private readonly IBlockedFileCacheService _blockedFiles;
+    private readonly IPlaybackErrorService _playbackErrors;
     private readonly IScanCoordinator _scans;
     private readonly IHistoryService _historyService;
 
@@ -28,7 +28,7 @@ public class DashboardSummaryService : IDashboardSummaryService
         IPromotionCandidateCacheService promotionCandidateCache,
         IMediaPromotionService mediaPromotion,
         IJunkFileScannerService junkFiles,
-        IBlockedFileCacheService blockedFiles,
+        IPlaybackErrorService playbackErrors,
         IScanCoordinator scans,
         IHistoryService historyService)
     {
@@ -39,7 +39,7 @@ public class DashboardSummaryService : IDashboardSummaryService
         _promotionCandidateCache = promotionCandidateCache;
         _mediaPromotion = mediaPromotion;
         _junkFiles = junkFiles;
-        _blockedFiles = blockedFiles;
+        _playbackErrors = playbackErrors;
         _scans = scans;
         _historyService = historyService;
     }
@@ -119,8 +119,8 @@ public class DashboardSummaryService : IDashboardSummaryService
             JunkFileCount =
                 drives.Sum(drive => drive.LeftoverFileCount),
 
-            BlockedFileCount =
-                drives.Sum(drive => drive.BlockedFileCount),
+            PlaybackErrorCount =
+                drives.Sum(drive => drive.PlaybackErrorCount),
 
             StorageSavedBytes =
                 storageSavedBytes,
@@ -153,7 +153,7 @@ public class DashboardSummaryService : IDashboardSummaryService
             FullCopyCount = fullCopies.Count,
             FullCopyBytes = fullCopies.Sum(candidate => candidate.SizeBytes),
             LeftoverFileCount = _junkFiles.GetCandidates(profile.Name).Count,
-            BlockedFileCount = _blockedFiles.GetBlockedFiles(profile.Name).Count,
+            PlaybackErrorCount = _playbackErrors.GetForDrive(profile.Name).Count,
             HealthyHardlinkCount = _wasteCandidateCache.GetHealthyHardlinkCount(profile.Name),
             LastScanUtc = _scans.GetLastScanUtc(profile.Name),
             SetupProblems = DriveProfileValidator.GetProblems(profile)

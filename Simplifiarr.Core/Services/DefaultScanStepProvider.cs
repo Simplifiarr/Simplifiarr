@@ -21,7 +21,7 @@ public class DefaultScanStepProvider
         IMediaPromotionService mediaPromotion,
         IWasteCandidateService waste,
         IJunkFileScannerService junk,
-        IBlockedFileService blockedFiles)
+        IPlaybackErrorService playbackErrors)
     {
         var steps = new List<ScanStep>
         {
@@ -52,8 +52,8 @@ public class DefaultScanStepProvider
 
         steps.Add(
             new ScanStep(
-                "Checking for blocked files",
-                profile => blockedFiles.GetBlockedFilesAsync(profile.Name, forceRefresh: true)));
+                "Checking for playback problems",
+                profile => playbackErrors.ScanAsync(profile.Name)));
 
         _steps = steps;
     }

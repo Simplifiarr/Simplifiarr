@@ -201,7 +201,9 @@ else
         new("deleted", "Deleted", record =>
             record.ActionType is HistoryActionType.QuarantineDeleted or HistoryActionType.DownloadCopyRemoved),
         new("restored", "Restored", record =>
-            record.ActionType == HistoryActionType.QuarantineRestored),
+            record.ActionType is HistoryActionType.QuarantineRestored or HistoryActionType.PermissionsRestored),
+        new("playback", "Playback fixes", record =>
+            record.ActionType == HistoryActionType.PlaybackErrorFixed),
         new("failed", "Didn't work", record => !record.Success)
     ];
 
@@ -313,6 +315,10 @@ else
                 record.Success ? "Restored from Quarantine" : "Couldn't restore from Quarantine",
             HistoryActionType.DownloadCopyRemoved =>
                 record.Success ? "Download copy deleted" : "Couldn't delete download copy",
+            HistoryActionType.PlaybackErrorFixed =>
+                record.Success ? "Playback problem fixed" : "Couldn't fix playback problem",
+            HistoryActionType.PermissionsRestored =>
+                record.Success ? "Earlier permissions put back" : "Couldn't put earlier permissions back",
             _ => record.ActionType.ToString()
         };
 }

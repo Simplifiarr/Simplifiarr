@@ -143,16 +143,16 @@ else
                     </div>
                 }
 
-                @if (_dashboard.BlockedFileCount > 0)
+                @if (_dashboard.PlaybackErrorCount > 0)
                 {
                     <div class="action-row">
                         <div>
                             <div class="action-row-title">
-                                @Count(_dashboard.BlockedFileCount, "library file is", "library files are") marked by Windows as downloaded from the internet
+                                @Count(_dashboard.PlaybackErrorCount, "playback problem", "playback problems") found in your libraries
                             </div>
-                            <div class="action-row-detail">Some players refuse these until they are unblocked.</div>
+                            <div class="action-row-detail">Files your media server may not be able to open: blocked, unreadable, packed or badly named.</div>
                         </div>
-                        <a class="btn btn-secondary" href="blocked-files">Review</a>
+                        <a class="btn btn-secondary" href="playback-errors">Review</a>
                     </div>
                 }
 
@@ -243,7 +243,7 @@ else
         _dashboard.PromotionOpportunityCount == 0 &&
         _dashboard.PossibleDuplicateCopyCount == 0 &&
         _dashboard.JunkFileCount == 0 &&
-        _dashboard.BlockedFileCount == 0 &&
+        _dashboard.PlaybackErrorCount == 0 &&
         ScanProblems.Count == 0 &&
         _dashboard.Drives.All(drive => drive.SetupProblems.Count == 0);
 
@@ -320,9 +320,9 @@ else
             parts.Add(Count(drive.LeftoverFileCount, "leftover", "leftovers"));
         }
 
-        if (drive.BlockedFileCount > 0)
+        if (drive.PlaybackErrorCount > 0)
         {
-            parts.Add($"{drive.BlockedFileCount:N0} blocked");
+            parts.Add($"{drive.PlaybackErrorCount:N0} playback problem(s)");
         }
 
         return parts.Count == 0

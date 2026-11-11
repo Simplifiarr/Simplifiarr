@@ -39,6 +39,21 @@ public class SimplifiarrSettings
         string.Empty;
 
     /// <summary>
+    /// The Windows account the media server runs as, for checking it can
+    /// read library files. Blank: found from the Jellyfin, Emby or Plex
+    /// Windows service.
+    /// </summary>
+    public string MediaServerAccount { get; set; } =
+        string.Empty;
+
+    /// <summary>
+    /// Where 7z.exe is (the file or its folder), for unpacking packed
+    /// releases. Blank: looked for in the usual 7-Zip install locations.
+    /// </summary>
+    public string SevenZipPath { get; set; } =
+        string.Empty;
+
+    /// <summary>
     /// Where ffprobe.exe is (the file or its folder). Leave blank to have
     /// Simplifiarr look in the usual install locations itself.
     /// </summary>

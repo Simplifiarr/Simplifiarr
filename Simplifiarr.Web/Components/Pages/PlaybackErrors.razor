@@ -1,0 +1,489 @@
+@page "/playback-errors"
+@page "/blocked-files"
+@rendermode InteractiveServer
+@inherits ScanAwareComponent
+
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+@using Simplifiarr.Core.Utilities
+
+@inject IPlaybackErrorService Service
+
+<PageTitle>Playback Errors - Simplifiarr</PageTitle>
+
+<PageHeader Title="Playback Errors"
+            Subtitle="Library files your media server may not be able to open, and why. Fixes only change Windows' marks, a file's permissions, or unpack an archive beside itself - never what is inside a file, so seeding and Torrent Rebuilder are unaffected." />
+
+@if (IsScanning)
+{
+    <div class="alert alert-info">A scan is running. This page will update when it finishes.</div>
+}
+
+<div class="panel section">
+    <div class="action-row">
+        <div>
+            <div class="action-row-title">Media server account</div>
+            <div class="action-row-detail">
+                @if (_account is null)
+                {
+                    <span>No Jellyfin, Emby or Plex service was found, so whether it can read files isn't checked. Set the account in <a href="settings">Settings</a>, under Storage.</span>
+                }
+                else
+                {
+                    <span>Checking that <strong>@_account</strong> can read each file.</span>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="action-row">
+        <div>
+            <div class="action-row-title">Fixing permissions</div>
+            <div class="action-row-detail">
+                Needs Simplifiarr to run as a Windows service (installed with <code>scripts\install-service.ps1</code>), which has the rights to change them.
+                The permissions a file had before are saved, so each fix can be undone below.
+            </div>
+        </div>
+    </div>
+
+    <div class="action-row">
+        <div>
+            <div class="action-row-title">Unpacking</div>
+            <div class="action-row-detail">
+                @if (_sevenZip is null)
+                {
+                    <span>Needs 7-Zip, which wasn't found. Install it from 7-zip.org, or set where <code>7z.exe</code> is in <a href="settings">Settings</a>, under Storage.</span>
+                }
+                else
+                {
+                    <span>Uses 7-Zip. The archive is unpacked into its own folder and then left where it is, in case a torrent is still seeding it.</span>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_message))
+{
+    <div class="alert @(_messageIsProblem ? "alert-warning" : "alert-info")" role="status">@_message</div>
+}
+
+@if (!_hasScanned)
+{
+    <EmptyState Icon="search" Text="No scan has checked for playback problems yet. Press Scan at the top of the page." />
+}
+else if (_errors.Count == 0)
+{
+    <EmptyState Icon="check-circle" Text="No playback problems were found in your libraries." />
+}
+else
+{
+    <div class="app-tabs" role="tablist" aria-label="Kind of problem">
+        @foreach (var kind in Kinds.Where(kind => _errors.Any(error => error.Kind == kind)))
+        {
+            <button type="button"
+                    role="tab"
+                    aria-selected="@(_kind == kind)"
+                    class="app-tab @(_kind == kind ? "active" : null)"
+                    @onclick="() => ShowKind(kind)">
+                @Label(kind) <span class="app-tab-count">@_errors.Count(error => error.Kind == kind)</span>
+            </button>
+        }
+    </div>
+
+    <p class="cell-note">@Explain(_kind)</p>
+
+    @if (CanFix)
+    {
+        @if (_pending.Count > 0)
+        {
+            <BatchConfirmBanner IsBusy="_isFixing"
+                                ConfirmLabel="Confirm"
+                                BusyLabel="Working..."
+                                OnConfirm="FixPendingAsync"
+                                OnCancel="() => _pending = []">
+                <Message>
+                    <strong>@FixLabel(_kind) @_pending.Count file(s)?</strong>
+                    @FixWarning(_kind)
+                </Message>
+            </BatchConfirmBanner>
+        }
+        else
+        {
+            <div class="toolbar">
+                <div class="toolbar-summary">
+                    <strong>@Visible.Count</strong> file(s)
+                    @if (_selection.Count > 0)
+                    {
+                        <text> · @_selection.Count selected</text>
+                    }
+                </div>
+
+                <div class="toolbar-actions">
+                    @if (_isFixing)
+                    {
+                        <button type="button" class="btn btn-secondary btn-sm" @onclick="() => _cancel?.Cancel()">
+                            Stop after this file
+                        </button>
+                    }
+
+                    <button type="button"
+                            class="btn btn-secondary btn-sm"
+                            disabled="@(IsBusy || !FixAvailable)"
+                            @onclick="() => _pending = Visible.ToList()">
+                        @FixLabel(_kind) all
+                    </button>
+
+                    <button type="button"
+                            class="btn btn-primary btn-sm"
+                            disabled="@(IsBusy || !FixAvailable || _selection.Count == 0)"
+                            @onclick="() => _pending = Visible.Where(_selection.IsSelected).ToList()">
+                        @FixLabel(_kind) selected (@_selection.Count)
+                    </button>
+                </div>
+            </div>
+        }
+    }
+    else
+    {
+        <div class="toolbar">
+            <div class="toolbar-summary"><strong>@Visible.Count</strong> file(s) · Simplifiarr can't fix these itself</div>
+        </div>
+    }
+
+    <div class="table-scroll">
+        <table class="table">
+            <thead>
+                <tr>
+                    @if (CanFix)
+                    {
+                        <th class="col-check">Select</th>
+                    }
+                    <th>File</th>
+                    <th class="col-num">Size</th>
+                    <th>What's wrong</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                @foreach (var error in Visible.Take(_shown))
+                {
+                    <tr @key="Key(error)">
+                        @if (CanFix)
+                        {
+                            <SelectableCheckboxCell Checked="_selection.IsSelected(error)"
+                                                    Disabled="IsBusy || !FixAvailable"
+                                                    OnChanged="selected => _selection.SetSelected(error, selected)" />
+                        }
+
+                        <td>
+                            <div class="file-name">@error.FileName</div>
+                            <div class="cell-note">@Path.GetDirectoryName(error.Path)</div>
+                            @if (_working == Key(error))
+                            {
+                                <div class="status-muted">Working...</div>
+                            }
+                        </td>
+
+                        <td class="col-num">@SizeFormatter.FormatBytes(error.SizeBytes)</td>
+
+                        <td>
+                            @error.Detail
+                            @if (IsWebLink(error.SourceUrl))
+                            {
+                                <div class="cell-note">From @(new Uri(error.SourceUrl!).Host)</div>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (Visible.Count > _shown)
+    {
+        <button type="button" class="btn btn-secondary mt-2" @onclick="() => _shown += PageSize">
+            Show more (@(Visible.Count - _shown) left)
+        </button>
+    }
+}
+
+@if (_undoable.Count > 0)
+{
+    <details class="section mt-4">
+        <summary>@_undoable.Count file(s) with earlier permissions saved</summary>
+
+        <p class="cell-note mt-2">Put back puts a file's permissions back to what they were before Simplifiarr changed them.</p>
+
+        <div class="panel">
+            @foreach (var path in _undoable.Order(StringComparer.OrdinalIgnoreCase).Take(100))
+            {
+                <div class="action-row">
+                    <div>
+                        <div class="action-row-title">@Path.GetFileName(path)</div>
+                        <div class="action-row-detail">@Path.GetDirectoryName(path)</div>
+                    </div>
+
+                    <button type="button" class="btn btn-secondary btn-sm" disabled="@IsBusy" @onclick="() => UndoAsync(path)">
+                        Put back
+                    </button>
+                </div>
+            }
+        </div>
+    </details>
+}
+
+@code
+{
+    private const int PageSize = 100;
+
+    // Tab order: what stops playback outright first.
+    private static readonly PlaybackErrorKind[] Kinds =
+    [
+        PlaybackErrorKind.MediaServerCantRead,
+        PlaybackErrorKind.Packed,
+        PlaybackErrorKind.Blocked,
+        PlaybackErrorKind.PermissionsDontMatchFolder,
+        PlaybackErrorKind.Empty,
+        PlaybackErrorKind.Unfinished,
+        PlaybackErrorKind.Encrypted,
+        PlaybackErrorKind.CloudOnly,
+        PlaybackErrorKind.PathTooLong,
+        PlaybackErrorKind.BadName
+    ];
+
+    private List<PlaybackError> _errors = [];
+    private PlaybackErrorKind _kind;
+    private bool _hasScanned;
+
+    private string? _account;
+    private string? _sevenZip;
+
+    private readonly CandidateSelection<PlaybackError> _selection = new(Key);
+
+    private List<PlaybackError> _pending = [];
+    private bool _isFixing;
+    private string? _working;
+    private CancellationTokenSource? _cancel;
+
+    private string? _message;
+    private bool _messageIsProblem;
+
+    private IReadOnlyCollection<string> _undoable = [];
+
+    private int _shown = PageSize;
+
+    private bool IsBusy => _isFixing || IsScanning;
+
+    private List<PlaybackError> Visible =>
+        _errors
+            .Where(error => error.Kind == _kind)
+            .OrderBy(error => error.Path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private bool CanFix => Service.CanFix(_kind);
+
+    // Unpacking can't happen without 7-Zip.
+    private bool FixAvailable => _kind != PlaybackErrorKind.Packed || _sevenZip is not null;
+
+    private static string Key(PlaybackError error) => $"{error.Kind}|{error.Path}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        base.OnInitialized();
+
+        _account = await Service.GetMediaServerAccountAsync();
+        _sevenZip = await Service.FindSevenZipAsync();
+
+        await LoadAsync();
+    }
+
+    protected override async Task OnScanFinishedAsync()
+    {
+        _selection.Clear();
+        _pending = [];
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _errors = await Service.GetAllAsync();
+        _undoable = Service.GetUndoablePaths();
+
+        _hasScanned = _errors.Count > 0 || await AnyDriveScannedAsync();
+
+        if (!_errors.Any(error => error.Kind == _kind))
+        {
+            _kind = Kinds.FirstOrDefault(kind => _errors.Any(error => error.Kind == kind));
+        }
+    }
+
+    [Inject]
+    private ISettingsService Settings { get; set; } = default!;
+
+    private async Task<bool> AnyDriveScannedAsync() =>
+        (await Settings.GetEnabledDriveProfilesAsync())
+            .Any(profile => Service.GetLastScanUtc(profile.Name).HasValue);
+
+    private void ShowKind(PlaybackErrorKind kind)
+    {
+        if (_isFixing)
+        {
+            return;
+        }
+
+        _kind = kind;
+        _shown = PageSize;
+        _selection.Clear();
+        _pending = [];
+    }
+
+    private async Task FixPendingAsync()
+    {
+        if (IsBusy || _pending.Count == 0)
+        {
+            return;
+        }
+
+        var batch = _pending.ToList();
+
+        _pending = [];
+        _isFixing = true;
+        _message = null;
+        _cancel = new CancellationTokenSource();
+
+        var fixedCount = 0;
+        var failed = new List<string>();
+
+        try
+        {
+            foreach (var error in batch)
+            {
+                if (_cancel.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                _working = Key(error);
+
+                await InvokeAsync(StateHasChanged);
+
+                PlaybackFixResult result;
+
+                try
+                {
+                    result = await Service.FixAsync(error, _cancel.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+
+                if (result.Succeeded)
+                {
+                    fixedCount++;
+                    _selection.Remove(error);
+                }
+                else
+                {
+                    failed.Add(result.Message);
+                }
+            }
+
+            var stopped = _cancel.IsCancellationRequested ? " Stopped before the rest." : string.Empty;
+
+            _messageIsProblem = failed.Count > 0;
+            _message =
+                failed.Count == 0
+                    ? $"Fixed {fixedCount} file(s).{stopped}"
+                    : $"Fixed {fixedCount} file(s); {failed.Count} weren't fixed.{stopped} First reason: {failed[0]}";
+        }
+        finally
+        {
+            _isFixing = false;
+            _working = null;
+            _cancel.Dispose();
+            _cancel = null;
+
+            await LoadAsync();
+        }
+    }
+
+    private async Task UndoAsync(string path)
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        var result = await Service.UndoPermissionsAsync(path);
+
+        _message = result.Message;
+        _messageIsProblem = !result.Succeeded;
+
+        _undoable = Service.GetUndoablePaths();
+    }
+
+    private static bool IsWebLink(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
+        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    private static string Label(PlaybackErrorKind kind) =>
+        kind switch
+        {
+            PlaybackErrorKind.MediaServerCantRead => "Can't be read",
+            PlaybackErrorKind.Packed => "Packed",
+            PlaybackErrorKind.Blocked => "Blocked",
+            PlaybackErrorKind.PermissionsDontMatchFolder => "Odd permissions",
+            PlaybackErrorKind.Empty => "Empty",
+            PlaybackErrorKind.Unfinished => "Unfinished",
+            PlaybackErrorKind.Encrypted => "Encrypted",
+            PlaybackErrorKind.CloudOnly => "In the cloud",
+            PlaybackErrorKind.PathTooLong => "Path too long",
+            PlaybackErrorKind.BadName => "Bad names",
+            _ => kind.ToString()
+        };
+
+    private static string Explain(PlaybackErrorKind kind) =>
+        kind switch
+        {
+            PlaybackErrorKind.MediaServerCantRead =>
+                "The media server isn't allowed to open these, so they won't play at all. Fixing makes each file take its folder's permissions again, and adds read access for the media server only if the folder doesn't give it.",
+            PlaybackErrorKind.Packed =>
+                "Releases still inside an archive or disc image. Unpacking puts the files beside the archive so the media server can see them. It uses as much extra space as what's inside.",
+            PlaybackErrorKind.Blocked =>
+                "Windows marked these as downloaded from the internet or copied from another computer. Some players refuse them. Fixing removes only the mark.",
+            PlaybackErrorKind.PermissionsDontMatchFolder =>
+                "These play today, but their permissions don't come from their folder - usually because they were moved in from somewhere else. A change to the folder won't reach them. Fixing makes them take their folder's permissions.",
+            PlaybackErrorKind.Empty =>
+                "Media files with nothing in them. Replace them with a fresh download through Radarr, Sonarr or your other apps.",
+            PlaybackErrorKind.Unfinished =>
+                "Downloads that never finished ended up in a library. Re-download them, then remove these.",
+            PlaybackErrorKind.Encrypted =>
+                "Encrypted with Windows. Only the Windows user who encrypted them can open them. That user can turn it off in the file's Properties, under Advanced.",
+            PlaybackErrorKind.CloudOnly =>
+                "These are only placeholders; the real files are in the cloud. Right-click the folder and choose \"Always keep on this device\", or move the library out of OneDrive.",
+            PlaybackErrorKind.PathTooLong =>
+                "Paths this long trip up many programs. Shorten the folder or file name, for example with Radarr or Sonarr's naming settings.",
+            PlaybackErrorKind.BadName =>
+                "Names Windows programs struggle with. Renaming them in Radarr or Sonarr is the safe way, so those apps keep track of them.",
+            _ => string.Empty
+        };
+
+    private static string FixLabel(PlaybackErrorKind kind) =>
+        kind switch
+        {
+            PlaybackErrorKind.Packed => "Unpack",
+            PlaybackErrorKind.Blocked => "Unblock",
+            _ => "Fix permissions on"
+        };
+
+    private static string FixWarning(PlaybackErrorKind kind) =>
+        kind switch
+        {
+            PlaybackErrorKind.Packed => "Each archive is unpacked beside itself and then left in place. Nothing is overwritten; an archive whose contents are already there is skipped.",
+            PlaybackErrorKind.Blocked => "Only Windows' download mark is removed.",
+            _ => "Each file takes its folder's permissions again. What it had before is saved, so it can be put back."
+        };
+}

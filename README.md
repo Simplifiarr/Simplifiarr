@@ -45,7 +45,7 @@ The pages are grouped the same way they are in the app's menu.
 | **Duplicates** | The same title more than once in your libraries, usually two qualities of one film or episode. |
 | **Junk** | Sample clips, checksum and tracker files, and stray images left in your libraries. |
 | **Downloads** | Downloads your library already has that qBittorrent is no longer seeding. |
-| **Blocked Files** | Files Windows has marked as coming from the internet, which can trip up media servers. Unblocking only removes the mark. |
+| **Playback Errors** | Files your media server may not be able to open: blocked by Windows, permissions it can't read, still packed in an archive, empty, unfinished, cloud-only or badly named. Blocks, permissions and archives can be fixed; fixes never change what is inside a file. |
 | **Size Reduction** | Smaller releases of films and episodes you already have, found on your indexers. Report only; nothing is downloaded. |
 
 ### Safety net
@@ -82,6 +82,10 @@ the browser.
 - **ffprobe** (part of [FFmpeg](https://ffmpeg.org/)) for reading video
   resolution. Simplifiarr looks in the usual install locations, or you can set
   its path in Settings.
+- **[7-Zip](https://www.7-zip.org/)** (optional) for unpacking packed releases
+  on the Playback Errors page.
+- To fix file permissions on Playback Errors, run Simplifiarr as a Windows
+  service (see below); it then has the rights to change them.
 
 ### Optional connections
 

@@ -1,4 +1,4 @@
-﻿using Simplifiarr.Core.Models;
+using Simplifiarr.Core.Models;
 using Simplifiarr.Core.Services;
 using Simplifiarr.Core.Utilities;
 using Simplifiarr.Web.Components;
@@ -61,8 +61,10 @@ builder.Services.AddSingleton<ILibraryTargetResolver, LibraryTargetResolver>();
 builder.Services.AddSingleton<IMediaPromotionService, MediaPromotionService>();
 builder.Services.AddSingleton<IWasteCandidateCacheService, WasteCandidateCacheService>();
 builder.Services.AddSingleton<IWasteCandidateService, WasteCandidateService>();
-builder.Services.AddSingleton<IBlockedFileCacheService, BlockedFileCacheService>();
-builder.Services.AddSingleton<IBlockedFileService, BlockedFileService>();
+// Simplifiarr only runs on Windows; this one says so out loud.
+#pragma warning disable CA1416
+builder.Services.AddSingleton<IPlaybackErrorService, PlaybackErrorService>();
+#pragma warning restore CA1416
 builder.Services.AddSingleton<ISizeReductionCandidateCacheService, SizeReductionCandidateCacheService>();
 builder.Services.AddSingleton<ISizeReductionCandidateService, SizeReductionCandidateService>();
 builder.Services.AddSingleton<IFileInventoryService, FileInventoryCacheService>();

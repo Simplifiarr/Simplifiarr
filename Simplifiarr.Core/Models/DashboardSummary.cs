@@ -20,7 +20,7 @@ public class DashboardSummary
 
     public int JunkFileCount { get; set; }
 
-    public int BlockedFileCount { get; set; }
+    public int PlaybackErrorCount { get; set; }
 
     public long StorageSavedBytes { get; set; }
 
@@ -51,7 +51,7 @@ public class DriveSummary
 
     public int LeftoverFileCount { get; set; }
 
-    public int BlockedFileCount { get; set; }
+    public int PlaybackErrorCount { get; set; }
 
     public int HealthyHardlinkCount { get; set; }
 
@@ -63,5 +63,5 @@ public class DriveSummary
     public List<string> SetupProblems { get; set; } = [];
 
     public int ItemsToReview =>
-        ToLinkCount + FullCopyCount + LeftoverFileCount + BlockedFileCount;
+        ToLinkCount + FullCopyCount + LeftoverFileCount + PlaybackErrorCount;
 }
