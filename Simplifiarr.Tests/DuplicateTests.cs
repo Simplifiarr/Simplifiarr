@@ -123,4 +123,70 @@ public class DuplicateAssetAnalysisTests : TempFolderTest
         Assert.AreEqual(1, groups[0].Episode);
         Assert.HasCount(2, groups[0].Entries);
     }
+
+    [TestMethod]
+    public async Task A_title_whose_other_copy_is_marked_not_a_duplicate_is_dropped()
+    {
+        var kept = Movie(@"movies\Film (2020)\Film.1080p.mkv", "Film", 2020, "a large copy");
+        var ignored = Movie(@"movies\Film (2020) Extended\Film.720p.mkv", "Film", 2020, "small");
+        var other1 = Movie(@"movies\Other (2019)\Other.1080p.mkv", "Other", 2019, "a large copy");
+        var other2 = Movie(@"movies\Other (2019) 4K\Other.2160p.mkv", "Other", 2019, "an even larger copy");
+
+        var groups = DuplicateAssetAnalysisService.RemoveIgnored(
+            await _service.FindDuplicatesAsync([kept, ignored, other1, other2], [Profile()]),
+            new IgnoreOnly(ignored.CanonicalPath));
+
+        Assert.HasCount(1, groups);
+        Assert.AreEqual("Other", groups[0].Title);
+    }
+
+    [TestMethod]
+    public async Task The_same_episode_named_differently_on_two_drives_is_a_duplicate()
+    {
+        // Sonarr's name on one drive, the file's own name on another.
+        var first = Episode(@"tv\Night Shift - Origins\S01E01.mkv", "Night Shift: Origins", "first drive copy");
+        var second = Episode(@"other\Night Shift - Origins\S01E01.mkv", "Night Shift Origins", "second copy");
+
+        var group = (await _service.FindDuplicatesAsync([first, second], [Profile()])).Single();
+
+        Assert.HasCount(2, group.Entries);
+    }
+
+    [TestMethod]
+    public void Titles_compare_by_letters_and_numbers_only()
+    {
+        Assert.AreEqual(
+            DuplicateAssetAnalysisService.NormalizeTitle("The Bakers Dozen"),
+            DuplicateAssetAnalysisService.NormalizeTitle("The Baker's Dozen"));
+        Assert.AreEqual(
+            DuplicateAssetAnalysisService.NormalizeTitle("Don’t Wake the Lighthouse"),
+            DuplicateAssetAnalysisService.NormalizeTitle("Don't wake the lighthouse"));
+        Assert.AreEqual(
+            DuplicateAssetAnalysisService.NormalizeTitle("Salt and Pepper"),
+            DuplicateAssetAnalysisService.NormalizeTitle("Salt & Pepper"));
+        Assert.AreNotEqual(
+            DuplicateAssetAnalysisService.NormalizeTitle("Harbour"),
+            DuplicateAssetAnalysisService.NormalizeTitle("Harbours"));
+    }
+
+    private MediaAsset Episode(string relativePath, string title, string content) =>
+        new()
+        {
+            MediaType = MediaType.TvEpisode,
+            Title = title,
+            Season = 1,
+            Episode = 1,
+            CanonicalPath = WriteFile(relativePath, content),
+            FileSizeBytes = content.Length
+        };
+
+    private sealed class IgnoreOnly(string path) : IIgnoredItemsService
+    {
+        public IReadOnlyList<IgnoredItem> GetAll() => [];
+        public bool IsIgnored(string sourcePath) => string.Equals(sourcePath, path, StringComparison.OrdinalIgnoreCase);
+        public void Add(IgnoredItem item) { }
+        public void AddRange(IEnumerable<IgnoredItem> items) { }
+        public void Remove(string sourcePath) { }
+        public int RemoveRange(IEnumerable<string> sourcePaths) => 0;
+    }
 }

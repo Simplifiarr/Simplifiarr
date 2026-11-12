@@ -86,12 +86,30 @@ public class DownloadCleanupService
                 profile.MusicLibraryPath,
                 profile.ComicLibraryPath);
 
-        if (downloadRoots.Count == 0 || libraryRoots.Count == 0)
+        // A library copy on another drive counts too: the download can't be
+        // hardlinked to it, so once qBittorrent is done with the download it
+        // is a whole second copy.
+        var otherLibraryRoots =
+            settings.DriveProfiles
+                .Where(other => other.Enabled && !ReferenceEquals(other, profile))
+                .SelectMany(other =>
+                    ExistingFolders(
+                        other.MovieLibraryPath,
+                        other.TvLibraryPath,
+                        other.BookLibraryPath,
+                        other.AudiobookLibraryPath,
+                        other.MusicLibraryPath,
+                        other.ComicLibraryPath))
+                .Where(root => !libraryRoots.Contains(root, StringComparer.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+        if (downloadRoots.Count == 0 || libraryRoots.Count + otherLibraryRoots.Count == 0)
         {
             return new DownloadCleanupScanResult
             {
                 Error =
-                    "This drive needs at least one existing download folder and one existing library folder (see Settings)."
+                    "This drive needs at least one existing download folder, and a library folder here or on another drive (see Settings)."
             };
         }
 
@@ -115,14 +133,29 @@ public class DownloadCleanupService
         var libraryFilesBySize =
             new Dictionary<long, List<FileRecord>>();
 
-        foreach (var root in libraryRoots)
+        foreach (var root in libraryRoots.Concat(otherLibraryRoots))
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            // This drive's folders are read fresh. Other drives' folders use
+            // the listing their own scan saved, so checking six drives
+            // doesn't read every library six times; they are only read here
+            // if no listing has been saved yet.
+            var ownFolder =
+                libraryRoots.Contains(root, StringComparer.OrdinalIgnoreCase);
 
             var files =
                 await _fileInventory.GetInventoryAsync(
                     root,
-                    forceRefresh: true);
+                    forceRefresh: ownFolder);
+
+            if (!ownFolder && files.Count == 0)
+            {
+                files =
+                    await _fileInventory.GetInventoryAsync(
+                        root,
+                        forceRefresh: true);
+            }
 
             foreach (var file in files.Where(file => file.SizeBytes > 0))
             {
@@ -164,7 +197,7 @@ public class DownloadCleanupService
 
                 // A download folder nested inside (or equal to) a library
                 // folder isn't a "download copy" of anything.
-                if (libraryRoots.Any(libraryRoot =>
+                if (libraryRoots.Concat(otherLibraryRoots).Any(libraryRoot =>
                         PathContainment.IsPathUnderRoot(file.FullPath, libraryRoot)))
                 {
                     continue;
@@ -376,23 +409,29 @@ public class DownloadCleanupService
         List<FileRecord> libraryCandidates,
         CancellationToken cancellationToken)
     {
-        foreach (var library in libraryCandidates)
-        {
-            if (string.Equals(
-                    library.FullPath,
-                    download.FullPath,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
+        var others =
+            libraryCandidates
+                .Where(library =>
+                    !string.Equals(
+                        library.FullPath,
+                        download.FullPath,
+                        StringComparison.OrdinalIgnoreCase))
+                .ToList();
 
+        // The quick check first: a hardlink is found without reading either
+        // file, so look for one before comparing any file byte for byte.
+        foreach (var library in others)
+        {
             if (await _hardlinkService.AreHardlinkedAsync(
                     download.FullPath,
                     library.FullPath))
             {
                 return (library, DownloadMatchKind.Hardlink);
             }
+        }
 
+        foreach (var library in others)
+        {
             if (await FileContentComparer.AreIdenticalAsync(
                     download.FullPath,
                     library.FullPath,

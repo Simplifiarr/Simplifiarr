@@ -6,7 +6,7 @@ namespace Simplifiarr.Core.Services;
 /// <summary>
 /// Pure read-only rollup - does not scan anything itself and makes no
 /// network calls. Every number here reflects what the last scan already
-/// found and remembered.
+/// found and remembered (duplicates are worked out from the scan's catalog).
 /// </summary>
 public class DashboardSummaryService : IDashboardSummaryService
 {
@@ -20,6 +20,9 @@ public class DashboardSummaryService : IDashboardSummaryService
     private readonly IPlaybackErrorService _playbackErrors;
     private readonly IScanCoordinator _scans;
     private readonly IHistoryService _historyService;
+    private readonly IMediaCatalogService _catalog;
+    private readonly IDuplicateAssetAnalysisService _duplicates;
+    private readonly IIgnoredItemsService _ignored;
 
     public DashboardSummaryService(
         IQuarantineInventoryService quarantineInventoryService,
@@ -30,7 +33,10 @@ public class DashboardSummaryService : IDashboardSummaryService
         IJunkFileScannerService junkFiles,
         IPlaybackErrorService playbackErrors,
         IScanCoordinator scans,
-        IHistoryService historyService)
+        IHistoryService historyService,
+        IMediaCatalogService catalog,
+        IDuplicateAssetAnalysisService duplicates,
+        IIgnoredItemsService ignored)
     {
         _quarantineInventoryService = quarantineInventoryService;
         _settingsService = settingsService;
@@ -42,6 +48,9 @@ public class DashboardSummaryService : IDashboardSummaryService
         _playbackErrors = playbackErrors;
         _scans = scans;
         _historyService = historyService;
+        _catalog = catalog;
+        _duplicates = duplicates;
+        _ignored = ignored;
     }
 
     public async Task<DashboardSummary> GetDashboardSummaryAsync()
@@ -60,9 +69,21 @@ public class DashboardSummaryService : IDashboardSummaryService
         var quarantinedSizeBytes =
             quarantineItems.Sum(item => item.SizeBytes);
 
+        // Duplicates aren't saved by the scan; they are worked out from the
+        // catalog the same way the Duplicates page does it.
+        var duplicateGroups =
+            DuplicateAssetAnalysisService.RemoveIgnored(
+                await _duplicates.FindDuplicatesAsync(
+                    _catalog.GetAssets(),
+                    enabledProfiles),
+                _ignored);
+
+        var duplicateReclaimableBytes =
+            duplicateGroups.Sum(group => group.ReclaimableSizeBytes);
+
         var drives =
             enabledProfiles
-                .Select(SummarizeDrive)
+                .Select(profile => SummarizeDrive(profile, duplicateGroups))
                 .ToList();
 
         // The same library file can show up under two drives when their
@@ -122,6 +143,15 @@ public class DashboardSummaryService : IDashboardSummaryService
             PlaybackErrorCount =
                 drives.Sum(drive => drive.PlaybackErrorCount),
 
+            DuplicateTitleCount =
+                duplicateGroups.Count,
+
+            DuplicateReclaimableBytes =
+                duplicateReclaimableBytes,
+
+            DuplicateReclaimableFormatted =
+                SizeFormatter.FormatBytes(duplicateReclaimableBytes),
+
             StorageSavedBytes =
                 storageSavedBytes,
 
@@ -136,7 +166,9 @@ public class DashboardSummaryService : IDashboardSummaryService
         };
     }
 
-    private DriveSummary SummarizeDrive(DriveProfile profile)
+    private DriveSummary SummarizeDrive(
+        DriveProfile profile,
+        IReadOnlyList<DuplicateAssetGroup> duplicateGroups)
     {
         var fullCopies =
             _wasteCandidateCache.GetCandidates(profile.Name);
@@ -154,6 +186,9 @@ public class DashboardSummaryService : IDashboardSummaryService
             FullCopyBytes = fullCopies.Sum(candidate => candidate.SizeBytes),
             LeftoverFileCount = _junkFiles.GetCandidates(profile.Name).Count,
             PlaybackErrorCount = _playbackErrors.GetForDrive(profile.Name).Count,
+            DuplicateTitleCount = duplicateGroups.Count(group =>
+                group.Entries.Any(entry =>
+                    string.Equals(entry.DriveProfileName, profile.Name, StringComparison.OrdinalIgnoreCase))),
             HealthyHardlinkCount = _wasteCandidateCache.GetHealthyHardlinkCount(profile.Name),
             LastScanUtc = _scans.GetLastScanUtc(profile.Name),
             SetupProblems = DriveProfileValidator.GetProblems(profile)

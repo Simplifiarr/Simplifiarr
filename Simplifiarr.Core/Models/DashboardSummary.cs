@@ -22,6 +22,14 @@ public class DashboardSummary
 
     public int PlaybackErrorCount { get; set; }
 
+    /// <summary>Titles that are in your libraries more than once.</summary>
+    public int DuplicateTitleCount { get; set; }
+
+    /// <summary>Space freed by keeping only the largest copy of each.</summary>
+    public long DuplicateReclaimableBytes { get; set; }
+
+    public string DuplicateReclaimableFormatted { get; set; } = string.Empty;
+
     public long StorageSavedBytes { get; set; }
 
     public string StorageSavedFormatted { get; set; } = string.Empty;
@@ -53,6 +61,9 @@ public class DriveSummary
 
     public int PlaybackErrorCount { get; set; }
 
+    /// <summary>Duplicate titles with at least one copy on this drive.</summary>
+    public int DuplicateTitleCount { get; set; }
+
     public int HealthyHardlinkCount { get; set; }
 
     public DateTime? LastScanUtc { get; set; }
@@ -63,5 +74,5 @@ public class DriveSummary
     public List<string> SetupProblems { get; set; } = [];
 
     public int ItemsToReview =>
-        ToLinkCount + FullCopyCount + LeftoverFileCount + PlaybackErrorCount;
+        ToLinkCount + FullCopyCount + LeftoverFileCount + PlaybackErrorCount + DuplicateTitleCount;
 }

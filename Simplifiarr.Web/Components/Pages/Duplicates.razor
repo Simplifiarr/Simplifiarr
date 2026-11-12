@@ -295,22 +295,12 @@ else
 
         _totalAssets = assets.Count;
 
-        var groups =
-            await DuplicateAssetAnalysisService.FindDuplicatesAsync(
-                assets,
-                enabledProfiles);
-
-        // Files marked "not a duplicate" are dropped; a title left with a
-        // single copy is no longer a duplicate.
-        foreach (var group in groups)
-        {
-            group.Entries.RemoveAll(entry =>
-                IgnoredItemsService.IsIgnored(entry.CanonicalPath));
-        }
-
-        groups.RemoveAll(group => group.Entries.Count <= 1);
-
-        _groups = groups;
+        _groups =
+            Simplifiarr.Core.Services.DuplicateAssetAnalysisService.RemoveIgnored(
+                await DuplicateAssetAnalysisService.FindDuplicatesAsync(
+                    assets,
+                    enabledProfiles),
+                IgnoredItemsService);
 
         if (_activeType is not null &&
             !_groups.Any(group => group.MediaType == _activeType))

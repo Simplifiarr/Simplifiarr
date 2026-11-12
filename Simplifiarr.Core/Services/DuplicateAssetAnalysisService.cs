@@ -44,9 +44,7 @@ public class DuplicateAssetAnalysisService
 
         var candidateGroups =
             relevantAssets
-                .GroupBy(
-                    asset => BuildKey(asset),
-                    KeyComparer.Instance)
+                .GroupBy(BuildKey)
                 .Select(group =>
                     group
                         .GroupBy(
@@ -87,6 +85,26 @@ public class DuplicateAssetAnalysisService
         return groups
             .OrderByDescending(group => group.ReclaimableSizeBytes)
             .ToList();
+    }
+
+    /// <summary>
+    /// Drops files marked "not a duplicate"; a title left with a single copy
+    /// is no longer a duplicate. Shared by the Duplicates page and Home so
+    /// the two always agree.
+    /// </summary>
+    public static List<DuplicateAssetGroup> RemoveIgnored(
+        List<DuplicateAssetGroup> groups,
+        IIgnoredItemsService ignored)
+    {
+        foreach (var group in groups)
+        {
+            group.Entries.RemoveAll(entry =>
+                ignored.IsIgnored(entry.CanonicalPath));
+        }
+
+        groups.RemoveAll(group => group.Entries.Count <= 1);
+
+        return groups;
     }
 
     /// <summary>
@@ -180,13 +198,59 @@ public class DuplicateAssetAnalysisService
     {
         return new DuplicateKey(
             asset.MediaType,
-            asset.Title,
+            NormalizeTitle(asset.Title),
             asset.Year,
             asset.Season,
             asset.Episode,
-            asset.Author,
-            asset.MediaType is MediaType.Music or MediaType.Comic ? asset.Album : null,
+            NormalizeTitle(asset.Author),
+            asset.MediaType is MediaType.Music or MediaType.Comic ? NormalizeTitle(asset.Album) : string.Empty,
             asset.MediaType == MediaType.Comic ? asset.TrackNumber : null);
+    }
+
+    /// <summary>
+    /// The same title is written differently depending on where it came
+    /// from: Sonarr says "Night Shift: Origins", a file name says
+    /// "Night Shift - Origins".
+    /// Compares letters and numbers only, ignoring case, punctuation and
+    /// spacing, with "&amp;" read as "and".
+    /// </summary>
+    public static string NormalizeTitle(
+        string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return string.Empty;
+        }
+
+        var builder = new System.Text.StringBuilder(title.Length);
+        var pendingSpace = false;
+
+        foreach (var character in title.Replace("&", " and ", StringComparison.Ordinal))
+        {
+            // An apostrophe is part of the word: "Don't" and "Don’t" are
+            // both "dont", not "don t".
+            if (character is '\'' or '’' or '‘' or '`')
+            {
+                continue;
+            }
+
+            if (char.IsLetterOrDigit(character))
+            {
+                if (pendingSpace && builder.Length > 0)
+                {
+                    builder.Append(' ');
+                }
+
+                builder.Append(char.ToLowerInvariant(character));
+                pendingSpace = false;
+            }
+            else
+            {
+                pendingSpace = true;
+            }
+        }
+
+        return builder.ToString();
     }
 
     private readonly record struct DuplicateKey(
@@ -195,38 +259,7 @@ public class DuplicateAssetAnalysisService
         int? Year,
         int? Season,
         int? Episode,
-        string? Author,
-        string? Album,
+        string Author,
+        string Album,
         double? Issue);
-
-    private sealed class KeyComparer : IEqualityComparer<DuplicateKey>
-    {
-        public static readonly KeyComparer Instance = new();
-
-        public bool Equals(DuplicateKey x, DuplicateKey y)
-        {
-            return x.MediaType == y.MediaType &&
-                   x.Year == y.Year &&
-                   x.Season == y.Season &&
-                   x.Episode == y.Episode &&
-                   string.Equals(x.Title, y.Title, StringComparison.OrdinalIgnoreCase) &&
-                   string.Equals(x.Author ?? string.Empty, y.Author ?? string.Empty, StringComparison.OrdinalIgnoreCase) &&
-                   string.Equals(x.Album ?? string.Empty, y.Album ?? string.Empty, StringComparison.OrdinalIgnoreCase) &&
-                   x.Issue == y.Issue;
-        }
-
-        public int GetHashCode(DuplicateKey obj)
-        {
-            var hash = new HashCode();
-            hash.Add(obj.MediaType);
-            hash.Add(obj.Year);
-            hash.Add(obj.Season);
-            hash.Add(obj.Episode);
-            hash.Add(obj.Title, StringComparer.OrdinalIgnoreCase);
-            hash.Add(obj.Author ?? string.Empty, StringComparer.OrdinalIgnoreCase);
-            hash.Add(obj.Album ?? string.Empty, StringComparer.OrdinalIgnoreCase);
-            hash.Add(obj.Issue);
-            return hash.ToHashCode();
-        }
-    }
 }

@@ -130,6 +130,21 @@ else
                     </div>
                 }
 
+                @if (_dashboard.DuplicateTitleCount > 0)
+                {
+                    <div class="action-row">
+                        <div>
+                            <div class="action-row-title">
+                                @Count(_dashboard.DuplicateTitleCount, "title is", "titles are") in your libraries more than once
+                            </div>
+                            <div class="action-row-detail">
+                                Keeping one copy of each frees up to @_dashboard.DuplicateReclaimableFormatted.
+                            </div>
+                        </div>
+                        <a class="btn btn-secondary" href="duplicates">Review</a>
+                    </div>
+                }
+
                 @if (_dashboard.JunkFileCount > 0)
                 {
                     <div class="action-row">
@@ -242,6 +257,7 @@ else
         _dashboard is not null &&
         _dashboard.PromotionOpportunityCount == 0 &&
         _dashboard.PossibleDuplicateCopyCount == 0 &&
+        _dashboard.DuplicateTitleCount == 0 &&
         _dashboard.JunkFileCount == 0 &&
         _dashboard.PlaybackErrorCount == 0 &&
         ScanProblems.Count == 0 &&
@@ -315,6 +331,11 @@ else
             parts.Add($"{Count(drive.FullCopyCount, "full copy", "full copies")} ({SizeFormatter.FormatBytes(drive.FullCopyBytes)})");
         }
 
+        if (drive.DuplicateTitleCount > 0)
+        {
+            parts.Add(Count(drive.DuplicateTitleCount, "duplicate", "duplicates"));
+        }
+
         if (drive.LeftoverFileCount > 0)
         {
             parts.Add(Count(drive.LeftoverFileCount, "leftover", "leftovers"));
@@ -322,7 +343,7 @@ else
 
         if (drive.PlaybackErrorCount > 0)
         {
-            parts.Add($"{drive.PlaybackErrorCount:N0} playback problem(s)");
+            parts.Add(Count(drive.PlaybackErrorCount, "playback problem", "playback problems"));
         }
 
         return parts.Count == 0
