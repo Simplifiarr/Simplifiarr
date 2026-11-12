@@ -5,7 +5,7 @@
 @using Simplifiarr.Core.Services
 @using Simplifiarr.Core.Utilities
 
-@inject IQbittorrentScanner Qbittorrent
+@inject ITorrentClient Client
 @inject IProwlarrClient Prowlarr
 @inject IReleaseParser ReleaseParser
 @inject IMediaCatalogService Catalog
@@ -44,17 +44,17 @@
 
         <div class="cell-note mt-1">Pick a .torrent file from this computer.</div>
     }
-    else if (_source == "qbittorrent")
+    else if (_source == "client")
     {
         @if (_torrents is null)
         {
             <div class="alert alert-warning">
-                Couldn't reach qBittorrent. Check it in <a href="settings">Settings</a>, under Connections.
+                Couldn't reach @Client.Name. Check it in <a href="settings">Settings</a>, under Connections.
             </div>
         }
         else if (_torrents.Count == 0)
         {
-            <EmptyState Icon="share" Text="qBittorrent has no torrents with files on disk." />
+            <EmptyState Icon="share" Text="@($"{Client.Name} has no torrents with files on disk.")" />
         }
         else
         {
@@ -70,7 +70,7 @@
                 <button type="button"
                         class="btn btn-primary"
                         disabled="@(_isLoading || string.IsNullOrWhiteSpace(_selectedHash))"
-                        @onclick="LoadFromQbittorrentAsync">
+                        @onclick="LoadFromClientAsync">
                     @(_isLoading ? "Loading..." : "Load")
                 </button>
             </div>
@@ -293,16 +293,16 @@
                     <div class="mt-2">
                         <button type="button"
                                 class="btn btn-primary btn-sm"
-                                disabled="@_isAddingToQbittorrent"
-                                @onclick="AddToQbittorrentAsync">
-                            @(_isAddingToQbittorrent ? "Adding..." : "Add to qBittorrent (stopped)")
+                                disabled="@_isAddingToClient"
+                                @onclick="AddToClientAsync">
+                            @(_isAddingToClient ? "Adding..." : $"Add to {Client.Name} (stopped)")
                         </button>
                     </div>
                 }
                 else if (_results.Any(row => row.Result.Success) && !IsWholeTorrentRebuilt)
                 {
                     <div class="cell-note">
-                        Only part of the torrent was rebuilt, so it isn't offered to qBittorrent - it would try to download the rest.
+                        Only part of the torrent was rebuilt, so it isn't offered to @Client.Name - it would try to download the rest.
                     </div>
                 }
 
@@ -375,7 +375,7 @@
     private static readonly (string Key, string Label)[] Sources =
     [
         ("file", "A .torrent file"),
-        ("qbittorrent", "From qBittorrent"),
+        ("client", "From your torrent client"),
         ("search", "Search indexers")
     ];
 
@@ -385,7 +385,7 @@
 
     private string _source = "file";
 
-    // Null when qBittorrent couldn't be reached.
+    // Null when the client couldn't be reached.
     private List<TorrentRecord>? _torrents = [];
 
     private string _selectedHash = string.Empty;
@@ -422,7 +422,7 @@
     private List<ResultRow> _results = [];
     private string? _rebuiltRoot;
 
-    private bool _isAddingToQbittorrent;
+    private bool _isAddingToClient;
     private string? _addResult;
 
     private bool CanRebuild =>
@@ -432,7 +432,7 @@
             : _selected.Count > 0);
 
     /// <summary>
-    /// True when every file of the torrent was rebuilt, so qBittorrent
+    /// True when every file of the torrent was rebuilt, so the client
     /// would have nothing left to download.
     /// </summary>
     private bool IsWholeTorrentRebuilt =>
@@ -449,7 +449,7 @@
         _storagePath = settings.CrossSeedTorrentStoragePath;
 
         _torrents =
-            (await Qbittorrent.TryGetTorrentsAsync())?
+            (await Client.TryGetTorrentsAsync())?
                 .Where(torrent =>
                     File.Exists(torrent.ContentPath) ||
                     Directory.Exists(torrent.ContentPath))
@@ -477,7 +477,7 @@
             });
     }
 
-    private async Task LoadFromQbittorrentAsync()
+    private async Task LoadFromClientAsync()
     {
         var torrent =
             _torrents?.FirstOrDefault(candidate =>
@@ -489,8 +489,8 @@
         }
 
         await LoadAsync(
-            "qBittorrent",
-            () => Qbittorrent.GetTorrentExportBytesAsync(torrent.TorrentHash));
+            Client.Name,
+            () => Client.GetTorrentExportBytesAsync(torrent.TorrentHash));
     }
 
     private async Task LoadFromSearchAsync(ProwlarrSearchResult result)
@@ -777,32 +777,32 @@
         }
     }
 
-    private async Task AddToQbittorrentAsync()
+    private async Task AddToClientAsync()
     {
-        if (_isAddingToQbittorrent || _torrentBytes is null || _rebuiltRoot is null)
+        if (_isAddingToClient || _torrentBytes is null || _rebuiltRoot is null)
         {
             return;
         }
 
-        _isAddingToQbittorrent = true;
+        _isAddingToClient = true;
 
         try
         {
             var result =
-                await Qbittorrent.AddTorrentAsync(_torrentBytes, _rebuiltRoot);
+                await Client.AddTorrentAsync(_torrentBytes, _rebuiltRoot);
 
             _addResult =
                 result.Success
-                    ? "Added to qBittorrent, stopped. Start it there once it has checked."
-                    : "qBittorrent didn't take it. You can add the saved .torrent file by hand, pointing at the folder above.";
+                    ? $"Added to {Client.Name}, stopped. Start it there once it has checked."
+                    : $"{Client.Name} didn't take it. You can add the saved .torrent file by hand, pointing at the folder above.";
         }
         catch (Exception exception)
         {
-            _addResult = $"Couldn't add it to qBittorrent: {exception.Message}";
+            _addResult = $"Couldn't add it to {Client.Name}: {exception.Message}";
         }
         finally
         {
-            _isAddingToQbittorrent = false;
+            _isAddingToClient = false;
         }
     }
 }

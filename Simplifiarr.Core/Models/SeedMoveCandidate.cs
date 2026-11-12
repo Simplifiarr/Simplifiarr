@@ -16,7 +16,7 @@ public class SeedMoveCandidate
 
     public string Category { get; set; } = string.Empty;
 
-    /// <summary>Where qBittorrent keeps the torrent now.</summary>
+    /// <summary>Where the client keeps the torrent now.</summary>
     public string SavePath { get; set; } = string.Empty;
 
     /// <summary>The matching downloads folder on the library's drive.</summary>
@@ -37,21 +37,21 @@ public class SeedMoveCandidate
     public long LinkedBytes =>
         Files.Where(file => file.InLibrary).Sum(file => file.SizeBytes);
 
-    /// <summary>Files with no library copy, which qBittorrent copies across.</summary>
+    /// <summary>Files with no library copy, which the client copies across.</summary>
     public long CopiedBytes =>
         TotalBytes - LinkedBytes;
 }
 
 public class SeedMoveFile
 {
-    /// <summary>Path relative to the torrent's save folder, as qBittorrent lists it.</summary>
+    /// <summary>Path relative to the torrent's save folder, as the client lists it.</summary>
     public string RelativePath { get; set; } = string.Empty;
 
     public long SizeBytes { get; set; }
 
     /// <summary>
     /// Library files on the target drive of the same size. Which one is the
-    /// same file is settled when moving; qBittorrent's recheck then proves it.
+    /// same file is settled when moving; the client's recheck then proves it.
     /// </summary>
     public List<string> LibraryCandidates { get; set; } = [];
 

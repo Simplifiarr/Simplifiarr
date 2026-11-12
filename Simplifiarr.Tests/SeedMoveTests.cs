@@ -9,7 +9,7 @@ public class SeedMoveTests : TempFolderTest
 {
     private const string Hash = "0123456789abcdef0123456789abcdef01234567";
 
-    private FakeQbittorrent _qbittorrent = default!;
+    private FakeTorrentClient _qbittorrent = default!;
     private SeedMoveService _service = default!;
     private HardlinkService _hardlinks = default!;
 
@@ -45,7 +45,7 @@ public class SeedMoveTests : TempFolderTest
                     ]
                 });
 
-        _qbittorrent = new FakeQbittorrent();
+        _qbittorrent = new FakeTorrentClient();
         _hardlinks = new HardlinkService();
 
         _service =
@@ -92,6 +92,7 @@ public class SeedMoveTests : TempFolderTest
                 Name = "Night Shift S01",
                 SavePath = savePath,
                 State = "uploading",
+                Status = TorrentStatus.Seeding,
                 Progress = 1,
                 Category = "tv",
                 Tracker = "udp://tracker.example.org:1337/announce"
@@ -99,7 +100,7 @@ public class SeedMoveTests : TempFolderTest
 
         _qbittorrent.Files[Hash] =
             files
-                .Select(file => (new QbittorrentFile(file.RelativePath, Encoding.UTF8.GetByteCount(file.Content)), Encoding.UTF8.GetBytes(file.Content)))
+                .Select(file => (new TorrentContentFile(file.RelativePath, Encoding.UTF8.GetByteCount(file.Content)), Encoding.UTF8.GetBytes(file.Content)))
                 .ToList();
 
         return savePath;

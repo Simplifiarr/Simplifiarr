@@ -14,7 +14,7 @@ public enum DownloadMatchKind
 
 /// <summary>
 /// A file in a download folder that also exists, verified, in a library and
-/// is no longer part of any torrent in qBittorrent - so the download copy
+/// is no longer part of any torrent in the client - so the download copy
 /// can go.
 /// </summary>
 public class DownloadCleanupCandidate

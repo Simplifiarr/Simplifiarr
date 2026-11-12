@@ -33,7 +33,7 @@ The pages are grouped the same way they are in the app's menu.
 |---|---|
 | **Hardlinks** | Finished downloads that aren't in your library yet. Preview where each will go, then link it in. TV is grouped by show and season. |
 | **Potential Waste** | Library files that are full copies of a download. Converting swaps the copy for a hardlink; the old copy goes to Quarantine first. |
-| **Move Seeds** | Torrents seeding from one drive while Sonarr or Radarr copied them into a library on another. Moving the seed to the library's drive leaves one shared copy; qBittorrent checks every piece before the old copy goes to the Recycle Bin, and the torrent is left paused. |
+| **Move Seeds** | Torrents seeding from one drive while Sonarr or Radarr copied them into a library on another. Moving the seed to the library's drive leaves one shared copy; the torrent client checks every piece before the old copy goes to the Recycle Bin, and the torrent is left paused. |
 | **Cross-Seed** | Finds other torrents of files you already seed, so you can seed them on more trackers without downloading anything. Every piece is checked against your files before a match is offered. |
 | **Torrent Rebuilder** | Rebuilds one torrent from files already in your library, even renamed ones, so it can seed straight away. |
 | **Collections** | Group anything in your libraries, across drives, and send it to Jellyfin as a collection. Sending again only changes what changed. |
@@ -45,7 +45,7 @@ The pages are grouped the same way they are in the app's menu.
 |---|---|
 | **Duplicates** | The same title more than once in your libraries, usually two qualities of one film or episode. |
 | **Junk** | Sample clips, checksum and tracker files, and stray images left in your libraries. |
-| **Downloads** | Downloads your library already has, on any drive, that qBittorrent is no longer seeding. |
+| **Downloads** | Downloads your library already has, on any drive, that your torrent client is no longer seeding. |
 | **Playback Errors** | Files your media server may not be able to open: blocked by Windows, permissions it can't read, still packed in an archive, empty, unfinished, cloud-only or badly named. Blocks, permissions and archives can be fixed; fixes never change what is inside a file. |
 | **Size Reduction** | Smaller releases of films and episodes you already have, found on your indexers. Report only; nothing is downloaded. |
 
@@ -70,12 +70,12 @@ the browser.
 - A hardlink only counts as done once Simplifiarr has checked it really is the
   same file.
 - Cross-seeds and rebuilt torrents are only offered once every piece has been
-  checked, and they are added to qBittorrent **stopped**.
+  checked, and they are added to your torrent client **stopped**.
 - Anything that changes files asks you to confirm first.
 - Radarr and Sonarr are only read. In Jellyfin, Simplifiarr only changes the
   collections it made and the posters you choose.
-- The only change it makes to a torrent already in qBittorrent is **Move
-  Seeds**, one torrent at a time when you ask. If qBittorrent's check doesn't
+- The only change it makes to a torrent already in your torrent client is
+  **Move Seeds**, one torrent at a time when you ask. If the client's check doesn't
   pass, the torrent is pointed back at its old files, which were never touched.
 
 ## Requirements
@@ -97,7 +97,7 @@ Simplifiarr works on its own. Each of these adds more:
 
 | App | Adds |
 |---|---|
-| qBittorrent | What is still seeding; adding cross-seeds and rebuilt torrents; moving seeds |
+| Torrent client (qBittorrent; others are planned) | What is still seeding; adding cross-seeds and rebuilt torrents; moving seeds. Works with or without a Web UI login |
 | Radarr / Sonarr | Exact titles, years, genres and episode numbers; Hardlinks puts files in their folders, and names new folders with their folder formats |
 | Prowlarr | Searching your indexers for Cross-Seed, Torrent Rebuilder and Size Reduction |
 | Jellyfin | Collections and Posters |
@@ -189,7 +189,7 @@ dotnet test Simplifiarr.slnx
 
 | Project | Contents |
 |---|---|
-| `Simplifiarr.Core` | Scanning, matching, hardlinks, Quarantine, and the qBittorrent, Arr, Prowlarr and Jellyfin clients |
+| `Simplifiarr.Core` | Scanning, matching, hardlinks, Quarantine, and the torrent client (`ITorrentClient`), Arr, Prowlarr and Jellyfin clients |
 | `Simplifiarr.Web` | The Blazor Server app (.NET 10) |
 | `Simplifiarr.Tests` | MSTest tests. They work in temporary folders and talk to stand-in servers, never real ones. |
 

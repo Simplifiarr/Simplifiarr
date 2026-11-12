@@ -8,6 +8,7 @@
 
 @inject ICrossSeedScanService Scanner
 @inject ISettingsService SettingsService
+@inject ITorrentClient Client
 
 <PageTitle>Cross-Seed - Simplifiarr</PageTitle>
 
@@ -35,7 +36,7 @@
 @if (!_isSetUp)
 {
     <div class="alert alert-warning">
-        Cross-seeding needs both qBittorrent and Prowlarr.
+        Cross-seeding needs both a torrent client and Prowlarr.
         <a href="settings">Set them up in Settings</a>, under Connections.
     </div>
 }
@@ -84,7 +85,7 @@ else
                             OnConfirm="AddPendingAsync"
                             OnCancel="() => _pending = []">
             <Message>
-                <strong>Add @_pending.Count torrent(s) to qBittorrent?</strong>
+                <strong>Add @_pending.Count torrent(s) to @Client.Name?</strong>
                 Your files are hardlinked into <code>@_storagePath</code> under the names each torrent expects,
                 and the torrents are added stopped so you can check them before they start. No file is copied or moved.
             </Message>
@@ -224,7 +225,7 @@ else
 @if (_alreadyHave.Count > 0)
 {
     <details class="mt-3">
-        <summary>@_alreadyHave.Count result(s) left out - that torrent is already in qBittorrent</summary>
+        <summary>@_alreadyHave.Count result(s) left out - that torrent is already in @Client.Name</summary>
 
         <ul class="cell-note">
             @foreach (var title in _alreadyHave.Distinct().Take(50))
@@ -278,7 +279,7 @@ else
         _storagePath = settings.CrossSeedTorrentStoragePath;
 
         _isSetUp =
-            !string.IsNullOrWhiteSpace(settings.QbittorrentUrl) &&
+            !string.IsNullOrWhiteSpace(settings.TorrentClientUrl) &&
             !string.IsNullOrWhiteSpace(settings.ProwlarrUrl) &&
             !string.IsNullOrWhiteSpace(settings.ProwlarrApiKey);
 
@@ -328,7 +329,7 @@ else
                 .ThenBy(match => match.CandidateResult.Title, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-        _alreadyHave = Scanner.AlreadyInQbittorrent.ToList();
+        _alreadyHave = Scanner.AlreadyInClient.ToList();
     }
 
     private async Task AddPendingAsync()
@@ -355,7 +356,7 @@ else
                     });
 
             _addMessage =
-                $"Added {summary.AddedToQbittorrent} torrent(s) to qBittorrent, stopped. Start them there once they have checked.";
+                $"Added {summary.AddedToClient} torrent(s) to {Client.Name}, stopped. Start them there once they have checked.";
 
             if (summary.FailedToLink > 0)
             {
@@ -363,10 +364,10 @@ else
                     $" {summary.FailedToLink} couldn't be linked and were left in the list.";
             }
 
-            if (summary.FailedToAddToQbittorrent > 0)
+            if (summary.FailedToAddToClient > 0)
             {
                 _addMessage +=
-                    $" {summary.FailedToAddToQbittorrent} were linked into {_storagePath} but qBittorrent didn't take them - add their .torrent files from that folder by hand.";
+                    $" {summary.FailedToAddToClient} were linked into {_storagePath} but {Client.Name} didn't take them - add their .torrent files from that folder by hand.";
             }
         }
         catch (Exception exception)

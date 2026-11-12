@@ -17,13 +17,13 @@ public sealed record CrossSeedScanProgress(
 public sealed record CrossSeedAddSummary(
     int Linked,
     int FailedToLink,
-    int AddedToQbittorrent,
-    int FailedToAddToQbittorrent);
+    int AddedToClient,
+    int FailedToAddToClient);
 
 /// <summary>
-/// Cross-seeding: for everything already seeding in qBittorrent, looks on
+/// Cross-seeding: for everything already seeding in the client, looks on
 /// the indexers for other torrents of the very same files, proves each one
-/// byte-for-byte, and can then add it to qBittorrent pointing at hardlinks
+/// byte-for-byte, and can then add it to the client pointing at hardlinks
 /// of the files already on disk.
 ///
 /// One scan runs at a time for the whole app and keeps running if the page
@@ -49,9 +49,9 @@ public interface ICrossSeedScanService
 
     /// <summary>
     /// Indexer results left out because the same torrent is already in
-    /// qBittorrent.
+    /// the client.
     /// </summary>
-    IReadOnlyList<string> AlreadyInQbittorrent { get; }
+    IReadOnlyList<string> AlreadyInClient { get; }
 
     /// <summary>
     /// Raised (from the scan's own thread) whenever any of the above changes.
@@ -67,7 +67,7 @@ public interface ICrossSeedScanService
 
     /// <summary>
     /// Hardlinks each match's files into the cross-seed folder under the
-    /// names the new torrent expects, then adds the torrent to qBittorrent,
+    /// names the new torrent expects, then adds the torrent to the client,
     /// stopped. A match that was added leaves <see cref="Matches"/>.
     /// </summary>
     Task<CrossSeedAddSummary> AddAsync(

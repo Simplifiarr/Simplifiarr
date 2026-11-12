@@ -21,20 +21,20 @@ public class DownloadCleanupService
 
     private readonly ISettingsService _settingsService;
     private readonly IFileInventoryService _fileInventory;
-    private readonly IQbittorrentScanner _qbittorrentScanner;
+    private readonly ITorrentClient _client;
     private readonly IHardlinkService _hardlinkService;
     private readonly IHistoryService _historyService;
 
     public DownloadCleanupService(
         ISettingsService settingsService,
         IFileInventoryService fileInventory,
-        IQbittorrentScanner qbittorrentScanner,
+        ITorrentClient client,
         IHardlinkService hardlinkService,
         IHistoryService historyService)
     {
         _settingsService = settingsService;
         _fileInventory = fileInventory;
-        _qbittorrentScanner = qbittorrentScanner;
+        _client = client;
         _hardlinkService = hardlinkService;
         _historyService = historyService;
     }
@@ -87,7 +87,7 @@ public class DownloadCleanupService
                 profile.ComicLibraryPath);
 
         // A library copy on another drive counts too: the download can't be
-        // hardlinked to it, so once qBittorrent is done with the download it
+        // hardlinked to it, so once the client is done with the download it
         // is a whole second copy.
         var otherLibraryRoots =
             settings.DriveProfiles
@@ -113,17 +113,17 @@ public class DownloadCleanupService
             };
         }
 
-        // Without qBittorrent's torrent list every download would look
+        // Without the client's torrent list every download would look
         // inactive - so an unreachable client stops the scan outright.
         var torrents =
-            await _qbittorrentScanner.TryGetTorrentsAsync();
+            await _client.TryGetTorrentsAsync();
 
         if (torrents is null)
         {
             return new DownloadCleanupScanResult
             {
                 Error =
-                    "Couldn't reach qBittorrent (check its URL in Settings). Nothing was scanned: without its torrent list, every download would look inactive."
+                    $"Couldn't reach {_client.Name} (check its address in Settings). Nothing was scanned: without its torrent list, every download would look inactive."
             };
         }
 
@@ -212,7 +212,7 @@ public class DownloadCleanupService
 
                 if (active.Contains(file.FullPath))
                 {
-                    result.SkippedStillInQbittorrent++;
+                    result.SkippedStillInClient++;
                     continue;
                 }
 
@@ -260,12 +260,12 @@ public class DownloadCleanupService
             new DownloadCleanupRemoveResult();
 
         var torrents =
-            await _qbittorrentScanner.TryGetTorrentsAsync();
+            await _client.TryGetTorrentsAsync();
 
         if (torrents is null)
         {
             result.Error =
-                "Couldn't reach qBittorrent, so nothing was removed: Simplifiarr won't delete downloads without confirming qBittorrent no longer has them.";
+                $"Couldn't reach {_client.Name}, so nothing was removed: Simplifiarr won't delete downloads without confirming {_client.Name} no longer has them.";
 
             return result;
         }
@@ -308,7 +308,7 @@ public class DownloadCleanupService
                     Success = success,
                     Message =
                         success
-                            ? $"Download copy deleted - qBittorrent no longer has it and the library has {DescribeMatch(candidate.MatchKind)}."
+                            ? $"Download copy deleted - {_client.Name} no longer has it and the library has {DescribeMatch(candidate.MatchKind)}."
                             : $"Failed to delete the download copy: {deleteError}"
                 });
 
@@ -362,7 +362,7 @@ public class DownloadCleanupService
     {
         if (active.Contains(candidate.DownloadPath))
         {
-            return "qBittorrent has this file again.";
+            return $"{_client.Name} has this file again.";
         }
 
         var download = new FileInfo(candidate.DownloadPath);
@@ -465,8 +465,8 @@ public class DownloadCleanupService
             .ToList();
 
     /// <summary>
-    /// Every path a qBittorrent torrent occupies on disk. A file counts as
-    /// "still in qBittorrent" if it IS a torrent's content path or sits
+    /// Every path a torrent occupies on disk. A file counts as
+    /// "still in the client" if it IS a torrent's content path or sits
     /// inside one - whatever state that torrent is in (seeding, paused,
     /// errored, checking...). Removing any of those would break the torrent.
     /// </summary>

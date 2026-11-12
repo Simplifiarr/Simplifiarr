@@ -6,7 +6,7 @@ namespace Simplifiarr.Core.Services;
 /// <inheritdoc cref="ISeedMoveService"/>
 public class SeedMoveService : ISeedMoveService
 {
-    // Space left free on the target drive on top of whatever qBittorrent
+    // Space left free on the target drive on top of whatever the client
     // has to copy, so a move never fills a drive.
     private const long FreeSpaceMargin = 2L * 1024 * 1024 * 1024;
 
@@ -29,20 +29,20 @@ public class SeedMoveService : ISeedMoveService
 
     private readonly ISettingsService _settings;
     private readonly IFileInventoryService _inventory;
-    private readonly IQbittorrentScanner _qbittorrent;
+    private readonly ITorrentClient _client;
     private readonly IHardlinkService _hardlinks;
     private readonly IHistoryService _history;
 
     public SeedMoveService(
         ISettingsService settings,
         IFileInventoryService inventory,
-        IQbittorrentScanner qbittorrent,
+        ITorrentClient client,
         IHardlinkService hardlinks,
         IHistoryService history)
     {
         _settings = settings;
         _inventory = inventory;
-        _qbittorrent = qbittorrent;
+        _client = client;
         _hardlinks = hardlinks;
         _history = history;
     }
@@ -57,7 +57,7 @@ public class SeedMoveService : ISeedMoveService
     /// </summary>
     public long SmallestMatchedFileBytes { get; set; } = 10L * 1024 * 1024;
 
-    /// <summary>How often qBittorrent is asked whether it has finished. Tests shorten it.</summary>
+    /// <summary>How often the client is asked whether it has finished. Tests shorten it.</summary>
     public TimeSpan PollInterval { get; set; } = TimeSpan.FromSeconds(2);
 
     /// <summary>
@@ -92,11 +92,11 @@ public class SeedMoveService : ISeedMoveService
             return;
         }
 
-        var torrents = await _qbittorrent.TryGetTorrentsAsync();
+        var torrents = await _client.TryGetTorrentsAsync();
 
         if (torrents is null)
         {
-            // Can't tell without qBittorrent; keep what the last scan found.
+            // Can't tell without the client; keep what the last scan found.
             return;
         }
 
@@ -135,7 +135,7 @@ public class SeedMoveService : ISeedMoveService
                 break;
             }
 
-            var files = await _qbittorrent.GetTorrentFilesAsync(torrent.TorrentHash);
+            var files = await _client.GetTorrentFilesAsync(torrent.TorrentHash);
 
             if (files is null || files.Count == 0)
             {
@@ -288,12 +288,19 @@ public class SeedMoveService : ISeedMoveService
         SeedMoveCandidate candidate,
         CancellationToken cancellationToken)
     {
+        // Linking the library's files in first only works when the client
+        // keeps files already at the new location instead of replacing them.
+        if (!_client.Capabilities.CanRelocate || !_client.Capabilities.RelocateKeepsExistingFiles)
+        {
+            return new(false, $"Moving seeds isn't supported with {_client.Name} yet. Nothing was changed.");
+        }
+
         // 1. Everything the scan saw must still be true.
         var torrent = await FindTorrentAsync(candidate.TorrentHash);
 
         if (torrent is null)
         {
-            return new(false, "qBittorrent can't be reached, or no longer has this torrent. Nothing was changed.");
+            return new(false, $"{_client.Name} can't be reached, or no longer has this torrent. Nothing was changed.");
         }
 
         if (!SamePath(torrent.SavePath, candidate.SavePath))
@@ -301,12 +308,12 @@ public class SeedMoveService : ISeedMoveService
             return new(false, $"The torrent has moved since the scan (it is now in {torrent.SavePath}). Scan again. Nothing was changed.");
         }
 
-        if (torrent.Progress < 1 || IsBusy(torrent.State))
+        if (torrent.Progress < 1 || IsBusy(torrent.Status))
         {
-            return new(false, "The torrent isn't finished, or qBittorrent is busy with it. Try again later. Nothing was changed.");
+            return new(false, $"The torrent isn't finished, or {_client.Name} is busy with it. Try again later. Nothing was changed.");
         }
 
-        var files = await _qbittorrent.GetTorrentFilesAsync(candidate.TorrentHash);
+        var files = await _client.GetTorrentFilesAsync(candidate.TorrentHash);
 
         if (files is null ||
             files.Count != candidate.Files.Count ||
@@ -351,7 +358,7 @@ public class SeedMoveService : ISeedMoveService
             return new(false, "None of this torrent's files are in the library any more. Nothing was changed.");
         }
 
-        // 3. Room for whatever qBittorrent has to copy.
+        // 3. Room for whatever the client has to copy.
         var copied = candidate.TotalBytes - links.Sum(link => link.Size);
 
         if (copied > 0)
@@ -373,13 +380,13 @@ public class SeedMoveService : ISeedMoveService
         }
 
         // 4. Pause, link, move, recheck.
-        var wasStopped = IsStopped(torrent.State);
+        var wasStopped = torrent.Status == TorrentStatus.Stopped;
 
         Report(candidate, "Pausing the torrent");
 
-        if (await _qbittorrent.StopTorrentAsync(candidate.TorrentHash) is { } stopError)
+        if (await _client.StopTorrentAsync(candidate.TorrentHash) is { } stopError)
         {
-            return new(false, $"qBittorrent didn't pause the torrent: {stopError}. Nothing was changed.");
+            return new(false, $"{_client.Name} didn't pause the torrent: {stopError}. Nothing was changed.");
         }
 
         var created = new List<(string Library, string Link)>();
@@ -401,7 +408,7 @@ public class SeedMoveService : ISeedMoveService
 
                 if (!wasStopped)
                 {
-                    await _qbittorrent.StartTorrentAsync(candidate.TorrentHash);
+                    await _client.StartTorrentAsync(candidate.TorrentHash);
                 }
 
                 return new(false, $"Couldn't link {Path.GetFileName(link.Link)}: {made.ErrorMessage} Nothing else was changed.");
@@ -411,14 +418,14 @@ public class SeedMoveService : ISeedMoveService
         }
 
         Report(candidate, copied > 0
-            ? $"Moving the torrent; qBittorrent is copying {SizeFormatter.FormatBytes(copied)}"
+            ? $"Moving the torrent; {_client.Name} is copying {SizeFormatter.FormatBytes(copied)}"
             : "Moving the torrent");
 
         var moved =
-            await _qbittorrent.SetLocationAsync(candidate.TorrentHash, candidate.TargetSavePath) is null &&
+            await _client.SetLocationAsync(candidate.TorrentHash, candidate.TargetSavePath) is null &&
             await WaitAsync(
                 candidate.TorrentHash,
-                current => SamePath(current.SavePath, candidate.TargetSavePath) && !IsMoving(current.State),
+                current => SamePath(current.SavePath, candidate.TargetSavePath) && current.Status != TorrentStatus.Moving,
                 TimeFor(copied),
                 cancellationToken);
 
@@ -426,10 +433,10 @@ public class SeedMoveService : ISeedMoveService
 
         if (moved)
         {
-            Report(candidate, "qBittorrent is checking every piece");
+            Report(candidate, $"{_client.Name} is checking every piece");
 
             proven =
-                await _qbittorrent.RecheckTorrentAsync(candidate.TorrentHash) is null &&
+                await _client.RecheckTorrentAsync(candidate.TorrentHash) is null &&
                 await WaitForRecheckAsync(candidate.TorrentHash, TimeFor(candidate.TotalBytes), cancellationToken);
         }
 
@@ -468,11 +475,11 @@ public class SeedMoveService : ISeedMoveService
             await CountSharedAsync(links);
 
         var message =
-            $"Now seeding from {candidate.TargetSavePath}, sharing {shared} of {candidate.Files.Count} file(s) with the library. It is paused; start it in qBittorrent when you're ready.";
+            $"Now seeding from {candidate.TargetSavePath}, sharing {shared} of {candidate.Files.Count} file(s) with the library. It is paused; start it in {_client.Name} when you're ready.";
 
         if (copied > 0)
         {
-            message += $" qBittorrent copied {SizeFormatter.FormatBytes(copied)} that the library doesn't have.";
+            message += $" {_client.Name} copied {SizeFormatter.FormatBytes(copied)} that the library doesn't have.";
         }
 
         if (notRemoved > 0)
@@ -496,26 +503,26 @@ public class SeedMoveService : ISeedMoveService
         Report(candidate, "That didn't work; putting everything back");
 
         var note = moved
-            ? "qBittorrent's check didn't pass."
-            : "qBittorrent didn't finish moving the torrent.";
+            ? $"{_client.Name}'s check didn't pass."
+            : $"{_client.Name} didn't finish moving the torrent.";
 
         // The old files were never touched, so pointing the torrent back at
-        // them restores it. Anything qBittorrent moved comes back with it.
+        // them restores it. Anything the client moved comes back with it.
         var back =
-            await _qbittorrent.SetLocationAsync(candidate.TorrentHash, candidate.SavePath) is null &&
+            await _client.SetLocationAsync(candidate.TorrentHash, candidate.SavePath) is null &&
             await WaitAsync(
                 candidate.TorrentHash,
-                current => SamePath(current.SavePath, candidate.SavePath) && !IsMoving(current.State),
+                current => SamePath(current.SavePath, candidate.SavePath) && current.Status != TorrentStatus.Moving,
                 TimeFor(candidate.TotalBytes),
                 CancellationToken.None);
 
         if (!back)
         {
-            return new(false, $"{note} Simplifiarr couldn't move the torrent back to {candidate.SavePath}; in qBittorrent, set its location to that folder and recheck it. Nothing was deleted.");
+            return new(false, $"{note} Simplifiarr couldn't move the torrent back to {candidate.SavePath}; in {_client.Name}, set its location to that folder and recheck it. Nothing was deleted.");
         }
 
         await RemoveLinksAsync(created);
-        await _qbittorrent.RecheckTorrentAsync(candidate.TorrentHash);
+        await _client.RecheckTorrentAsync(candidate.TorrentHash);
 
         return new(false, $"{note} The torrent is back in {candidate.SavePath}, paused, and is being rechecked. Nothing was deleted.");
     }
@@ -628,7 +635,7 @@ public class SeedMoveService : ISeedMoveService
     {
         var deadline = DateTime.UtcNow + timeout;
 
-        // Give qBittorrent a moment to start before reading its state.
+        // Give the client a moment to start before reading its state.
         await Task.Delay(PollInterval, cancellationToken);
 
         while (DateTime.UtcNow < deadline)
@@ -647,7 +654,7 @@ public class SeedMoveService : ISeedMoveService
     }
 
     /// <summary>
-    /// True once qBittorrent has rechecked the torrent and found every
+    /// True once the client has rechecked the torrent and found every
     /// piece. Right after a move it can still show the old progress for a
     /// moment, and a small torrent can finish checking between two looks,
     /// so the answer has to be the same twice in a row.
@@ -667,11 +674,11 @@ public class SeedMoveService : ISeedMoveService
         {
             var current = await FindTorrentAsync(hash);
 
-            if (current is null || IsChecking(current.State))
+            if (current is null || current.Status == TorrentStatus.Checking)
             {
                 completeInARow = incompleteInARow = 0;
             }
-            else if (current.Progress >= 1 && !IsFaulted(current.State))
+            else if (current.Progress >= 1 && current.Status != TorrentStatus.Error)
             {
                 incompleteInARow = 0;
 
@@ -698,7 +705,7 @@ public class SeedMoveService : ISeedMoveService
 
     private async Task<TorrentRecord?> FindTorrentAsync(
         string hash) =>
-        (await _qbittorrent.TryGetTorrentsAsync())?
+        (await _client.TryGetTorrentsAsync())?
             .FirstOrDefault(torrent => string.Equals(torrent.TorrentHash, hash, StringComparison.OrdinalIgnoreCase));
 
     private void Report(
@@ -728,23 +735,8 @@ public class SeedMoveService : ISeedMoveService
         }
     }
 
-    // qBittorrent 4 says "paused", 5 says "stopped".
-    private static bool IsStopped(string state) =>
-        state.StartsWith("stopped", StringComparison.OrdinalIgnoreCase) ||
-        state.StartsWith("paused", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsMoving(string state) =>
-        state.Equals("moving", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsChecking(string state) =>
-        state.StartsWith("checking", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsFaulted(string state) =>
-        state.Equals("error", StringComparison.OrdinalIgnoreCase) ||
-        state.Equals("missingFiles", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsBusy(string state) =>
-        IsMoving(state) || IsChecking(state);
+    private static bool IsBusy(TorrentStatus status) =>
+        status is TorrentStatus.Moving or TorrentStatus.Checking or TorrentStatus.Preparing;
 
     private static bool SamePath(string? a, string? b) =>
         a is not null && b is not null &&

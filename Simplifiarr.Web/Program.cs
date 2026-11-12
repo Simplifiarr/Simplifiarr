@@ -22,7 +22,9 @@ builder.Services.Configure<HostOptions>(options =>
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-builder.Services.AddHttpClient<IQbittorrentScanner, QbittorrentScanner>();
+// The client keeps its own login cookie, so the handler mustn't.
+builder.Services.AddHttpClient<ITorrentClient, QbittorrentClient>()
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { UseCookies = false });
 
 builder.Services.AddHttpClient<IRadarrClient, RadarrClient>();
 builder.Services.AddHttpClient<ISonarrClient, SonarrClient>();

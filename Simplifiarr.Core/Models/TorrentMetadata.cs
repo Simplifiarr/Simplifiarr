@@ -34,7 +34,7 @@ public class TorrentMetadata
 
     /// <summary>
     /// BEP 3 info-hash (lowercase hex SHA1 of the raw "info" dict bytes) -
-    /// the same identifier qBittorrent reports as a torrent's hash. Two
+    /// the same identifier the client reports as a torrent's hash. Two
     /// torrents sharing this are the exact same content, regardless of
     /// which tracker each came from. Null if it couldn't be computed.
     /// </summary>

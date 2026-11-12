@@ -39,7 +39,7 @@
             </li>
             <li>
                 <strong>Connect your apps (optional).</strong>
-                qBittorrent, Radarr, Sonarr, Prowlarr and Jellyfin each unlock more. Simplifiarr
+                Your torrent client, Radarr, Sonarr, Prowlarr and Jellyfin each unlock more. Simplifiarr
                 works without any of them.
             </li>
             <li>
@@ -117,9 +117,9 @@
             <li>It never copies a file from one drive to another, and never deletes a file outright.</li>
             <li>Anything taken out of a library goes to <a href="quarantine">Quarantine</a> first. Restore puts it back; Delete sends it to the Windows Recycle Bin.</li>
             <li>A hardlink is only counted as done once Simplifiarr has checked it really is the same file.</li>
-            <li>Cross-seeds and rebuilt torrents are only offered once every piece has been checked against your files, and are added to qBittorrent stopped.</li>
+            <li>Cross-seeds and rebuilt torrents are only offered once every piece has been checked against your files, and are added to your torrent client stopped.</li>
             <li>Anything that changes files asks you to confirm first.</li>
-            <li>The only change Simplifiarr makes to a torrent already in qBittorrent is Move Seeds, one torrent at a time when you ask. It is undone if qBittorrent's check doesn't pass.</li>
+            <li>The only change Simplifiarr makes to a torrent already in your torrent client is Move Seeds, one torrent at a time when you ask. It is undone if the client's check doesn't pass.</li>
         </ul>
     </div>
 
@@ -151,7 +151,7 @@
 
             <dt>Connections</dt>
             <dd>
-                qBittorrent (what is still seeding), Radarr and Sonarr (exact titles, genres and episode
+                Your torrent client, qBittorrent for now (what is still seeding), Radarr and Sonarr (exact titles, genres and episode
                 numbers; Hardlinks uses their folders and folder formats), Prowlarr (searching your indexers), Jellyfin (Collections and Posters) and an
                 optional fanart.tv key (more posters). Each has a Test button.
             </dd>
@@ -196,7 +196,7 @@
         new("potential-waste", "arrow-repeat", "Potential Waste",
             "Library files that are full copies of a download. Converting swaps the copy for a hardlink; the old copy goes to Quarantine."),
         new("move-seeds", "truck", "Move Seeds",
-            "Torrents seeding from one drive while Sonarr or Radarr copied them into a library on another. Moving the seed to the library's drive leaves one shared copy. qBittorrent checks every piece before the old copy goes to the Recycle Bin, and the torrent is left paused."),
+            "Torrents seeding from one drive while Sonarr or Radarr copied them into a library on another. Moving the seed to the library's drive leaves one shared copy. The torrent client checks every piece before the old copy goes to the Recycle Bin, and the torrent is left paused."),
         new("cross-seed", "share", "Cross-Seed",
             "Finds other torrents of files you already seed, so you can seed them on more trackers without downloading anything."),
         new("torrent-rebuilder", "hammer", "Torrent Rebuilder",
@@ -214,7 +214,7 @@
         new("junk-cleanup", "trash3", "Junk",
             "Sample clips, checksum and tracker files, and stray images left in your libraries."),
         new("download-cleanup", "folder-x", "Downloads",
-            "Downloads your library already has, on any drive, that qBittorrent is no longer seeding. Each is checked byte for byte against the library copy."),
+            "Downloads your library already has, on any drive, that your torrent client is no longer seeding. Each is checked byte for byte against the library copy."),
         new("playback-errors", "exclamation-octagon", "Playback Errors",
             "Files your media server may not be able to open: blocked by Windows, permissions it can't read, still packed in an archive, empty, unfinished, or badly named. Several can be fixed in one click."),
         new("size-reduction", "file-earmark-zip", "Size Reduction",
@@ -242,7 +242,7 @@
         ("Why does a film show 'resolution not known'?",
          "Simplifiarr reads it with ffprobe. If ffprobe isn't installed or can't be found, set its location under Settings, Storage."),
         ("Does Simplifiarr change Radarr, Sonarr or Jellyfin?",
-         "It only reads Radarr and Sonarr. In Jellyfin it only changes collections it made and posters you choose. In qBittorrent it adds torrents stopped, and moves a seed only when you press Move."),
+         "It only reads Radarr and Sonarr. In Jellyfin it only changes collections it made and posters you choose. In your torrent client it adds torrents stopped, and moves a seed only when you press Move."),
         ("Where are the logs?",
          $"In {AppPaths.LogsDirectory}. They are the first place to look if something goes wrong.")
     ];

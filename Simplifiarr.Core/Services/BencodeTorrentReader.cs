@@ -125,7 +125,7 @@ public static class BencodeTorrentReader
     /// far enough to find "info"'s exact byte span, reusing the existing
     /// parse functions purely to advance offset correctly (their parsed
     /// return values are discarded here). This is the same identifier
-    /// torrent clients report (e.g. qBittorrent's TorrentHash) - two
+    /// torrent clients report (e.g. the client's TorrentHash) - two
     /// torrents sharing this hash are, by definition, the exact same
     /// content, regardless of which tracker each came from.
     /// </summary>

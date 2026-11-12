@@ -10,7 +10,7 @@ public class MoviePromotionCandidateService
     private readonly IFileInventoryService _fileInventory;
     private readonly IReleaseParser _releaseParser;
     private readonly IPromotionPlanService _promotionPlanService;
-    private readonly IQbittorrentScanner _torrentScanner;
+    private readonly ITorrentClient _torrentScanner;
     private readonly IMediaCatalogService _catalogService;
     private readonly IPromotionCandidateCacheService _candidateCache;
     private readonly IMediaCatalogPopulationService
@@ -26,7 +26,7 @@ public class MoviePromotionCandidateService
         IFileInventoryService fileInventory,
         IReleaseParser releaseParser,
         IPromotionPlanService promotionPlanService,
-        IQbittorrentScanner torrentScanner,
+        ITorrentClient torrentScanner,
         IMediaCatalogService catalogService,
         IPromotionCandidateCacheService candidateCache,
         IMediaCatalogPopulationService catalogPopulationService,

@@ -1,11 +1,40 @@
+using System.Text.Json.Serialization;
 using Simplifiarr.Core.Utilities;
 
 namespace Simplifiarr.Core.Models;
 
 public class SimplifiarrSettings
 {
-    public string QbittorrentUrl { get; set; } =
+    [JsonConverter(typeof(JsonStringEnumConverter<TorrentClientKind>))]
+    public TorrentClientKind TorrentClient { get; set; } =
+        TorrentClientKind.QBittorrent;
+
+    public string TorrentClientUrl { get; set; } =
         "http://localhost:8080";
+
+    /// <summary>Blank when the client doesn't ask for a login.</summary>
+    public string TorrentClientUsername { get; set; } =
+        string.Empty;
+
+    public string TorrentClientPassword { get; set; } =
+        string.Empty;
+
+    /// <summary>
+    /// The address's old name, from before other clients were planned.
+    /// Read from older settings files and carried over; never written.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? QbittorrentUrl
+    {
+        get => null;
+        set
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                TorrentClientUrl = value;
+            }
+        }
+    }
 
     public string RadarrUrl { get; set; } =
         "http://localhost:7878";

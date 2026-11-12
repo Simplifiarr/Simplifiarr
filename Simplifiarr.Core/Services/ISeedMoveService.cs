@@ -27,7 +27,7 @@ public interface ISeedMoveService
 
     /// <summary>
     /// Moves one torrent's seed onto its library's drive and leaves it
-    /// paused. Undoes what it did if qBittorrent's recheck doesn't pass.
+    /// paused. Undoes what it did if the client's recheck doesn't pass.
     /// </summary>
     Task<SeedMoveResult> MoveAsync(SeedMoveCandidate candidate, CancellationToken cancellationToken = default);
 }

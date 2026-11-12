@@ -1,6 +1,6 @@
 namespace Simplifiarr.Core.Models;
 
-public class QbittorrentAddResult
+public class TorrentAddResult
 {
     public bool Success { get; set; }
 

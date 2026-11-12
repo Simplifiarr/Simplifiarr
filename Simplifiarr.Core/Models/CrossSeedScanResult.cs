@@ -30,7 +30,7 @@ public class CrossSeedScanResult
         new();
 
     /// <summary>
-    /// Torrents already in qBittorrent whose data contains the matched
+    /// Torrents already in the client whose data contains the matched
     /// files - i.e. what you're seeding these exact bytes as right now. The
     /// candidate is a different torrent (different info-hash) of the same
     /// files, which is what makes it a real cross-seed.

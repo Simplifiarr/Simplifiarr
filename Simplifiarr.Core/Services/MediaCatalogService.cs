@@ -453,7 +453,7 @@ public class MediaCatalogService
 
         lock (_sync)
         {
-            // Every scan reports qBittorrent's whole list again; keep one
+            // Every scan reports the client's whole list again; keep one
             // record per torrent instead of letting the list grow for as
             // long as the app stays running.
             if (!string.IsNullOrWhiteSpace(torrent.TorrentHash))

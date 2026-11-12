@@ -6,13 +6,11 @@ namespace Simplifiarr.Core.Services;
 public class CrossSeedScanService : ICrossSeedScanService
 {
     // Torrents in these states don't have settled files to compare against.
-    private static readonly string[] UnsettledStates =
-        ["checking", "error", "missingfiles", "allocating", "moving", "unknown", "metadl"];
 
     // Per torrent, only the closest-sized releases are worth downloading.
     private const int CandidatesPerTorrent = 20;
 
-    private readonly IQbittorrentScanner _qbittorrent;
+    private readonly ITorrentClient _client;
     private readonly IProwlarrClient _prowlarr;
     private readonly IReleaseParser _releaseParser;
     private readonly IFileScannerService _fileScanner;
@@ -25,10 +23,10 @@ public class CrossSeedScanService : ICrossSeedScanService
     private CancellationTokenSource? _cancellation;
 
     private List<CrossSeedScanResult> _matches = [];
-    private List<string> _alreadyInQbittorrent = [];
+    private List<string> _alreadyInClient = [];
 
     public CrossSeedScanService(
-        IQbittorrentScanner qbittorrent,
+        ITorrentClient client,
         IProwlarrClient prowlarr,
         IReleaseParser releaseParser,
         IFileScannerService fileScanner,
@@ -36,7 +34,7 @@ public class CrossSeedScanService : ICrossSeedScanService
         IWholeTorrentCandidateService wholeTorrent,
         ISettingsService settings)
     {
-        _qbittorrent = qbittorrent;
+        _client = client;
         _prowlarr = prowlarr;
         _releaseParser = releaseParser;
         _fileScanner = fileScanner;
@@ -64,13 +62,13 @@ public class CrossSeedScanService : ICrossSeedScanService
         }
     }
 
-    public IReadOnlyList<string> AlreadyInQbittorrent
+    public IReadOnlyList<string> AlreadyInClient
     {
         get
         {
             lock (_sync)
             {
-                return _alreadyInQbittorrent.ToList();
+                return _alreadyInClient.ToList();
             }
         }
     }
@@ -95,7 +93,7 @@ public class CrossSeedScanService : ICrossSeedScanService
             token = _cancellation.Token;
 
             _matches = [];
-            _alreadyInQbittorrent = [];
+            _alreadyInClient = [];
         }
 
         LastMessage = null;
@@ -104,14 +102,21 @@ public class CrossSeedScanService : ICrossSeedScanService
 
         try
         {
+            if (!_client.Capabilities.CanExportTorrentFiles || !_client.Capabilities.CanAddTorrents)
+            {
+                Finish(false, $"Cross-seeding isn't supported with {_client.Name} yet.");
+
+                return;
+            }
+
             var allTorrents =
-                await _qbittorrent.TryGetTorrentsAsync();
+                await _client.TryGetTorrentsAsync();
 
             if (allTorrents is null)
             {
                 Finish(
                     false,
-                    "Couldn't reach qBittorrent. Check its address and sign-in in Settings, under Connections.");
+                    $"Couldn't reach {_client.Name}. Check its address and sign-in in Settings, under Connections.");
 
                 return;
             }
@@ -129,7 +134,7 @@ public class CrossSeedScanService : ICrossSeedScanService
                 await ScanTorrentsAsync(allTorrents, token);
 
             var found = Matches.Count;
-            var skipped = AlreadyInQbittorrent.Count;
+            var skipped = AlreadyInClient.Count;
 
             var message =
                 token.IsCancellationRequested
@@ -139,7 +144,7 @@ public class CrossSeedScanService : ICrossSeedScanService
             if (skipped > 0)
             {
                 message +=
-                    $" {skipped} result(s) were left out because that torrent is already in qBittorrent.";
+                    $" {skipped} result(s) were left out because that torrent is already in {_client.Name}.";
             }
 
             Finish(!token.IsCancellationRequested, message);
@@ -197,10 +202,10 @@ public class CrossSeedScanService : ICrossSeedScanService
                 _matches.Remove(match);
             }
 
-            onProgress?.Invoke($"Adding {match.CandidateResult.Title} to qBittorrent...");
+            onProgress?.Invoke($"Adding {match.CandidateResult.Title} to {_client.Name}...");
 
             var addResult =
-                await _qbittorrent.AddTorrentAsync(
+                await _client.AddTorrentAsync(
                     match.CandidateTorrentBytes,
                     result.OutputRoot ?? settings.CrossSeedTorrentStoragePath);
 
@@ -242,7 +247,7 @@ public class CrossSeedScanService : ICrossSeedScanService
         var catalogAssets =
             _catalog.GetAssets();
 
-        // Every torrent in qBittorrent, whatever its state. A release with
+        // Every torrent in the client, whatever its state. A release with
         // one of these hashes is a torrent you already have (including one
         // just cross-seeded that is still checking), not a new one.
         var knownHashes =
@@ -354,7 +359,7 @@ public class CrossSeedScanService : ICrossSeedScanService
         {
             lock (_sync)
             {
-                _alreadyInQbittorrent.Add($"{release.Title} ({release.Indexer})");
+                _alreadyInClient.Add($"{release.Title} ({release.Indexer})");
             }
 
             return;
@@ -438,14 +443,11 @@ public class CrossSeedScanService : ICrossSeedScanService
     private static bool IsSettled(
         TorrentRecord torrent)
     {
-        var state =
-            torrent.State.ToLowerInvariant();
-
-        return !UnsettledStates.Any(state.Contains);
+        return torrent.Status is not (TorrentStatus.Checking or TorrentStatus.Error or TorrentStatus.Preparing or TorrentStatus.Moving or TorrentStatus.Unknown);
     }
 
     /// <summary>
-    /// The torrents in qBittorrent whose data holds any of the matched
+    /// The torrents in the client whose data holds any of the matched
     /// files - what these bytes are being seeded as today.
     /// </summary>
     private static List<TorrentRecord> FindSeedingTorrents(

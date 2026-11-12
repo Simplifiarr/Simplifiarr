@@ -3,7 +3,7 @@ namespace Simplifiarr.Core.Models;
 public class DownloadCleanupScanResult
 {
     /// <summary>
-    /// Set when the scan could not run safely (for example qBittorrent was
+    /// Set when the scan could not run safely (for example the client was
     /// unreachable) - nothing was scanned and the previous results are kept.
     /// </summary>
     public string? Error { get; set; }
@@ -17,7 +17,7 @@ public class DownloadCleanupScanResult
 
     /// <summary>
     /// Download files that have a same-size library file but were left
-    /// alone because qBittorrent still has them.
+    /// alone because the client still has them.
     /// </summary>
-    public int SkippedStillInQbittorrent { get; set; }
+    public int SkippedStillInClient { get; set; }
 }

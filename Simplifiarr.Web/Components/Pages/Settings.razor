@@ -10,6 +10,7 @@
 @inject ISettingsService SettingsService
 @inject IJellyfinClient JellyfinClient
 @inject IArrEnrichmentService ArrEnrichmentService
+@inject ITorrentClient TorrentClient
 
 <PageTitle>Settings - Simplifiarr</PageTitle>
 
@@ -161,7 +162,7 @@ else
                             <div class="col-md-6">
                                 <PathInput Label="Downloads folder"
                                            Placeholder="D:\Torrents"
-                                           Help="Where qBittorrent saves finished movies, TV and books"
+                                           Help="Where your torrent client saves finished movies, TV and books"
                                            @bind-Value="profile.DownloadPath" />
                             </div>
 
@@ -308,16 +309,58 @@ else
     else if (_tab == ConnectionsTab)
     {
         <p class="text-muted" style="max-width: 70ch">
-            Only qBittorrent is needed. The rest are optional and each adds one thing.
+            Only the torrent client is needed. The rest are optional and each adds one thing.
             Test connection tries what is typed in right now, saved or not.
         </p>
 
-        <ConnectionFields Name="qBittorrent"
-                          Purpose="Knows which downloads are still seeding"
-                          HasApiKey="false"
-                          UrlPlaceholder="http://localhost:8080"
-                          @bind-Url="_settings.QbittorrentUrl"
-                          Test="TestQbittorrentAsync" />
+        <div class="group-card">
+            <div class="group-card-header">
+                <div class="group-card-title">Torrent client</div>
+                <div class="group-card-meta" style="white-space: normal">Knows which downloads are still seeding, and adds and moves torrents when you ask</div>
+            </div>
+
+            <div style="padding: 0 1.1rem 1.1rem">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label" for="client-kind">Client</label>
+                        <select id="client-kind" class="form-select" @bind="_settings.TorrentClient">
+                            <option value="@TorrentClientKind.QBittorrent">qBittorrent</option>
+                        </select>
+                    </div>
+
+                    <div class="col-md-8">
+                        <label class="form-label" for="client-url">Web UI address</label>
+                        <input id="client-url" class="form-control" placeholder="http://localhost:8080" @bind="_settings.TorrentClientUrl" @bind:event="oninput" />
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label" for="client-user">Username</label>
+                        <input id="client-user" class="form-control" autocomplete="off" @bind="_settings.TorrentClientUsername" @bind:event="oninput" />
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label" for="client-password">Password</label>
+                        <input id="client-password" class="form-control" type="password" autocomplete="off" @bind="_settings.TorrentClientPassword" @bind:event="oninput" />
+                    </div>
+                </div>
+
+                <div class="cell-note mt-2">
+                    Leave the username blank if the client lets this computer in without one
+                    (in qBittorrent: "Bypass authentication for clients on localhost").
+                </div>
+
+                <div class="cell-actions mt-3" style="flex-wrap: wrap; align-items: center">
+                    <button type="button" class="btn btn-secondary btn-sm" disabled="@_isTestingClient" @onclick="TestTorrentClientAsync">
+                        @(_isTestingClient ? "Testing..." : "Test connection")
+                    </button>
+
+                    @if (_clientTestResult is not null)
+                    {
+                        <span class="@(_clientTestOk ? "status-ok" : "status-warn")" style="white-space: normal">@_clientTestResult</span>
+                    }
+                </div>
+            </div>
+        </div>
 
         <ConnectionFields Name="Radarr"
                           Purpose="Optional. Adds genres and exact titles to your movies"
@@ -770,14 +813,36 @@ else
             .Where(path => !string.IsNullOrWhiteSpace(path));
     }
 
-    private async Task<string?> TestQbittorrentAsync()
+    private bool _isTestingClient;
+    private bool _clientTestOk;
+    private string? _clientTestResult;
+
+    // Uses what is typed in now, saved or not, including the login.
+    private async Task TestTorrentClientAsync()
     {
-        if (!Uri.TryCreate(_settings!.QbittorrentUrl, UriKind.Absolute, out var baseUri))
+        if (_isTestingClient || _settings is null)
         {
-            return "That isn't a valid address. It should look like http://localhost:8080";
+            return;
         }
 
-        return await TryGetAsync(new Uri(baseUri, "/api/v2/torrents/info"), apiKey: null);
+        _isTestingClient = true;
+        _clientTestResult = null;
+
+        try
+        {
+            var problem =
+                await TorrentClient.TestConnectionAsync(
+                    _settings.TorrentClientUrl,
+                    _settings.TorrentClientUsername,
+                    _settings.TorrentClientPassword);
+
+            _clientTestOk = problem is null;
+            _clientTestResult = problem ?? $"Connected to {TorrentClient.Name}";
+        }
+        finally
+        {
+            _isTestingClient = false;
+        }
     }
 
     private static Task<string?> TestArrAsync(
@@ -825,7 +890,7 @@ else
             }
 
             return (int)response.StatusCode is 401 or 403
-                ? "It answered, but refused the request. Check the API key (or qBittorrent's login settings)."
+                ? "It answered, but refused the request. Check the API key."
                 : $"It answered with an error: {(int)response.StatusCode} {response.ReasonPhrase}.";
         }
         catch (TaskCanceledException)

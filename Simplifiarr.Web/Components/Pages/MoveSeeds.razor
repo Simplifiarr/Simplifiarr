@@ -8,6 +8,7 @@
 
 @inject ISettingsService SettingsService
 @inject ISeedMoveService Seeds
+@inject ITorrentClient Client
 @inject IScanCoordinator Scans
 
 <PageTitle>Move Seeds - Simplifiarr</PageTitle>
@@ -21,18 +22,18 @@
     <div class="mt-2 text-muted">
         <p class="mb-2">
             Simplifiarr pauses the torrent, links each library file into the downloads folder
-            on the library's drive (instant, and it takes no space), and tells qBittorrent to
-            seed from there. qBittorrent then checks every piece of the torrent. Only if every
+            on the library's drive (instant, and it takes no space), and tells @Client.Name to
+            seed from there. @Client.Name then checks every piece of the torrent. Only if every
             piece passes is the old copy sent to the Recycle Bin. If the check doesn't pass,
             the torrent is pointed back at its old files, which were never touched.
         </p>
         <p class="mb-2">
             Files the library doesn't have, such as samples or episodes Sonarr skipped, are
-            copied across by qBittorrent itself.
+            copied across by @Client.Name itself.
         </p>
         <p class="mb-0">
-            The torrent is left paused afterwards; start it in qBittorrent when you're ready.
-            This list is updated by Scan, which only compares sizes. qBittorrent's check is
+            The torrent is left paused afterwards; start it in @Client.Name when you're ready.
+            This list is updated by Scan, which only compares sizes. @(Client.Name)'s check is
             what proves a match.
         </p>
     </div>
@@ -87,7 +88,7 @@ else
     {
         <div class="panel mb-3 help-panel">
             <strong>Why this happens.</strong>
-            qBittorrent saved these on a different drive from where Sonarr or Radarr keeps them,
+            @Client.Name saved these on a different drive from where Sonarr or Radarr keeps them,
             so the files had to be copied. To stop it, give each category a save folder on the
             drive its library is on:
             <ul class="mb-0 mt-2">
@@ -144,7 +145,7 @@ else
                                             @file.RelativePath
                                             <span class="cell-note">
                                                 · @SizeFormatter.FormatBytes(file.SizeBytes) ·
-                                                @(file.InLibrary ? "in the library" : "copied by qBittorrent")
+                                                @(file.InLibrary ? "in the library" : $"copied by {Client.Name}")
                                             </span>
                                         </li>
                                     }
@@ -181,7 +182,7 @@ else
                                         Cancel
                                     </button>
                                 </div>
-                                <div class="cell-note mt-1">Pauses it in qBittorrent and leaves it paused.</div>
+                                <div class="cell-note mt-1">Pauses it in @Client.Name and leaves it paused.</div>
                             }
                             else
                             {

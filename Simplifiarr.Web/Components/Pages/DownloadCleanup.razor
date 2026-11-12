@@ -7,11 +7,12 @@
 
 @inject ISettingsService SettingsService
 @inject IDownloadCleanupService DownloadCleanupService
+@inject ITorrentClient Client
 
 <PageTitle>Downloads - Simplifiarr</PageTitle>
 
 <PageHeader Title="Downloads"
-            Subtitle="Download files that your library already has and that qBittorrent is no longer using - so the download copy is just taking up room.">
+            Subtitle="Download files that your library already has and that your torrent client is no longer using - so the download copy is just taking up room.">
     <button type="button"
             class="btn btn-primary"
             disabled="@(IsBusy || _profiles.Count == 0)"
@@ -29,7 +30,7 @@
             A download is only listed when the library has the same file (a
             hardlink) or a copy whose every byte matches - checked by reading
             both, not guessed from the name or size - <em>and</em> it isn't
-            part of any torrent in qBittorrent, in any state. If qBittorrent
+            part of any torrent in @Client.Name, in any state. If @Client.Name
             can't be reached, nothing is checked and nothing can be deleted.
         </p>
         <p class="mb-2">
@@ -40,7 +41,7 @@
             Deleting here is permanent - these files do not go to Quarantine,
             because Quarantine lives on one drive and moving a hardlink there
             from another drive would turn it into a full copy. Each file is
-            checked again against qBittorrent and its library copy right
+            checked again against @Client.Name and its library copy right
             before it is deleted. Deleting a hardlinked download only removes
             that extra name and frees no space; deleting an identical copy
             frees its space.
@@ -308,7 +309,7 @@ else
 
                 if (result.Error is not null)
                 {
-                    // Almost always "qBittorrent can't be reached" - which
+                    // Almost always "the client can't be reached" - which
                     // is the same answer for every drive, so stop here.
                     _errorMessage = result.Error;
 
@@ -317,7 +318,7 @@ else
 
                 found += result.Candidates.Count;
                 filesChecked += result.DownloadFilesChecked;
-                stillInUse += result.SkippedStillInQbittorrent;
+                stillInUse += result.SkippedStillInClient;
             }
 
             _selection.Clear();
@@ -332,7 +333,7 @@ else
                 if (stillInUse > 0)
                 {
                     _statusMessage +=
-                        $" {stillInUse:N0} more are in your library too, but qBittorrent still has them, so they were left alone.";
+                        $" {stillInUse:N0} more are in your library too, but {Client.Name} still has them, so they were left alone.";
                 }
             }
         }

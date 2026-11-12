@@ -4,7 +4,7 @@ namespace Simplifiarr.Core.Services;
 
 /// <summary>
 /// Finds download-folder files that are also in a library (as the very same
-/// file or a byte-identical copy) and that qBittorrent no longer has - so
+/// file or a byte-identical copy) and that the client no longer has - so
 /// the leftover download copy can be removed.
 /// </summary>
 public interface IDownloadCleanupService
@@ -22,7 +22,7 @@ public interface IDownloadCleanupService
     /// <summary>
     /// Deletes each candidate's download copy directly (no Quarantine - a
     /// cross-drive move would turn a hardlink into a full copy), re-checking
-    /// everything first (qBittorrent, the files themselves, the library
+    /// everything first (the client, the files themselves, the library
     /// copy) - a candidate that no longer passes is skipped, never removed.
     /// </summary>
     Task<DownloadCleanupRemoveResult> RemoveAsync(

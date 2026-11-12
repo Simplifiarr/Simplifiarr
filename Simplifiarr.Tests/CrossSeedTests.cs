@@ -52,8 +52,20 @@ internal static class TestTorrent
     }
 }
 
-internal sealed class FakeQbittorrent : IQbittorrentScanner
+/// <summary>
+/// A stand-in torrent client, behaving the way qBittorrent 5 does. Any new
+/// client must do what this does.
+/// </summary>
+internal sealed class FakeTorrentClient : ITorrentClient
 {
+    public string Name => "Test client";
+
+    public TorrentClientCapabilities Capabilities { get; set; } =
+        new() { CanExportTorrentFiles = true, CanAddTorrents = true, CanRelocate = true, RelocateKeepsExistingFiles = true, HasCategories = true };
+
+    public Task<string?> TestConnectionAsync(string url, string username, string password) =>
+        Task.FromResult<string?>(IsReachable ? null : "Not reachable.");
+
     public List<TorrentRecord> Torrents { get; } = [];
 
     public bool IsReachable { get; set; } = true;
@@ -70,29 +82,29 @@ internal sealed class FakeQbittorrent : IQbittorrentScanner
     public Task<byte[]?> GetTorrentExportBytesAsync(string torrentHash) =>
         Task.FromResult<byte[]?>(null);
 
-    public Task<QbittorrentAddResult> AddTorrentAsync(byte[] torrentBytes, string savePath)
+    public Task<TorrentAddResult> AddTorrentAsync(byte[] torrentBytes, string savePath)
     {
         AddedTo.Add(savePath);
 
-        return Task.FromResult(new QbittorrentAddResult { Success = true });
+        return Task.FromResult(new TorrentAddResult { Success = true });
     }
 
     // ---- Changing torrents, behaving the way qBittorrent 5 does.
 
     /// <summary>Each torrent's files, and the bytes a recheck expects.</summary>
-    public Dictionary<string, List<(QbittorrentFile File, byte[] Content)>> Files { get; } = [];
+    public Dictionary<string, List<(TorrentContentFile File, byte[] Content)>> Files { get; } = [];
 
     /// <summary>Every change asked for, in order, e.g. "stop", "setLocation X".</summary>
     public List<string> Calls { get; } = [];
 
-    public Task<List<QbittorrentFile>?> GetTorrentFilesAsync(string torrentHash) =>
-        Task.FromResult<List<QbittorrentFile>?>(
+    public Task<List<TorrentContentFile>?> GetTorrentFilesAsync(string torrentHash) =>
+        Task.FromResult<List<TorrentContentFile>?>(
             Files.TryGetValue(torrentHash, out var files) ? files.Select(file => file.File).ToList() : []);
 
     public Task<string?> StopTorrentAsync(string torrentHash)
     {
         Calls.Add("stop");
-        Torrent(torrentHash).State = "stoppedUP";
+        Set(Torrent(torrentHash), "stoppedUP");
 
         return Task.FromResult<string?>(null);
     }
@@ -100,7 +112,7 @@ internal sealed class FakeQbittorrent : IQbittorrentScanner
     public Task<string?> StartTorrentAsync(string torrentHash)
     {
         Calls.Add("start");
-        Torrent(torrentHash).State = "uploading";
+        Set(Torrent(torrentHash), "uploading");
 
         return Task.FromResult<string?>(null);
     }
@@ -128,7 +140,7 @@ internal sealed class FakeQbittorrent : IQbittorrentScanner
 
         torrent.SavePath = location;
         torrent.Progress = 0;
-        torrent.State = "stoppedDL";
+        Set(torrent, "stoppedDL");
 
         return Task.FromResult<string?>(null);
     }
@@ -148,13 +160,19 @@ internal sealed class FakeQbittorrent : IQbittorrentScanner
             });
 
         torrent.Progress = complete ? 1 : 0;
-        torrent.State = complete ? "stoppedUP" : "stoppedDL";
+        Set(torrent, complete ? "stoppedUP" : "stoppedDL");
 
         return Task.FromResult<string?>(null);
     }
 
     private TorrentRecord Torrent(string hash) =>
         Torrents.Single(torrent => torrent.TorrentHash == hash);
+
+    private static void Set(TorrentRecord torrent, string state)
+    {
+        torrent.State = state;
+        torrent.Status = QbittorrentClient.MapState(state);
+    }
 }
 
 [TestClass]
@@ -163,7 +181,7 @@ public class CrossSeedTests : TempFolderTest
     private const string FirstTracker = "https://tracker.first.test/announce";
     private const string SecondTracker = "https://announce.second.test/announce";
 
-    private FakeQbittorrent _qbittorrent = default!;
+    private FakeTorrentClient _qbittorrent = default!;
     private FakeProwlarr _prowlarr = default!;
     private MediaCatalogService _catalog = default!;
     private TorrentReconstructionService _reconstruction = default!;
@@ -173,7 +191,7 @@ public class CrossSeedTests : TempFolderTest
     [TestInitialize]
     public void Build()
     {
-        _qbittorrent = new FakeQbittorrent();
+        _qbittorrent = new FakeTorrentClient();
         _prowlarr = new FakeProwlarr();
         _catalog = new MediaCatalogService();
 
@@ -219,6 +237,7 @@ public class CrossSeedTests : TempFolderTest
                 Name = fileName,
                 ContentPath = path,
                 State = "uploading",
+                Status = TorrentStatus.Seeding,
                 SizeBytes = content.Length,
                 Tracker = tracker
             };
@@ -292,7 +311,7 @@ public class CrossSeedTests : TempFolderTest
         await _crossSeed.ScanAsync();
 
         Assert.IsEmpty(_crossSeed.Matches);
-        Assert.HasCount(1, _crossSeed.AlreadyInQbittorrent);
+        Assert.HasCount(1, _crossSeed.AlreadyInClient);
     }
 
     [TestMethod]

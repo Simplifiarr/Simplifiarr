@@ -6,7 +6,7 @@ namespace Simplifiarr.Tests;
 [TestClass]
 public class DownloadCleanupTests : TempFolderTest
 {
-    private FakeQbittorrent _qbittorrent = default!;
+    private FakeTorrentClient _qbittorrent = default!;
     private DownloadCleanupService _service = default!;
 
     // Two "drives", each with its own downloads and library folders.
@@ -37,7 +37,7 @@ public class DownloadCleanupTests : TempFolderTest
                     ]
                 });
 
-        _qbittorrent = new FakeQbittorrent();
+        _qbittorrent = new FakeTorrentClient();
 
         _service =
             new DownloadCleanupService(

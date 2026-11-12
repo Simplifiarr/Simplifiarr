@@ -2,7 +2,7 @@ namespace Simplifiarr.Core.Models;
 
 public class DownloadCleanupRemoveResult
 {
-    /// <summary>Set when nothing could be removed safely (for example qBittorrent was unreachable).</summary>
+    /// <summary>Set when nothing could be removed safely (for example the client was unreachable).</summary>
     public string? Error { get; set; }
 
     public int Removed { get; set; }
