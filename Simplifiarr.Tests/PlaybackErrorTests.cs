@@ -386,4 +386,32 @@ public class PlaybackErrorTests : TempFolderTest
 
         Assert.IsTrue(FilePermissions.MatchesFolder(file, folder));
     }
+
+    [TestMethod]
+    public void Creator_owner_on_the_folder_matches_the_files_owner()
+    {
+        // A drive root's usual permissions. Windows hands "Creator Owner"
+        // down as whoever owns the file, here an ordinary user.
+        const string user = "S-1-5-21-1000000000-2000000000-3000000000-1001";
+
+        var folder = new DirectorySecurity();
+
+        folder.SetSecurityDescriptorSddlForm(
+            "O:BAG:SYD:AI(A;OICIID;FA;;;WD)(A;ID;FA;;;BA)(A;OICIIOID;FA;;;CO)(A;OICIID;FA;;;SY)(A;OICIIOID;FA;;;BA)(A;OICIID;0x1201bf;;;BU)");
+
+        var file = new FileSecurity();
+
+        file.SetSecurityDescriptorSddlForm(
+            $"O:{user}G:{user}D:AI(A;ID;FA;;;WD)(A;ID;FA;;;{user})(A;ID;FA;;;SY)(A;ID;FA;;;BA)(A;ID;0x1201bf;;;BU)");
+
+        Assert.IsTrue(FilePermissions.MatchesFolder(file, folder), "The owner's entry came from Creator Owner.");
+
+        // The same file owned by someone else has an entry the folder didn't give it.
+        var moved = new FileSecurity();
+
+        moved.SetSecurityDescriptorSddlForm(
+            $"O:BAG:SYD:AI(A;ID;FA;;;WD)(A;ID;FA;;;{user})(A;ID;FA;;;SY)(A;ID;FA;;;BA)(A;ID;0x1201bf;;;BU)");
+
+        Assert.IsFalse(FilePermissions.MatchesFolder(moved, folder));
+    }
 }

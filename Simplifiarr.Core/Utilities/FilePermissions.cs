@@ -133,14 +133,37 @@ public static class FilePermissions
             have.Add(Key(rule));
         }
 
+        // "Creator Owner" and "Creator Group" are placeholders: Windows hands
+        // them down as whoever owns the file, so compare them that way.
+        var owner = file.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+        var group = file.GetGroup(typeof(SecurityIdentifier)) as SecurityIdentifier;
+
         var want = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (FileSystemAccessRule rule in folder.GetAccessRules(true, true, typeof(SecurityIdentifier)))
         {
-            if ((rule.InheritanceFlags & InheritanceFlags.ObjectInherit) != 0)
+            if ((rule.InheritanceFlags & InheritanceFlags.ObjectInherit) == 0)
             {
-                want.Add(Key(rule));
+                continue;
             }
+
+            var identity = rule.IdentityReference as SecurityIdentifier;
+
+            if (identity is not null && identity.IsWellKnown(WellKnownSidType.CreatorOwnerSid))
+            {
+                identity = owner;
+            }
+            else if (identity is not null && identity.IsWellKnown(WellKnownSidType.CreatorGroupSid))
+            {
+                identity = group;
+            }
+
+            if (identity is null)
+            {
+                continue;
+            }
+
+            want.Add(Key(identity, rule));
         }
 
         return have.SetEquals(want);
@@ -206,7 +229,10 @@ public static class FilePermissions
     }
 
     private static string Key(FileSystemAccessRule rule) =>
-        $"{rule.IdentityReference.Value}|{rule.AccessControlType}|{Expand((int)rule.FileSystemRights) & ~Synchronize}";
+        Key(rule.IdentityReference, rule);
+
+    private static string Key(IdentityReference identity, FileSystemAccessRule rule) =>
+        $"{identity.Value}|{rule.AccessControlType}|{Expand((int)rule.FileSystemRights) & ~Synchronize}";
 
     private static int Expand(int rights)
     {
