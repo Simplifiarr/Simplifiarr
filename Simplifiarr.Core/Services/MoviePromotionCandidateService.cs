@@ -19,6 +19,7 @@ public class MoviePromotionCandidateService
         _torrentCatalogPopulationService;
     private readonly IIgnoredItemsService _ignoredItemsService;
     private readonly IHistoryService _historyService;
+    private readonly IArrNamingService _arrNaming;
 
     public MoviePromotionCandidateService(
         ISettingsService settingsService,
@@ -31,7 +32,8 @@ public class MoviePromotionCandidateService
         IMediaCatalogPopulationService catalogPopulationService,
         ITorrentCatalogPopulationService torrentCatalogPopulationService,
         IIgnoredItemsService ignoredItemsService,
-        IHistoryService historyService)
+        IHistoryService historyService,
+        IArrNamingService arrNaming)
     {
         _settingsService = settingsService;
         _fileInventory = fileInventory;
@@ -45,6 +47,7 @@ public class MoviePromotionCandidateService
             torrentCatalogPopulationService;
         _ignoredItemsService = ignoredItemsService;
         _historyService = historyService;
+        _arrNaming = arrNaming;
     }
 
     public async Task<List<MoviePromotionCandidate>>
@@ -218,6 +221,11 @@ public class MoviePromotionCandidateService
                         }
                     }
                 }
+
+                // Sonarr's or Radarr's own reading of the name, and their
+                // folder for it if they already have it.
+                release =
+                    await _arrNaming.IdentifyAsync(release);
 
                 if (mediaKind == MediaKind.Movies && release.IsTv)
                 {

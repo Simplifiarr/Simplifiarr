@@ -31,7 +31,7 @@ public class ArrEnrichmentService
             };
 
         var assets =
-            _catalogService.GetAssets();
+            ByPath(_catalogService.GetAssets());
 
         foreach (var movie in movies)
         {
@@ -41,12 +41,7 @@ public class ArrEnrichmentService
                 continue;
             }
 
-            var asset =
-                assets.FirstOrDefault(asset =>
-                    string.Equals(
-                        asset.CanonicalPath,
-                        movie.FilePath,
-                        StringComparison.OrdinalIgnoreCase));
+            assets.TryGetValue(movie.FilePath, out var asset);
 
             if (asset is null)
             {
@@ -102,7 +97,7 @@ public class ArrEnrichmentService
             };
 
         var assets =
-            _catalogService.GetAssets();
+            ByPath(_catalogService.GetAssets());
 
         foreach (var episode in episodes)
         {
@@ -112,12 +107,7 @@ public class ArrEnrichmentService
                 continue;
             }
 
-            var asset =
-                assets.FirstOrDefault(asset =>
-                    string.Equals(
-                        asset.CanonicalPath,
-                        episode.FilePath,
-                        StringComparison.OrdinalIgnoreCase));
+            assets.TryGetValue(episode.FilePath, out var asset);
 
             if (asset is null)
             {
@@ -173,4 +163,11 @@ public class ArrEnrichmentService
 
         return result;
     }
+
+    private static Dictionary<string, MediaAsset> ByPath(
+        IEnumerable<MediaAsset> assets) =>
+        assets
+            .Where(asset => !string.IsNullOrWhiteSpace(asset.CanonicalPath))
+            .GroupBy(asset => asset.CanonicalPath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
 }

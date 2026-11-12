@@ -41,6 +41,16 @@ public class PromotionPlanService
                 release,
                 sourcePath);
 
+        if (target.KeptElsewhere is not null)
+        {
+            return new PromotionPlan
+            {
+                SourcePath = sourcePath,
+                CanPromote = false,
+                Reason = $"{release.IdentifiedBy} keeps this in {target.KeptElsewhere}, on another drive. A hardlink can't reach it; see Move Seeds."
+            };
+        }
+
         if (existingAsset is not null &&
             File.Exists(existingAsset.CanonicalPath))
         {

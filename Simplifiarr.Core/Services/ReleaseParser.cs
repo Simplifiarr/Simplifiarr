@@ -197,10 +197,19 @@ public class ReleaseParser
             result.Year =
                 int.Parse(yearMatch.Value);
 
-            normalized =
-                normalized.Substring(
-                    0,
-                    yearMatch.Index);
+            // A TV year right before the season ("Show 2019 S01") is part of
+            // the show's name: it tells a remake from the original. Films
+            // keep "Title (Year)" apart as before.
+            var yearEndsTitle =
+                string.IsNullOrWhiteSpace(normalized[(yearMatch.Index + yearMatch.Length)..]);
+
+            if (!(result.IsTv && yearEndsTitle && yearMatch.Index > 0))
+            {
+                normalized =
+                    normalized.Substring(
+                        0,
+                        yearMatch.Index);
+            }
         }
 
         foreach (var token in NoiseTokens)

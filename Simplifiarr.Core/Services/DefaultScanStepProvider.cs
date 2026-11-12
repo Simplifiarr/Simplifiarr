@@ -15,6 +15,7 @@ public class DefaultScanStepProvider
     : IScanStepProvider
 {
     private readonly IReadOnlyList<ScanStep> _steps;
+    private readonly IReadOnlyList<FinishingStep> _finishing;
 
     public DefaultScanStepProvider(
         IMoviePromotionCandidateService movies,
@@ -22,7 +23,8 @@ public class DefaultScanStepProvider
         IWasteCandidateService waste,
         IJunkFileScannerService junk,
         IPlaybackErrorService playbackErrors,
-        ISeedMoveService seedMoves)
+        ISeedMoveService seedMoves,
+        IArrEnrichmentService arrEnrichment)
     {
         var steps = new List<ScanStep>
         {
@@ -63,7 +65,23 @@ public class DefaultScanStepProvider
                 profile => seedMoves.ScanAsync(profile.Name)));
 
         _steps = steps;
+
+        // Library files get Sonarr's and Radarr's titles, so Duplicates,
+        // Collections and Hardlinks all use the names they use. Does
+        // nothing when they aren't set up.
+        _finishing =
+        [
+            new FinishingStep(
+                "Taking titles from Sonarr and Radarr",
+                async () =>
+                {
+                    await arrEnrichment.EnrichFromSonarrAsync();
+                    await arrEnrichment.EnrichFromRadarrAsync();
+                })
+        ];
     }
 
     public IReadOnlyList<ScanStep> GetSteps() => _steps;
+
+    public IReadOnlyList<FinishingStep> GetFinishingSteps() => _finishing;
 }

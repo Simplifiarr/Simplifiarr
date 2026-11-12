@@ -177,6 +177,33 @@ public class ScanCoordinator
                         DateTime.UtcNow;
                 }
             }
+
+            foreach (var step in _stepProvider.GetFinishingSteps())
+            {
+                token.ThrowIfCancellationRequested();
+
+                lock (_sync)
+                {
+                    _progress = _progress with { StepName = step.Name, Percent = 99 };
+                }
+
+                Notify(force: true);
+
+                var timer = System.Diagnostics.Stopwatch.StartNew();
+
+                try
+                {
+                    await step.RunAsync();
+
+                    AppLog.Info($"Scan: {step.Name} - {timer.Elapsed.TotalSeconds:N1}s.");
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    AppLog.Error($"Scan step '{step.Name}' failed.", exception);
+
+                    summary.Problems.Add($"\"{step.Name}\" failed - {exception.Message}");
+                }
+            }
         }
         catch (OperationCanceledException)
         {

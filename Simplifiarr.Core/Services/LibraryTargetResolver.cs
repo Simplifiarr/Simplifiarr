@@ -72,17 +72,32 @@ public class LibraryTargetResolver
             };
         }
 
-        var targetDirectory =
-            release.IsTv
-                ? Path.Combine(
-                    libraryRoot,
-                    release.NormalizedTitle,
-                    $"Season {release.Season ?? 1:00}")
+        // Sonarr or Radarr already has it: their folder, or nothing if
+        // that folder isn't in this drive's library.
+        if (!string.IsNullOrWhiteSpace(release.KnownFolder) &&
+            !PathContainment.IsPathUnderRoot(release.KnownFolder, libraryRoot))
+        {
+            return new LibraryTarget
+            {
+                IsTv = release.IsTv,
+                KeptElsewhere = release.KnownFolder
+            };
+        }
+
+        var titleFolder =
+            !string.IsNullOrWhiteSpace(release.KnownFolder)
+                ? release.KnownFolder
                 : Path.Combine(
                     libraryRoot,
-                    release.Year.HasValue
-                        ? $"{release.NormalizedTitle} ({release.Year.Value})"
-                        : release.NormalizedTitle);
+                    release.FolderName ??
+                        (release.IsTv || !release.Year.HasValue
+                            ? release.NormalizedTitle
+                            : $"{release.NormalizedTitle} ({release.Year.Value})"));
+
+        var targetDirectory =
+            release.IsTv && release.UsesSeasonFolders
+                ? Path.Combine(titleFolder, SeasonFolder(titleFolder, release))
+                : titleFolder;
 
         var sourceExtension =
             Path.GetExtension(sourcePath);
@@ -109,6 +124,31 @@ public class LibraryTargetResolver
             DirectoryExists = Directory.Exists(targetDirectory),
             FileExists = File.Exists(targetFilePath)
         };
+    }
+
+    // The season folder the show already has, whichever way it's written;
+    // otherwise the name from Sonarr's format (or "Season 01").
+    private static string SeasonFolder(
+        string titleFolder,
+        ParsedRelease release)
+    {
+        var season = release.Season ?? 1;
+
+        var preferred =
+            release.SeasonFolderName ?? $"Season {season:00}";
+
+        if (Directory.Exists(titleFolder))
+        {
+            foreach (var name in new[] { preferred, $"Season {season}", $"Season {season:00}" })
+            {
+                if (Directory.Exists(Path.Combine(titleFolder, name)))
+                {
+                    return name;
+                }
+            }
+        }
+
+        return preferred;
     }
 }
 

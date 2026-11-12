@@ -10,9 +10,19 @@ public sealed record ScanStep(
     string Name,
     Func<DriveProfile, Task> RunAsync);
 
+/// <summary>
+/// Work a scan does once, after every drive is done, for example "Taking
+/// names from Sonarr and Radarr".
+/// </summary>
+public sealed record FinishingStep(
+    string Name,
+    Func<Task> RunAsync);
+
 public interface IScanStepProvider
 {
     IReadOnlyList<ScanStep> GetSteps();
+
+    IReadOnlyList<FinishingStep> GetFinishingSteps() => [];
 }
 
 /// <summary>

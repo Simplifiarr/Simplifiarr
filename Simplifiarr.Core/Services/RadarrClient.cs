@@ -72,6 +72,90 @@ public class RadarrClient : IRadarrClient
         }
     }
 
+    public async Task<ArrIdentity?> ParseAsync(
+        string releaseName)
+    {
+        try
+        {
+            var json =
+                await SendAsync($"/api/v3/parse?title={Uri.EscapeDataString(releaseName)}");
+
+            if (json is null)
+            {
+                return null;
+            }
+
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+
+            if (!root.TryGetProperty("parsedMovieInfo", out var parsed) ||
+                parsed.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var title =
+                parsed.TryGetProperty("movieTitles", out var titles) && titles.ValueKind == JsonValueKind.Array
+                    ? titles.EnumerateArray().Select(item => item.GetString()).FirstOrDefault(item => !string.IsNullOrWhiteSpace(item))
+                    : null;
+
+            var identity =
+                new ArrIdentity
+                {
+                    Source = "Radarr",
+                    Title = title ?? GetString(parsed, "movieTitle"),
+                    Year = GetNullableInt(parsed, "year") is > 0 and var year ? year : null
+                };
+
+            // Radarr has this film: its own title, year and folder win.
+            if (root.TryGetProperty("movie", out var movie) &&
+                movie.ValueKind == JsonValueKind.Object)
+            {
+                var path = GetString(movie, "path");
+
+                identity = identity with
+                {
+                    Title = GetString(movie, "title") is { Length: > 0 } movieTitle ? movieTitle : identity.Title,
+                    Year = GetNullableInt(movie, "year") is > 0 and var movieYear ? movieYear : identity.Year,
+                    KnownFolder = string.IsNullOrWhiteSpace(path) ? null : path,
+                    TmdbId = GetNullableInt(movie, "tmdbId"),
+                    ImdbId = GetString(movie, "imdbId") is { Length: > 0 } imdb ? imdb : null
+                };
+            }
+
+            return string.IsNullOrWhiteSpace(identity.Title) ? null : identity;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or TaskCanceledException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    public async Task<ArrFolderFormats?> GetFolderFormatsAsync()
+    {
+        try
+        {
+            var json = await SendAsync("/api/v3/config/naming");
+
+            if (json is null)
+            {
+                return null;
+            }
+
+            using var document = JsonDocument.Parse(json);
+            var defaults = new ArrFolderFormats();
+
+            return defaults with
+            {
+                MovieFolderFormat = GetString(document.RootElement, "movieFolderFormat") is { Length: > 0 } format ? format : defaults.MovieFolderFormat
+            };
+        }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or TaskCanceledException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
     private async Task<string?> SendAsync(
         string relativePath)
     {

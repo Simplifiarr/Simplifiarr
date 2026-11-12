@@ -98,7 +98,7 @@ Simplifiarr works on its own. Each of these adds more:
 | App | Adds |
 |---|---|
 | qBittorrent | What is still seeding; adding cross-seeds and rebuilt torrents; moving seeds |
-| Radarr / Sonarr | Exact titles, years, genres and episode numbers |
+| Radarr / Sonarr | Exact titles, years, genres and episode numbers; Hardlinks puts files in their folders, and names new folders with their folder formats |
 | Prowlarr | Searching your indexers for Cross-Seed, Torrent Rebuilder and Size Reduction |
 | Jellyfin | Collections and Posters |
 | fanart.tv | More poster choices (needs your own free API key) |

@@ -149,6 +149,95 @@ public class SonarrClient : ISonarrClient
         }
     }
 
+    public async Task<ArrIdentity?> ParseAsync(
+        string releaseName)
+    {
+        try
+        {
+            var json =
+                await SendAsync($"/api/v3/parse?title={Uri.EscapeDataString(releaseName)}");
+
+            if (json is null)
+            {
+                return null;
+            }
+
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+
+            if (!root.TryGetProperty("parsedEpisodeInfo", out var parsed) ||
+                parsed.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var episodes =
+                parsed.TryGetProperty("episodeNumbers", out var numbers) && numbers.ValueKind == JsonValueKind.Array
+                    ? numbers.EnumerateArray().Where(number => number.ValueKind == JsonValueKind.Number).Select(number => number.GetInt32()).ToList()
+                    : [];
+
+            var identity =
+                new ArrIdentity
+                {
+                    Source = "Sonarr",
+                    Title = GetString(parsed, "seriesTitle"),
+                    Season = GetNullableInt(parsed, "seasonNumber"),
+                    Episode = episodes.Count > 0 ? episodes[0] : null
+                };
+
+            // Sonarr has this show: its own title, year and folder win.
+            if (root.TryGetProperty("series", out var series) &&
+                series.ValueKind == JsonValueKind.Object)
+            {
+                var path = GetString(series, "path");
+
+                identity = identity with
+                {
+                    Title = GetString(series, "title") is { Length: > 0 } title ? title : identity.Title,
+                    Year = GetNullableInt(series, "year") is > 0 and var year ? year : null,
+                    KnownFolder = string.IsNullOrWhiteSpace(path) ? null : path,
+                    UsesSeasonFolders = !series.TryGetProperty("seasonFolder", out var seasonFolder) || seasonFolder.ValueKind != JsonValueKind.False,
+                    TvdbId = GetNullableInt(series, "tvdbId"),
+                    ImdbId = GetString(series, "imdbId") is { Length: > 0 } imdb ? imdb : null
+                };
+            }
+
+            return string.IsNullOrWhiteSpace(identity.Title) ? null : identity;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or TaskCanceledException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    public async Task<ArrFolderFormats?> GetFolderFormatsAsync()
+    {
+        try
+        {
+            var json = await SendAsync("/api/v3/config/naming");
+
+            if (json is null)
+            {
+                return null;
+            }
+
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            var defaults = new ArrFolderFormats();
+
+            return defaults with
+            {
+                SeriesFolderFormat = GetString(root, "seriesFolderFormat") is { Length: > 0 } series ? series : defaults.SeriesFolderFormat,
+                SeasonFolderFormat = GetString(root, "seasonFolderFormat") is { Length: > 0 } season ? season : defaults.SeasonFolderFormat,
+                SpecialsFolderFormat = GetString(root, "specialsFolderFormat") is { Length: > 0 } specials ? specials : defaults.SpecialsFolderFormat
+            };
+        }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or TaskCanceledException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
     private async Task<string?> SendAsync(
         string relativePath)
     {

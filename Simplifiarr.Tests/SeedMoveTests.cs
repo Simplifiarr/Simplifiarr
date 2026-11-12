@@ -201,7 +201,7 @@ public class SeedMoveTests : TempFolderTest
         Assert.AreEqual("episode 1!!", File.ReadAllText(library), "Nor was the library's.");
         Assert.IsFalse(File.Exists(Path.Combine(_secondDownloads, "tv", @"Night Shift S01\E01.mkv")), "The link Simplifiarr made is removed.");
         Assert.IsEmpty(_recycled);
-        Assert.AreEqual(1, _service.GetCandidates("First").Count, "It stays on the list.");
+        Assert.HasCount(1, _service.GetCandidates("First"), "It stays on the list.");
     }
 
     [TestMethod]

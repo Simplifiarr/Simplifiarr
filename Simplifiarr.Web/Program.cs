@@ -76,6 +76,7 @@ builder.Services.AddSingleton<ICollectionBuilderService, CollectionBuilderServic
 builder.Services.AddSingleton<IJunkFileScannerService, JunkFileScannerService>();
 builder.Services.AddSingleton<IDownloadCleanupService, DownloadCleanupService>();
 builder.Services.AddSingleton<ISeedMoveService, SeedMoveService>();
+builder.Services.AddSingleton<IArrNamingService, ArrNamingService>();
 builder.Services.AddSingleton<ITorrentPieceVerificationService, TorrentPieceVerificationService>();
 builder.Services.AddSingleton<ITorrentReconstructionService, TorrentReconstructionService>();
 builder.Services.AddSingleton<IWholeTorrentCandidateService, WholeTorrentCandidateService>();
