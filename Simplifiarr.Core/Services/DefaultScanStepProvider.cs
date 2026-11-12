@@ -21,7 +21,8 @@ public class DefaultScanStepProvider
         IMediaPromotionService mediaPromotion,
         IWasteCandidateService waste,
         IJunkFileScannerService junk,
-        IPlaybackErrorService playbackErrors)
+        IPlaybackErrorService playbackErrors,
+        ISeedMoveService seedMoves)
     {
         var steps = new List<ScanStep>
         {
@@ -54,6 +55,12 @@ public class DefaultScanStepProvider
             new ScanStep(
                 "Checking for playback problems",
                 profile => playbackErrors.ScanAsync(profile.Name)));
+
+        // Sizes only; nothing is read or changed.
+        steps.Add(
+            new ScanStep(
+                "Checking which drive each torrent seeds from",
+                profile => seedMoves.ScanAsync(profile.Name)));
 
         _steps = steps;
     }

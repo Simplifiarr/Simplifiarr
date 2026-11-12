@@ -119,6 +119,7 @@
             <li>A hardlink is only counted as done once Simplifiarr has checked it really is the same file.</li>
             <li>Cross-seeds and rebuilt torrents are only offered once every piece has been checked against your files, and are added to qBittorrent stopped.</li>
             <li>Anything that changes files asks you to confirm first.</li>
+            <li>The only change Simplifiarr makes to a torrent already in qBittorrent is Move Seeds, one torrent at a time when you ask. It is undone if qBittorrent's check doesn't pass.</li>
         </ul>
     </div>
 
@@ -194,6 +195,8 @@
             "Finished downloads that aren't in your library yet. Preview where each one will go, then link it in - it keeps seeding and costs no extra space. TV is grouped by show and season."),
         new("potential-waste", "arrow-repeat", "Potential Waste",
             "Library files that are full copies of a download. Converting swaps the copy for a hardlink; the old copy goes to Quarantine."),
+        new("move-seeds", "truck", "Move Seeds",
+            "Torrents seeding from one drive while Sonarr or Radarr copied them into a library on another. Moving the seed to the library's drive leaves one shared copy. qBittorrent checks every piece before the old copy goes to the Recycle Bin, and the torrent is left paused."),
         new("cross-seed", "share", "Cross-Seed",
             "Finds other torrents of files you already seed, so you can seed them on more trackers without downloading anything."),
         new("torrent-rebuilder", "hammer", "Torrent Rebuilder",
@@ -239,7 +242,7 @@
         ("Why does a film show 'resolution not known'?",
          "Simplifiarr reads it with ffprobe. If ffprobe isn't installed or can't be found, set its location under Settings, Storage."),
         ("Does Simplifiarr change Radarr, Sonarr or Jellyfin?",
-         "It only reads Radarr and Sonarr. In Jellyfin it only changes collections it made and posters you choose."),
+         "It only reads Radarr and Sonarr. In Jellyfin it only changes collections it made and posters you choose. In qBittorrent it adds torrents stopped, and moves a seed only when you press Move."),
         ("Where are the logs?",
          $"In {AppPaths.LogsDirectory}. They are the first place to look if something goes wrong.")
     ];

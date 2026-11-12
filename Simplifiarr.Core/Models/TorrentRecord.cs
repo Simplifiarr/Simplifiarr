@@ -18,6 +18,9 @@ public class TorrentRecord
 
     public long SizeBytes { get; set; }
 
+    /// <summary>How much of the torrent is on disk and verified, from 0 to 1.</summary>
+    public double Progress { get; set; }
+
     /// <summary>qBittorrent's current tracker URL for this torrent (may be empty).</summary>
     public string Tracker { get; set; } = string.Empty;
 

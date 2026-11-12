@@ -1,0 +1,284 @@
+@page "/move-seeds"
+@rendermode InteractiveServer
+@implements IDisposable
+
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+@using Simplifiarr.Core.Utilities
+
+@inject ISettingsService SettingsService
+@inject ISeedMoveService Seeds
+@inject IScanCoordinator Scans
+
+<PageTitle>Move Seeds - Simplifiarr</PageTitle>
+
+<PageHeader Title="Move Seeds"
+            Subtitle="Torrents seeding from one drive while Sonarr or Radarr copied them into a library on another. Moving the seed to the library's drive leaves one copy that both share." />
+
+<details class="mb-3">
+    <summary>How moving works, and what it changes</summary>
+
+    <div class="mt-2 text-muted">
+        <p class="mb-2">
+            Simplifiarr pauses the torrent, links each library file into the downloads folder
+            on the library's drive (instant, and it takes no space), and tells qBittorrent to
+            seed from there. qBittorrent then checks every piece of the torrent. Only if every
+            piece passes is the old copy sent to the Recycle Bin. If the check doesn't pass,
+            the torrent is pointed back at its old files, which were never touched.
+        </p>
+        <p class="mb-2">
+            Files the library doesn't have, such as samples or episodes Sonarr skipped, are
+            copied across by qBittorrent itself.
+        </p>
+        <p class="mb-0">
+            The torrent is left paused afterwards; start it in qBittorrent when you're ready.
+            This list is updated by Scan, which only compares sizes. qBittorrent's check is
+            what proves a match.
+        </p>
+    </div>
+</details>
+
+@if (Seeds.Current is { } current)
+{
+    <div class="alert alert-info">
+        <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
+        <strong>Moving @current.TorrentName:</strong> @current.Step...
+        <div class="cell-note">This carries on if you leave the page.</div>
+    </div>
+}
+
+@if (_result is not null)
+{
+    <div class="alert @(_result.Succeeded ? "alert-success" : "alert-danger")">
+        @_result.Message
+        @if (_result.FreedBytes > 0)
+        {
+            <div class="cell-note">
+                @SizeFormatter.FormatBytes(_result.FreedBytes) is in the Recycle Bin; empty it to get the space back.
+            </div>
+        }
+    </div>
+}
+
+@if (_profiles.Count == 0)
+{
+    <div class="alert alert-warning">
+        No drives are set up yet. <a href="settings">Add one in Settings</a>.
+    </div>
+}
+else if (!_hasScanned)
+{
+    <EmptyState Icon="search" Text="Nothing to show yet. Press Scan at the top of the page." />
+}
+else if (_candidates.Count == 0)
+{
+    <EmptyState Icon="check-circle" Text="Every torrent seeds from the same drive as its library copy." />
+}
+else
+{
+    <div class="toolbar">
+        <div class="toolbar-summary">
+            <strong>@_candidates.Count</strong> torrent(s) ·
+            <strong>@SizeFormatter.FormatBytes(_candidates.Sum(candidate => candidate.LinkedBytes))</strong> freed by moving them all
+        </div>
+    </div>
+
+    @if (Causes.Count > 0)
+    {
+        <div class="panel mb-3 help-panel">
+            <strong>Why this happens.</strong>
+            qBittorrent saved these on a different drive from where Sonarr or Radarr keeps them,
+            so the files had to be copied. To stop it, give each category a save folder on the
+            drive its library is on:
+            <ul class="mb-0 mt-2">
+                @foreach (var cause in Causes)
+                {
+                    <li>
+                        <strong>@(string.IsNullOrWhiteSpace(cause.Category) ? "No category" : $"Category \"{cause.Category}\"")</strong>:
+                        @cause.Count torrent(s) saved on @cause.From whose library is on @cause.To.
+                    </li>
+                }
+            </ul>
+        </div>
+    }
+
+    <div class="table-scroll">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Torrent</th>
+                    <th>Move</th>
+                    <th>Files in library</th>
+                    <th class="col-num">Frees</th>
+                    <th></th>
+                </tr>
+            </thead>
+
+            <tbody>
+                @foreach (var candidate in _candidates)
+                {
+                    <tr @key="candidate.TorrentHash">
+                        <td>
+                            <div class="file-name">@candidate.TorrentName</div>
+                            <div class="cell-note">
+                                @(string.IsNullOrWhiteSpace(candidate.TrackerHost) ? "No tracker" : candidate.TrackerHost)
+                                @if (!string.IsNullOrWhiteSpace(candidate.Category))
+                                {
+                                    <text> · @candidate.Category</text>
+                                }
+                            </div>
+
+                            <details class="mt-1">
+                                <summary>Files</summary>
+
+                                <div class="detail-label">Seeds from now</div>
+                                <code>@candidate.SavePath</code>
+
+                                <div class="detail-label mt-2">Will seed from</div>
+                                <code>@candidate.TargetSavePath</code>
+
+                                <ul class="mt-2 mb-0">
+                                    @foreach (var file in candidate.Files)
+                                    {
+                                        <li>
+                                            @file.RelativePath
+                                            <span class="cell-note">
+                                                · @SizeFormatter.FormatBytes(file.SizeBytes) ·
+                                                @(file.InLibrary ? "in the library" : "copied by qBittorrent")
+                                            </span>
+                                        </li>
+                                    }
+                                </ul>
+                            </details>
+                        </td>
+
+                        <td>@candidate.SourceDriveName → @candidate.TargetDriveName</td>
+
+                        <td>
+                            @candidate.Files.Count(file => file.InLibrary) of @candidate.Files.Count
+                            @if (candidate.CopiedBytes > 0)
+                            {
+                                <div class="cell-note">@SizeFormatter.FormatBytes(candidate.CopiedBytes) copied across</div>
+                            }
+                        </td>
+
+                        <td class="col-num">@SizeFormatter.FormatBytes(candidate.LinkedBytes)</td>
+
+                        <td>
+                            @if (_confirmHash == candidate.TorrentHash)
+                            {
+                                <div class="d-flex gap-2 flex-wrap">
+                                    <button type="button"
+                                            class="btn btn-primary btn-sm"
+                                            disabled="@IsBusy"
+                                            @onclick="() => MoveAsync(candidate)">
+                                        Move it
+                                    </button>
+                                    <button type="button"
+                                            class="btn btn-secondary btn-sm"
+                                            disabled="@IsBusy"
+                                            @onclick="() => _confirmHash = null">
+                                        Cancel
+                                    </button>
+                                </div>
+                                <div class="cell-note mt-1">Pauses it in qBittorrent and leaves it paused.</div>
+                            }
+                            else
+                            {
+                                <button type="button"
+                                        class="btn btn-secondary btn-sm"
+                                        disabled="@IsBusy"
+                                        @onclick="() => _confirmHash = candidate.TorrentHash">
+                                    Move to @candidate.TargetDriveName
+                                </button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code
+{
+    private sealed record Cause(string Category, string From, string To, int Count);
+
+    private List<DriveProfile> _profiles = [];
+    private List<SeedMoveCandidate> _candidates = [];
+    private bool _hasScanned;
+
+    private string? _confirmHash;
+    private SeedMoveResult? _result;
+    private bool _scanWasRunning;
+
+    private bool IsBusy =>
+        Seeds.Current is not null || Scans.Progress.IsRunning;
+
+    private List<Cause> Causes =>
+        _candidates
+            .GroupBy(candidate => (candidate.Category, candidate.SourceDriveName, candidate.TargetDriveName))
+            .Select(group => new Cause(group.Key.Category, group.Key.SourceDriveName, group.Key.TargetDriveName, group.Count()))
+            .OrderByDescending(cause => cause.Count)
+            .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _profiles = await SettingsService.GetEnabledDriveProfilesAsync();
+        _scanWasRunning = Scans.Progress.IsRunning;
+
+        Seeds.Changed += OnChanged;
+        Scans.Changed += OnScanChanged;
+
+        Load();
+    }
+
+    private void Load()
+    {
+        _candidates =
+            _profiles
+                .SelectMany(profile => Seeds.GetCandidates(profile.Name))
+                .OrderByDescending(candidate => candidate.LinkedBytes)
+                .ToList();
+
+        _hasScanned = _profiles.Any(profile => Seeds.GetLastScanUtc(profile.Name).HasValue);
+    }
+
+    private async Task MoveAsync(SeedMoveCandidate candidate)
+    {
+        _confirmHash = null;
+        _result = null;
+
+        // Runs in the service, so it finishes even if this page is closed.
+        _result = await Seeds.MoveAsync(candidate);
+
+        Load();
+    }
+
+    private void OnChanged() =>
+        _ = InvokeAsync(StateHasChanged);
+
+    private void OnScanChanged()
+    {
+        var running = Scans.Progress.IsRunning;
+        var finished = _scanWasRunning && !running;
+
+        _scanWasRunning = running;
+
+        _ = InvokeAsync(() =>
+        {
+            if (finished)
+            {
+                Load();
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        Seeds.Changed -= OnChanged;
+        Scans.Changed -= OnScanChanged;
+    }
+}

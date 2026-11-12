@@ -76,6 +76,85 @@ internal sealed class FakeQbittorrent : IQbittorrentScanner
 
         return Task.FromResult(new QbittorrentAddResult { Success = true });
     }
+
+    // ---- Changing torrents, behaving the way qBittorrent 5 does.
+
+    /// <summary>Each torrent's files, and the bytes a recheck expects.</summary>
+    public Dictionary<string, List<(QbittorrentFile File, byte[] Content)>> Files { get; } = [];
+
+    /// <summary>Every change asked for, in order, e.g. "stop", "setLocation X".</summary>
+    public List<string> Calls { get; } = [];
+
+    public Task<List<QbittorrentFile>?> GetTorrentFilesAsync(string torrentHash) =>
+        Task.FromResult<List<QbittorrentFile>?>(
+            Files.TryGetValue(torrentHash, out var files) ? files.Select(file => file.File).ToList() : []);
+
+    public Task<string?> StopTorrentAsync(string torrentHash)
+    {
+        Calls.Add("stop");
+        Torrent(torrentHash).State = "stoppedUP";
+
+        return Task.FromResult<string?>(null);
+    }
+
+    public Task<string?> StartTorrentAsync(string torrentHash)
+    {
+        Calls.Add("start");
+        Torrent(torrentHash).State = "uploading";
+
+        return Task.FromResult<string?>(null);
+    }
+
+    // Files already at the new location are kept and the old ones left
+    // where they are; anything missing there is moved. Progress then reads
+    // 0 until a recheck.
+    public Task<string?> SetLocationAsync(string torrentHash, string location)
+    {
+        Calls.Add($"setLocation {location}");
+
+        var torrent = Torrent(torrentHash);
+
+        foreach (var (file, _) in Files[torrentHash])
+        {
+            var from = Path.Combine(torrent.SavePath, file.RelativePath);
+            var to = Path.Combine(location, file.RelativePath);
+
+            if (!File.Exists(to) && File.Exists(from))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+                File.Move(from, to);
+            }
+        }
+
+        torrent.SavePath = location;
+        torrent.Progress = 0;
+        torrent.State = "stoppedDL";
+
+        return Task.FromResult<string?>(null);
+    }
+
+    public Task<string?> RecheckTorrentAsync(string torrentHash)
+    {
+        Calls.Add("recheck");
+
+        var torrent = Torrent(torrentHash);
+
+        var complete =
+            Files[torrentHash].All(file =>
+            {
+                var path = Path.Combine(torrent.SavePath, file.File.RelativePath);
+
+                return File.Exists(path) && File.ReadAllBytes(path).AsSpan().SequenceEqual(file.Content);
+            });
+
+        torrent.Progress = complete ? 1 : 0;
+        torrent.State = complete ? "stoppedUP" : "stoppedDL";
+
+        return Task.FromResult<string?>(null);
+    }
+
+    private TorrentRecord Torrent(string hash) =>
+        Torrents.Single(torrent => torrent.TorrentHash == hash);
 }
 
 [TestClass]

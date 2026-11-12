@@ -49,6 +49,9 @@ public class QbittorrentScanner : IQbittorrentScanner
                     ContentPath = GetString(torrent, "content_path"),
                     State = GetString(torrent, "state"),
                     SizeBytes = GetLong(torrent, "size"),
+                    Progress = torrent.TryGetProperty("progress", out var progress) && progress.ValueKind == JsonValueKind.Number
+                        ? progress.GetDouble()
+                        : 0,
                     Tracker = GetString(torrent, "tracker"),
                     InfoHashV1 = GetString(torrent, "infohash_v1"),
                     InfoHashV2 = GetString(torrent, "infohash_v2")
@@ -163,6 +166,99 @@ public class QbittorrentScanner : IQbittorrentScanner
                 Success = false,
                 ErrorMessage = ex.Message
             };
+        }
+    }
+
+    public async Task<List<QbittorrentFile>?> GetTorrentFilesAsync(
+        string torrentHash)
+    {
+        try
+        {
+            var json =
+                await GetStringAsync($"/api/v2/torrents/files?hash={Uri.EscapeDataString(torrentHash)}");
+
+            if (json is null)
+            {
+                return null;
+            }
+
+            using var document =
+                JsonDocument.Parse(json);
+
+            return document.RootElement
+                .EnumerateArray()
+                .Select(file =>
+                    new QbittorrentFile(
+                        // qBittorrent always uses "/" here.
+                        GetString(file, "name").Replace('/', Path.DirectorySeparatorChar),
+                        GetLong(file, "size")))
+                .ToList();
+        }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or TaskCanceledException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    // qBittorrent 5 renamed pause/resume to stop/start; try the new name
+    // first and fall back for older versions.
+    public Task<string?> StopTorrentAsync(
+        string torrentHash) =>
+        PostAsync(["/api/v2/torrents/stop", "/api/v2/torrents/pause"], new() { ["hashes"] = torrentHash });
+
+    public Task<string?> StartTorrentAsync(
+        string torrentHash) =>
+        PostAsync(["/api/v2/torrents/start", "/api/v2/torrents/resume"], new() { ["hashes"] = torrentHash });
+
+    public Task<string?> SetLocationAsync(
+        string torrentHash,
+        string location) =>
+        PostAsync(["/api/v2/torrents/setLocation"], new() { ["hashes"] = torrentHash, ["location"] = location });
+
+    public Task<string?> RecheckTorrentAsync(
+        string torrentHash) =>
+        PostAsync(["/api/v2/torrents/recheck"], new() { ["hashes"] = torrentHash });
+
+    private async Task<string?> PostAsync(
+        string[] paths,
+        Dictionary<string, string> form)
+    {
+        var baseUri =
+            await GetBaseUriAsync();
+
+        if (baseUri is null)
+        {
+            return "qBittorrent's URL is not set (see Settings).";
+        }
+
+        try
+        {
+            foreach (var path in paths)
+            {
+                using var content = new FormUrlEncodedContent(form);
+                using var response = await _httpClient.PostAsync(new Uri(baseUri, path), content);
+
+                // An older qBittorrent doesn't know the newer name.
+                if (response.StatusCode == System.Net.HttpStatusCode.NotFound && path != paths[^1])
+                {
+                    continue;
+                }
+
+                if (response.IsSuccessStatusCode)
+                {
+                    return null;
+                }
+
+                var body = await response.Content.ReadAsStringAsync();
+
+                return $"qBittorrent returned HTTP {(int)response.StatusCode} {response.ReasonPhrase} {body}".Trim();
+            }
+
+            return "qBittorrent didn't recognise the request.";
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
+        {
+            return $"Couldn't reach qBittorrent: {exception.Message}";
         }
     }
 

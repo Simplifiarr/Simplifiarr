@@ -130,6 +130,21 @@ else
                     </div>
                 }
 
+                @if (_dashboard.SeedMoveCount > 0)
+                {
+                    <div class="action-row">
+                        <div>
+                            <div class="action-row-title">
+                                @Count(_dashboard.SeedMoveCount, "torrent is", "torrents are") seeding on a different drive from your library
+                            </div>
+                            <div class="action-row-detail">
+                                Sonarr or Radarr copied them into a library on another drive. Moving the seeds there frees @_dashboard.SeedMoveFormatted.
+                            </div>
+                        </div>
+                        <a class="btn btn-secondary" href="move-seeds">Review</a>
+                    </div>
+                }
+
                 @if (_dashboard.DuplicateTitleCount > 0)
                 {
                     <div class="action-row">
@@ -258,6 +273,7 @@ else
         _dashboard.PromotionOpportunityCount == 0 &&
         _dashboard.PossibleDuplicateCopyCount == 0 &&
         _dashboard.DuplicateTitleCount == 0 &&
+        _dashboard.SeedMoveCount == 0 &&
         _dashboard.JunkFileCount == 0 &&
         _dashboard.PlaybackErrorCount == 0 &&
         ScanProblems.Count == 0 &&
@@ -329,6 +345,11 @@ else
         if (drive.FullCopyCount > 0)
         {
             parts.Add($"{Count(drive.FullCopyCount, "full copy", "full copies")} ({SizeFormatter.FormatBytes(drive.FullCopyBytes)})");
+        }
+
+        if (drive.SeedMoveCount > 0)
+        {
+            parts.Add(Count(drive.SeedMoveCount, "seed on the wrong drive", "seeds on the wrong drive"));
         }
 
         if (drive.DuplicateTitleCount > 0)

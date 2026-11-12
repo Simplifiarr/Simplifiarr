@@ -23,6 +23,7 @@ public class DashboardSummaryService : IDashboardSummaryService
     private readonly IMediaCatalogService _catalog;
     private readonly IDuplicateAssetAnalysisService _duplicates;
     private readonly IIgnoredItemsService _ignored;
+    private readonly ISeedMoveService _seedMoves;
 
     public DashboardSummaryService(
         IQuarantineInventoryService quarantineInventoryService,
@@ -36,7 +37,8 @@ public class DashboardSummaryService : IDashboardSummaryService
         IHistoryService historyService,
         IMediaCatalogService catalog,
         IDuplicateAssetAnalysisService duplicates,
-        IIgnoredItemsService ignored)
+        IIgnoredItemsService ignored,
+        ISeedMoveService seedMoves)
     {
         _quarantineInventoryService = quarantineInventoryService;
         _settingsService = settingsService;
@@ -51,6 +53,7 @@ public class DashboardSummaryService : IDashboardSummaryService
         _catalog = catalog;
         _duplicates = duplicates;
         _ignored = ignored;
+        _seedMoves = seedMoves;
     }
 
     public async Task<DashboardSummary> GetDashboardSummaryAsync()
@@ -80,6 +83,14 @@ public class DashboardSummaryService : IDashboardSummaryService
 
         var duplicateReclaimableBytes =
             duplicateGroups.Sum(group => group.ReclaimableSizeBytes);
+
+        var seedMoves =
+            enabledProfiles
+                .SelectMany(profile => _seedMoves.GetCandidates(profile.Name))
+                .ToList();
+
+        var seedMoveBytes =
+            seedMoves.Sum(candidate => candidate.LinkedBytes);
 
         var drives =
             enabledProfiles
@@ -146,6 +157,15 @@ public class DashboardSummaryService : IDashboardSummaryService
             DuplicateTitleCount =
                 duplicateGroups.Count,
 
+            SeedMoveCount =
+                seedMoves.Count,
+
+            SeedMoveBytes =
+                seedMoveBytes,
+
+            SeedMoveFormatted =
+                SizeFormatter.FormatBytes(seedMoveBytes),
+
             DuplicateReclaimableBytes =
                 duplicateReclaimableBytes,
 
@@ -189,6 +209,7 @@ public class DashboardSummaryService : IDashboardSummaryService
             DuplicateTitleCount = duplicateGroups.Count(group =>
                 group.Entries.Any(entry =>
                     string.Equals(entry.DriveProfileName, profile.Name, StringComparison.OrdinalIgnoreCase))),
+            SeedMoveCount = _seedMoves.GetCandidates(profile.Name).Count,
             HealthyHardlinkCount = _wasteCandidateCache.GetHealthyHardlinkCount(profile.Name),
             LastScanUtc = _scans.GetLastScanUtc(profile.Name),
             SetupProblems = DriveProfileValidator.GetProblems(profile)

@@ -30,6 +30,14 @@ public class DashboardSummary
 
     public string DuplicateReclaimableFormatted { get; set; } = string.Empty;
 
+    /// <summary>Torrents seeding on a different drive from their library copy.</summary>
+    public int SeedMoveCount { get; set; }
+
+    /// <summary>Space freed by moving all of them.</summary>
+    public long SeedMoveBytes { get; set; }
+
+    public string SeedMoveFormatted { get; set; } = string.Empty;
+
     public long StorageSavedBytes { get; set; }
 
     public string StorageSavedFormatted { get; set; } = string.Empty;
@@ -64,6 +72,9 @@ public class DriveSummary
     /// <summary>Duplicate titles with at least one copy on this drive.</summary>
     public int DuplicateTitleCount { get; set; }
 
+    /// <summary>Torrents seeding from this drive whose library copy is on another.</summary>
+    public int SeedMoveCount { get; set; }
+
     public int HealthyHardlinkCount { get; set; }
 
     public DateTime? LastScanUtc { get; set; }
@@ -74,5 +85,5 @@ public class DriveSummary
     public List<string> SetupProblems { get; set; } = [];
 
     public int ItemsToReview =>
-        ToLinkCount + FullCopyCount + LeftoverFileCount + PlaybackErrorCount + DuplicateTitleCount;
+        ToLinkCount + FullCopyCount + LeftoverFileCount + PlaybackErrorCount + DuplicateTitleCount + SeedMoveCount;
 }

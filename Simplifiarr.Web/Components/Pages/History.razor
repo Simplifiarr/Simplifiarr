@@ -204,6 +204,8 @@ else
             record.ActionType is HistoryActionType.QuarantineRestored or HistoryActionType.PermissionsRestored),
         new("playback", "Playback fixes", record =>
             record.ActionType == HistoryActionType.PlaybackErrorFixed),
+        new("seeds", "Seeds moved", record =>
+            record.ActionType == HistoryActionType.SeedMoved),
         new("failed", "Didn't work", record => !record.Success)
     ];
 
@@ -319,6 +321,8 @@ else
                 record.Success ? "Playback problem fixed" : "Couldn't fix playback problem",
             HistoryActionType.PermissionsRestored =>
                 record.Success ? "Earlier permissions put back" : "Couldn't put earlier permissions back",
+            HistoryActionType.SeedMoved =>
+                record.Success ? "Seed moved to its library's drive" : "Couldn't move seed",
             _ => record.ActionType.ToString()
         };
 }

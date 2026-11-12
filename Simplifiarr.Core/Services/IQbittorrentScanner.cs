@@ -24,4 +24,23 @@ public interface IQbittorrentScanner
     /// unattended.
     /// </summary>
     Task<QbittorrentAddResult> AddTorrentAsync(byte[] torrentBytes, string savePath);
+
+    /// <summary>The torrent's files, or null if qBittorrent can't be reached.</summary>
+    Task<List<QbittorrentFile>?> GetTorrentFilesAsync(string torrentHash);
+
+    // The calls below change a torrent that is already in qBittorrent. Only
+    // Move Seeds uses them, one torrent at a time and with the user's
+    // confirmation. Each returns null on success, otherwise why it failed.
+
+    Task<string?> StopTorrentAsync(string torrentHash);
+
+    Task<string?> StartTorrentAsync(string torrentHash);
+
+    /// <summary>
+    /// Points the torrent at another folder. qBittorrent moves any files
+    /// that aren't already there and keeps the ones that are.
+    /// </summary>
+    Task<string?> SetLocationAsync(string torrentHash, string location);
+
+    Task<string?> RecheckTorrentAsync(string torrentHash);
 }

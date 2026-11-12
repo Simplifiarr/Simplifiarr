@@ -13,6 +13,7 @@ public enum HistoryActionType
     QuarantineRestored,
     DuplicateQuarantined,
     PlaybackErrorFixed,
-    PermissionsRestored
+    PermissionsRestored,
+    SeedMoved
 }
 

@@ -33,6 +33,7 @@ The pages are grouped the same way they are in the app's menu.
 |---|---|
 | **Hardlinks** | Finished downloads that aren't in your library yet. Preview where each will go, then link it in. TV is grouped by show and season. |
 | **Potential Waste** | Library files that are full copies of a download. Converting swaps the copy for a hardlink; the old copy goes to Quarantine first. |
+| **Move Seeds** | Torrents seeding from one drive while Sonarr or Radarr copied them into a library on another. Moving the seed to the library's drive leaves one shared copy; qBittorrent checks every piece before the old copy goes to the Recycle Bin, and the torrent is left paused. |
 | **Cross-Seed** | Finds other torrents of files you already seed, so you can seed them on more trackers without downloading anything. Every piece is checked against your files before a match is offered. |
 | **Torrent Rebuilder** | Rebuilds one torrent from files already in your library, even renamed ones, so it can seed straight away. |
 | **Collections** | Group anything in your libraries, across drives, and send it to Jellyfin as a collection. Sending again only changes what changed. |
@@ -44,7 +45,7 @@ The pages are grouped the same way they are in the app's menu.
 |---|---|
 | **Duplicates** | The same title more than once in your libraries, usually two qualities of one film or episode. |
 | **Junk** | Sample clips, checksum and tracker files, and stray images left in your libraries. |
-| **Downloads** | Downloads your library already has that qBittorrent is no longer seeding. |
+| **Downloads** | Downloads your library already has, on any drive, that qBittorrent is no longer seeding. |
 | **Playback Errors** | Files your media server may not be able to open: blocked by Windows, permissions it can't read, still packed in an archive, empty, unfinished, cloud-only or badly named. Blocks, permissions and archives can be fixed; fixes never change what is inside a file. |
 | **Size Reduction** | Smaller releases of films and episodes you already have, found on your indexers. Report only; nothing is downloaded. |
 
@@ -73,6 +74,9 @@ the browser.
 - Anything that changes files asks you to confirm first.
 - Radarr and Sonarr are only read. In Jellyfin, Simplifiarr only changes the
   collections it made and the posters you choose.
+- The only change it makes to a torrent already in qBittorrent is **Move
+  Seeds**, one torrent at a time when you ask. If qBittorrent's check doesn't
+  pass, the torrent is pointed back at its old files, which were never touched.
 
 ## Requirements
 
@@ -93,7 +97,7 @@ Simplifiarr works on its own. Each of these adds more:
 
 | App | Adds |
 |---|---|
-| qBittorrent | What is still seeding; adding cross-seeds and rebuilt torrents |
+| qBittorrent | What is still seeding; adding cross-seeds and rebuilt torrents; moving seeds |
 | Radarr / Sonarr | Exact titles, years, genres and episode numbers |
 | Prowlarr | Searching your indexers for Cross-Seed, Torrent Rebuilder and Size Reduction |
 | Jellyfin | Collections and Posters |
