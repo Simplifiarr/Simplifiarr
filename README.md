@@ -59,7 +59,9 @@ The pages are grouped the same way they are in the app's menu.
 
 There is one **Scan** button at the top of every page. It reads every drive and
 refreshes every list at once, runs on the server, and keeps going if you close
-the browser.
+the browser. To have it run by itself every few hours or once a day, use
+**Settings → Scanning**. Automatic scans only find things; nothing is changed
+until you press a button.
 
 ## How it keeps your files safe
 

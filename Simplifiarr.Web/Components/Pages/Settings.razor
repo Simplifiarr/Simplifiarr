@@ -11,6 +11,7 @@
 @inject IJellyfinClient JellyfinClient
 @inject IArrEnrichmentService ArrEnrichmentService
 @inject ITorrentClient TorrentClient
+@inject IScanCoordinator Scans
 
 <PageTitle>Settings - Simplifiarr</PageTitle>
 
@@ -68,6 +69,14 @@ else
                 class="app-tab @(_tab == StorageTab ? "active" : null)"
                 @onclick="() => _tab = StorageTab">
             Storage
+        </button>
+
+        <button type="button"
+                role="tab"
+                aria-selected="@(_tab == ScanningTab)"
+                class="app-tab @(_tab == ScanningTab ? "active" : null)"
+                @onclick="() => _tab = ScanningTab">
+            Scanning
         </button>
     </div>
 
@@ -435,6 +444,71 @@ else
             </div>
         </div>
     }
+    else if (_tab == ScanningTab)
+    {
+        <div class="group-card">
+            <div class="group-card-header">
+                <div class="group-card-title">Automatic scanning</div>
+                <div class="group-card-meta" style="white-space: normal">Runs Scan by itself, so every page is up to date when you open it</div>
+            </div>
+
+            <div style="padding: 0 1.1rem 1.1rem">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label" for="auto-scan">Scan</label>
+                        <select id="auto-scan" class="form-select" @bind="_settings.AutoScan">
+                            <option value="@AutoScanMode.Off">Only when I press Scan</option>
+                            <option value="@AutoScanMode.EveryHours">Every few hours</option>
+                            <option value="@AutoScanMode.Daily">Once a day</option>
+                        </select>
+                    </div>
+
+                    @if (_settings.AutoScan == AutoScanMode.EveryHours)
+                    {
+                        <div class="col-md-4">
+                            <label class="form-label" for="auto-scan-hours">Every</label>
+                            <select id="auto-scan-hours" class="form-select" @bind="_settings.AutoScanEveryHours">
+                                @foreach (var hours in AutoScanSchedule.HourChoices)
+                                {
+                                    <option value="@hours">@(hours == 1 ? "hour" : $"{hours} hours")</option>
+                                }
+                            </select>
+                        </div>
+                    }
+                    else if (_settings.AutoScan == AutoScanMode.Daily)
+                    {
+                        <div class="col-md-4">
+                            <label class="form-label" for="auto-scan-time">At</label>
+                            <input id="auto-scan-time" class="form-control" type="time" @bind="DailyTime" @bind:event="onchange" />
+                        </div>
+                    }
+                </div>
+
+                @if (_settings.AutoScan != AutoScanMode.Off)
+                {
+                    <div class="form-check mt-3">
+                        <input id="auto-cross-seed" class="form-check-input" type="checkbox" @bind="_settings.AutoScanCrossSeed" />
+                        <label class="form-check-label" for="auto-cross-seed">
+                            Then search for cross-seeds
+                        </label>
+                        <div class="cell-note">
+                            Asks your indexers through Prowlarr about every torrent you seed, which can take a while.
+                            Matches wait on the Cross-Seed page; nothing is added to your torrent client without you.
+                        </div>
+                    </div>
+                }
+
+                <div class="cell-note mt-3">
+                    @NextScanText
+                </div>
+                <div class="cell-note">
+                    Automatic scans only find things. Nothing is linked, moved or deleted until you press a button.
+                    A scan already running is never interrupted, and a scan missed while the computer was off runs
+                    a couple of minutes after Simplifiarr starts.
+                </div>
+            </div>
+        </div>
+    }
     else
     {
         <div class="group-card">
@@ -600,6 +674,52 @@ else
     private const string DrivesTab = "drives";
     private const string ConnectionsTab = "connections";
     private const string StorageTab = "storage";
+    private const string ScanningTab = "scanning";
+
+    private TimeOnly? DailyTime
+    {
+        get => AutoScanSchedule.ParseTime(_settings?.AutoScanDailyTime) is { } time
+            ? TimeOnly.FromTimeSpan(time)
+            : null;
+        set
+        {
+            if (_settings is not null && value is { } time)
+            {
+                _settings.AutoScanDailyTime = time.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+            }
+        }
+    }
+
+    private string NextScanText
+    {
+        get
+        {
+            if (_settings is null || _settings.AutoScan == AutoScanMode.Off)
+            {
+                return "Automatic scanning is off.";
+            }
+
+            if (Scans.Progress.IsRunning)
+            {
+                return "A scan is running now. The next automatic one is worked out from when it started.";
+            }
+
+            var now = DateTime.Now;
+            var last = Scans.LastSummary?.StartedUtc.ToLocalTime();
+            var next = AutoScanSchedule.NextRunLocal(_settings, last, now);
+
+            var lastText =
+                last is { } lastValue ? $" The last scan started {lastValue:ddd d MMM, h:mm tt}." : string.Empty;
+
+            var saved = HasUnsavedChanges ? " (once you press Save)" : string.Empty;
+
+            return next is not { } nextValue
+                ? "Automatic scanning is off."
+                : nextValue <= now
+                    ? $"The next automatic scan is due now{saved}; it starts within a minute.{lastText}"
+                    : $"The next automatic scan is {nextValue:ddd d MMM, h:mm tt}{saved}.{lastText}";
+        }
+    }
 
     private SimplifiarrSettings? _settings;
 

@@ -100,4 +100,28 @@ public class SimplifiarrSettings
 
     public List<DriveProfile> DriveProfiles { get; set; } =
         [];
+
+    /// <summary>When Scan runs by itself. Off by default.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter<AutoScanMode>))]
+    public AutoScanMode AutoScan { get; set; } =
+        AutoScanMode.Off;
+
+    /// <summary>For <see cref="AutoScanMode.EveryHours"/>.</summary>
+    public int AutoScanEveryHours { get; set; } = 6;
+
+    /// <summary>For <see cref="AutoScanMode.Daily"/>: local time, "HH:mm".</summary>
+    public string AutoScanDailyTime { get; set; } = "03:00";
+
+    /// <summary>
+    /// After an automatic scan, also search the indexers for cross-seeds.
+    /// Nothing is added to the torrent client without you.
+    /// </summary>
+    public bool AutoScanCrossSeed { get; set; }
+}
+
+public enum AutoScanMode
+{
+    Off,
+    EveryHours,
+    Daily
 }

@@ -85,6 +85,7 @@ builder.Services.AddSingleton<IWholeTorrentCandidateService, WholeTorrentCandida
 builder.Services.AddSingleton<ICrossSeedScanService, CrossSeedScanService>();
 builder.Services.AddSingleton<IScanStepProvider,DefaultScanStepProvider>();
 builder.Services.AddSingleton<IScanCoordinator, ScanCoordinator>();
+builder.Services.AddHostedService<Simplifiarr.Web.AutoScanService>();
 
 var app = builder.Build();
 
