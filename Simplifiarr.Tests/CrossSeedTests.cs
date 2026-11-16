@@ -358,6 +358,45 @@ public class CrossSeedTests : TempFolderTest
     }
 
     [TestMethod]
+    public async Task One_chosen_torrent_is_searched_alone_and_earlier_matches_stay()
+    {
+        var first = Bytes(1);
+        var second = Bytes(2, 41000);
+
+        var night = Seeding("Night.Shift.2021.1080p.WEB-DL-GROUP.mkv", first);
+        var harbour = Seeding("Harbour.2019.720p.WEB-GROUP.mkv", second);
+
+        OnIndexer("Night Shift (2021) 1080p.mkv", first);
+
+        await _crossSeed.ScanAsync(night.TorrentHash);
+
+        Assert.IsTrue(_crossSeed.LastSucceeded, _crossSeed.LastMessage);
+        Assert.AreEqual(1, _prowlarr.Searches, "Only the chosen torrent is searched for.");
+        Assert.HasCount(1, _crossSeed.Matches);
+
+        OnIndexer("Harbour (2019) 720p.mkv", second);
+
+        await _crossSeed.ScanAsync(harbour.TorrentHash);
+
+        Assert.HasCount(2, _crossSeed.Matches, "The first search's match is kept.");
+
+        // Searching the first one again doesn't list its match twice.
+        await _crossSeed.ScanAsync(night.TorrentHash);
+
+        Assert.HasCount(2, _crossSeed.Matches);
+    }
+
+    [TestMethod]
+    public async Task A_chosen_torrent_that_has_gone_says_so()
+    {
+        await _crossSeed.ScanAsync("not-a-hash");
+
+        Assert.IsFalse(_crossSeed.LastSucceeded);
+        StringAssert.Contains(_crossSeed.LastMessage, "no longer in");
+        Assert.AreEqual(0, _prowlarr.Searches);
+    }
+
+    [TestMethod]
     public async Task When_qBittorrent_cannot_be_reached_nothing_is_searched()
     {
         _qbittorrent.IsReachable = false;

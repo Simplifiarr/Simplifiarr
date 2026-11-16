@@ -59,9 +59,10 @@ public interface ICrossSeedScanService
     event Action? Changed;
 
     /// <summary>
-    /// Does nothing if a scan is already running.
+    /// Does nothing if a scan is already running. With a hash, searches for
+    /// that one torrent only and keeps the matches already found for others.
     /// </summary>
-    Task ScanAsync();
+    Task ScanAsync(string? torrentHash = null);
 
     void Stop();
 

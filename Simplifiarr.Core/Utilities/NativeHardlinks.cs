@@ -90,6 +90,59 @@ public static class NativeHardlinks
     }
 
     /// <summary>
+    /// Every name this file has on its drive, including
+    /// <paramref name="path"/> itself. Empty when the file can't be read.
+    /// </summary>
+    public static List<string> GetLinkPaths(string path)
+    {
+        var names = new List<string>();
+
+        if (!IsSupported)
+        {
+            return names;
+        }
+
+        var root = Path.GetPathRoot(Path.GetFullPath(path));
+
+        if (string.IsNullOrEmpty(root))
+        {
+            return names;
+        }
+
+        var buffer = new char[4096];
+        var length = (uint)buffer.Length;
+
+        var search = FindFirstFileNameW(ToExtendedPath(path), 0, ref length, buffer);
+
+        if (search == InvalidHandle)
+        {
+            return names;
+        }
+
+        try
+        {
+            do
+            {
+                // Windows gives each name from the drive's root, without
+                // the drive letter: "\Movies\Film\Film.mkv".
+                var end = Array.IndexOf(buffer, '\0');
+                var name = new string(buffer, 0, end < 0 ? buffer.Length : end);
+
+                names.Add(Path.Combine(root, name.TrimStart('\\')));
+
+                length = (uint)buffer.Length;
+            }
+            while (FindNextFileNameW(search, ref length, buffer));
+        }
+        finally
+        {
+            FindClose(search);
+        }
+
+        return names;
+    }
+
+    /// <summary>
     /// Windows' classic path limit is 260 characters; the \\?\ prefix lifts
     /// it. .NET's own file APIs add this automatically, raw kernel32 calls
     /// don't.
@@ -141,6 +194,26 @@ public static class NativeHardlinks
     private static extern bool GetFileInformationByHandle(
         SafeFileHandle file,
         out ByHandleFileInformation fileInformation);
+
+    private static readonly IntPtr InvalidHandle = new(-1);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr FindFirstFileNameW(
+        string fileName,
+        uint flags,
+        ref uint stringLength,
+        [Out] char[] linkName);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool FindNextFileNameW(
+        IntPtr findStream,
+        ref uint stringLength,
+        [Out] char[] linkName);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool FindClose(IntPtr findFile);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

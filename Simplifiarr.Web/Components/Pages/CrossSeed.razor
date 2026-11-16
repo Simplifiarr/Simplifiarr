@@ -41,6 +41,31 @@
     </div>
 }
 
+@if (_isSetUp && _torrents is { Count: > 0 })
+{
+    <div class="panel mb-3">
+        <label class="detail-label" for="one-torrent">Or search for one torrent</label>
+        <div class="d-flex flex-wrap gap-2">
+            <select id="one-torrent" class="form-select fill-row" @bind="_selectedHash" disabled="@IsBusy">
+                <option value="">Choose a torrent...</option>
+                @foreach (var torrent in _torrents)
+                {
+                    <option value="@torrent.TorrentHash">@torrent.Name</option>
+                }
+            </select>
+
+            <button type="button"
+                    class="btn btn-secondary"
+                    disabled="@(IsBusy || string.IsNullOrWhiteSpace(_selectedHash))"
+                    @onclick="StartOne">
+                <i class="bi bi-search" aria-hidden="true"></i>
+                Search this one
+            </button>
+        </div>
+        <div class="cell-note mt-1">Matches already in the list stay; this one's are added to them.</div>
+    </div>
+}
+
 @if (Scanner.Progress is { } progress)
 {
     <div class="alert alert-info" role="status">
@@ -252,9 +277,15 @@ else
     private readonly CandidateSelection<CrossSeedScanResult> _selection =
         new(match => match.CandidateResult.DownloadUrl);
 
+    // Torrents that can be searched for on their own; null if the client
+    // couldn't be reached.
+    private List<TorrentRecord>? _torrents = [];
+    private string _selectedHash = string.Empty;
+
     private bool _isSetUp;
     private bool _isAdding;
     private bool _wasScanning;
+    private bool _singleSearch;
 
     private string _storagePath = string.Empty;
     private string? _addMessage;
@@ -284,6 +315,15 @@ else
             !string.IsNullOrWhiteSpace(settings.ProwlarrApiKey);
 
         Load();
+
+        if (_isSetUp)
+        {
+            _torrents =
+                (await Client.TryGetTorrentsAsync())?
+                    .Where(CrossSeedScanService.IsSearchable)
+                    .OrderBy(torrent => torrent.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+        }
     }
 
     private void Start()
@@ -296,9 +336,28 @@ else
         _addMessage = null;
         _pending = [];
         _selection.Clear();
+        _singleSearch = false;
 
         // Runs on its own, so it carries on if this page is closed.
-        _ = Task.Run(Scanner.ScanAsync);
+        _ = Task.Run(() => Scanner.ScanAsync());
+    }
+
+    private void StartOne()
+    {
+        if (IsBusy || string.IsNullOrWhiteSpace(_selectedHash))
+        {
+            return;
+        }
+
+        var hash = _selectedHash;
+
+        _addMessage = null;
+        _pending = [];
+
+        // Earlier matches stay, so ticks on them stay too.
+        _singleSearch = true;
+
+        _ = Task.Run(() => Scanner.ScanAsync(hash));
     }
 
     // Raised from the scan's own thread - hop back onto this page's.
@@ -306,7 +365,7 @@ else
     {
         _ = InvokeAsync(() =>
         {
-            if (_wasScanning && !Scanner.IsScanning)
+            if (_wasScanning && !Scanner.IsScanning && !_singleSearch)
             {
                 // The list was rebuilt; old ticks may point at nothing.
                 _selection.Clear();

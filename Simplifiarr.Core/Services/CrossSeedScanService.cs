@@ -75,9 +75,11 @@ public class CrossSeedScanService : ICrossSeedScanService
 
     public event Action? Changed;
 
-    public async Task ScanAsync()
+    public async Task ScanAsync(string? torrentHash = null)
     {
         CancellationToken token;
+
+        var single = !string.IsNullOrWhiteSpace(torrentHash);
 
         lock (_sync)
         {
@@ -92,8 +94,12 @@ public class CrossSeedScanService : ICrossSeedScanService
 
             token = _cancellation.Token;
 
-            _matches = [];
-            _alreadyInClient = [];
+            // One torrent's search adds to what earlier searches found.
+            if (!single)
+            {
+                _matches = [];
+                _alreadyInClient = [];
+            }
         }
 
         LastMessage = null;
@@ -130,16 +136,46 @@ public class CrossSeedScanService : ICrossSeedScanService
                 return;
             }
 
-            var checkedCount =
-                await ScanTorrentsAsync(allTorrents, token);
+            var chosen =
+                single
+                    ? allTorrents.FirstOrDefault(torrent =>
+                        string.Equals(torrent.TorrentHash, torrentHash, StringComparison.OrdinalIgnoreCase))
+                    : null;
 
-            var found = Matches.Count;
-            var skipped = AlreadyInClient.Count;
+            if (single && chosen is null)
+            {
+                Finish(false, $"That torrent is no longer in {_client.Name}.");
+
+                return;
+            }
+
+            if (chosen is not null && !IsSearchable(chosen))
+            {
+                Finish(false, $"{chosen.Name} can't be searched yet: its files must be on disk and {_client.Name} must have finished checking it.");
+
+                return;
+            }
+
+            var foundBefore = Matches.Count;
+            var skippedBefore = AlreadyInClient.Count;
+
+            var checkedCount =
+                await ScanTorrentsAsync(
+                    allTorrents,
+                    chosen is null ? allTorrents : [chosen],
+                    token);
+
+            var found = Matches.Count - foundBefore;
+            var skipped = AlreadyInClient.Count - skippedBefore;
 
             var message =
-                token.IsCancellationRequested
-                    ? $"Scan stopped after {checkedCount.Done} of {checkedCount.Total} torrent(s). {found} match(es) found so far."
-                    : $"Scan finished. {found} match(es) found across {checkedCount.Total} torrent(s).";
+                chosen is not null
+                    ? token.IsCancellationRequested
+                        ? $"Search for {chosen.Name} stopped."
+                        : $"Search for {chosen.Name} finished. {found} new match(es)."
+                    : token.IsCancellationRequested
+                        ? $"Scan stopped after {checkedCount.Done} of {checkedCount.Total} torrent(s). {found} match(es) found so far."
+                        : $"Scan finished. {found} match(es) found across {checkedCount.Total} torrent(s).";
 
             if (skipped > 0)
             {
@@ -226,14 +262,12 @@ public class CrossSeedScanService : ICrossSeedScanService
 
     private async Task<(int Done, int Total)> ScanTorrentsAsync(
         List<TorrentRecord> allTorrents,
+        IReadOnlyCollection<TorrentRecord> toSearch,
         CancellationToken token)
     {
         var torrents =
-            allTorrents
-                .Where(torrent =>
-                    File.Exists(torrent.ContentPath) ||
-                    Directory.Exists(torrent.ContentPath))
-                .Where(IsSettled)
+            toSearch
+                .Where(IsSearchable)
                 .ToList();
 
         // Torrents of the same title are searched once, together.
@@ -343,6 +377,15 @@ public class CrossSeedScanService : ICrossSeedScanService
         List<TorrentRecord> allTorrents,
         HashSet<string> knownHashes)
     {
+        // Already found by an earlier search: nothing new to prove.
+        lock (_sync)
+        {
+            if (_matches.Any(existing => existing.CandidateResult.DownloadUrl == release.DownloadUrl))
+            {
+                return;
+            }
+        }
+
         var bytes =
             await _prowlarr.DownloadTorrentAsync(release.DownloadUrl);
 
@@ -384,6 +427,13 @@ public class CrossSeedScanService : ICrossSeedScanService
 
         lock (_sync)
         {
+            // The same torrent can come from two indexers under two links.
+            if (_matches.Any(existing => existing.CandidateMetadata.InfoHashHex is { } hash &&
+                                         hash == metadata.InfoHashHex))
+            {
+                return;
+            }
+
             _matches.Add(
                 new CrossSeedScanResult
                 {
@@ -439,6 +489,11 @@ public class CrossSeedScanService : ICrossSeedScanService
 
         Changed?.Invoke();
     }
+
+    /// <summary>Its files are on disk and the client isn't busy with it.</summary>
+    public static bool IsSearchable(TorrentRecord torrent) =>
+        (File.Exists(torrent.ContentPath) || Directory.Exists(torrent.ContentPath)) &&
+        IsSettled(torrent);
 
     private static bool IsSettled(
         TorrentRecord torrent)

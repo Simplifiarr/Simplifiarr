@@ -140,6 +140,21 @@ public class MoviePromotionCandidateService
                             .First(),
                     StringComparer.OrdinalIgnoreCase);
 
+        var libraryRoots =
+            settings.DriveProfiles
+                .Where(profile => profile.Enabled)
+                .SelectMany(profile => GetLibraryPaths(profile, MediaKind.All))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+        var allDownloadRoots =
+            settings.DriveProfiles
+                .Where(profile => profile.Enabled)
+                .Select(profile => profile.DownloadPath)
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
         var results =
             new List<MoviePromotionCandidate>();
 
@@ -165,6 +180,13 @@ public class MoviePromotionCandidateService
                 }
 
                 if (_ignoredItemsService.IsIgnored(file.FullPath))
+                {
+                    continue;
+                }
+
+                // Already linked into a library, whatever that folder is
+                // called now: nothing to do.
+                if (FindLibraryLink(file.FullPath, libraryRoots, allDownloadRoots) is not null)
                 {
                     continue;
                 }
@@ -327,6 +349,30 @@ public class MoviePromotionCandidateService
         }
 
         return sortedResults;
+    }
+
+    /// <summary>
+    /// The library name this file is already hardlinked to, or null.
+    /// Looks at the file itself rather than titles, so a folder Sonarr or
+    /// Radarr renamed still counts.
+    /// </summary>
+    public static string? FindLibraryLink(
+        string path,
+        IReadOnlyCollection<string> libraryRoots,
+        IReadOnlyCollection<string> downloadRoots)
+    {
+        if (libraryRoots.Count == 0 ||
+            NativeHardlinks.GetIdentity(path) is not { LinkCount: > 1 })
+        {
+            return null;
+        }
+
+        // Downloads can sit inside a library folder (C:\Media\Torrents
+        // under C:\Media), so a name there never counts as the library's.
+        return NativeHardlinks.GetLinkPaths(path)
+            .FirstOrDefault(name =>
+                !downloadRoots.Any(root => PathContainment.IsPathUnderRoot(name, root)) &&
+                libraryRoots.Any(root => PathContainment.IsPathUnderRoot(name, root)));
     }
 
     private static bool MatchesKind(
