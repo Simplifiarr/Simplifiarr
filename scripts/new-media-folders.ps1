@@ -7,7 +7,10 @@
     Simplifiarr works one drive at a time, because a hardlink can only join two
     places on the same drive. Each drive needs:
 
-        <drive>\<root>\Torrents               finished movies, TV and books
+        <drive>\<root>\Torrents               anything without a folder of its own
+        <drive>\<root>\Torrents\Movies        finished movies
+        <drive>\<root>\Torrents\TV            finished TV
+        <drive>\<root>\Torrents\Books         finished books
         <drive>\<root>\Torrents\Audiobooks    finished audiobooks
         <drive>\<root>\Torrents\Music         finished music
         <drive>\<root>\Torrents\Comics        finished comics
@@ -19,8 +22,9 @@
         <drive>\<root>\Music
         <drive>\<root>\Comics
 
-    Audiobooks, music and comics get their own download folders because their
-    files can't be told apart by content alone (an MP3 could be either).
+    Each kind gets its own download folder, so a movie is never mistaken for an
+    episode. Audiobooks, music and comics must have one, because their files
+    can't be told apart by content alone (an MP3 could be either).
 
     Only folders that don't exist yet are created. Nothing is moved, renamed or
     deleted, so it is safe to run on a drive that already has some of these.
@@ -51,14 +55,14 @@
 .EXAMPLE
     .\scripts\new-media-folders.ps1 -Drive D
 
-    Creates D:\Torrents (with Audiobooks, Music and Comics inside) and
-    D:\Movies, D:\TV, D:\Books, D:\Audiobooks, D:\Music, D:\Comics.
+    Creates D:\Torrents (with Movies, TV, Books, Audiobooks, Music and Comics
+    inside) and D:\Movies, D:\TV, D:\Books, D:\Audiobooks, D:\Music, D:\Comics.
 
 .EXAMPLE
     .\scripts\new-media-folders.ps1 -Drive E -Root Media -Types Movies,TV -SeedOnly
 
-    Creates E:\Media\Torrents, E:\Media\Torrents\SeedOnly, E:\Media\Movies and
-    E:\Media\TV.
+    Creates E:\Media\Torrents with Movies, TV and SeedOnly inside, and
+    E:\Media\Movies and E:\Media\TV.
 
 .EXAMPLE
     .\scripts\new-media-folders.ps1 -Drive D -WhatIf
@@ -135,9 +139,18 @@ if ($SeedOnly) {
 
 foreach ($type in $Types | Select-Object -Unique) {
     switch ($type) {
-        'Movies'     { Add-Folder 'Movies' (Join-Path $base 'Movies') }
-        'TV'         { Add-Folder 'TV' (Join-Path $base 'TV') }
-        'Books'      { Add-Folder 'Books' (Join-Path $base 'Books') }
+        'Movies' {
+            Add-Folder 'Movies' (Join-Path $base 'Movies')
+            Add-Folder 'Movie downloads' (Join-Path $downloads 'Movies')
+        }
+        'TV' {
+            Add-Folder 'TV' (Join-Path $base 'TV')
+            Add-Folder 'TV downloads' (Join-Path $downloads 'TV')
+        }
+        'Books' {
+            Add-Folder 'Books' (Join-Path $base 'Books')
+            Add-Folder 'Book downloads' (Join-Path $downloads 'Books')
+        }
         'Audiobooks' {
             Add-Folder 'Audiobooks' (Join-Path $base 'Audiobooks')
             Add-Folder 'Audiobook downloads' (Join-Path $downloads 'Audiobooks')
@@ -189,11 +202,11 @@ if (-not $WhatIfPreference) {
     Write-Host "$created folder(s) created, $existing already there." -ForegroundColor Green
 }
 
-$ownDownloads = @($Types | Where-Object { $_ -in 'Audiobooks', 'Music', 'Comics' })
+$ownDownloads = @($Types)
 
 $qbittorrent =
     if ($ownDownloads.Count -gt 0) {
-        "`n     Give $(($ownDownloads -join ', ').ToLowerInvariant()) their own categories that save into" +
+        "`n     Give $(($ownDownloads -join ', ').Replace('TV', 'tv').ToLowerInvariant().Replace('tv', 'TV')) their own categories that save into" +
         "`n     the matching download folders above."
     }
     else { '' }

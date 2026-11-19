@@ -37,9 +37,10 @@ public class DuplicateAssetAnalysisService
                 // folder caused it to be catalogued.
                 .Where(asset =>
                     !profiles.Any(profile =>
-                        PathContainment.IsPathUnderRoot(
-                            asset.CanonicalPath,
-                            profile.DownloadPath)))
+                        profile.AllDownloadPaths().Any(root =>
+                            PathContainment.IsPathUnderRoot(
+                                asset.CanonicalPath,
+                                root))))
                 .ToList();
 
         var candidateGroups =

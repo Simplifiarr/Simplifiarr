@@ -39,10 +39,16 @@ public class LibraryTargetResolver
         // the wrong library whenever two entries share a drive.
         var profile =
             settings.DriveProfiles
-                .Where(profile =>
-                    profile.Enabled &&
-                    PathContainment.IsPathUnderRoot(sourcePath, profile.DownloadPath))
-                .OrderByDescending(profile => profile.DownloadPath.Length)
+                .Where(profile => profile.Enabled)
+                .Select(profile => (
+                    Profile: profile,
+                    Root: profile.AllDownloadPaths()
+                        .Where(root => PathContainment.IsPathUnderRoot(sourcePath, root))
+                        .OrderByDescending(root => root.Length)
+                        .FirstOrDefault()))
+                .Where(match => match.Root is not null)
+                .OrderByDescending(match => match.Root!.Length)
+                .Select(match => match.Profile)
                 .FirstOrDefault()
             ??
             settings.DriveProfiles

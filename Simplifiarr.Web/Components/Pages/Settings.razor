@@ -171,7 +171,7 @@ else
                             <div class="col-md-6">
                                 <PathInput Label="Downloads folder"
                                            Placeholder="D:\Torrents"
-                                           Help="Where your torrent client saves finished movies, TV and books"
+                                           Help="Where your torrent client saves finished downloads. Movies, TV and books are looked for here unless they have their own folder below"
                                            @bind-Value="profile.DownloadPath" />
                             </div>
 
@@ -195,10 +195,24 @@ else
                             </div>
 
                             <div class="col-md-6">
+                                <PathInput Label="Movie downloads"
+                                           Placeholder="D:\Torrents\Movies"
+                                           EmptyText="Not set, so movies are looked for in the main downloads folder"
+                                           @bind-Value="profile.MovieDownloadPath" />
+                            </div>
+
+                            <div class="col-md-6">
                                 <PathInput Label="TV"
                                            Placeholder="D:\TV"
                                            EmptyText="No TV library on this drive"
                                            @bind-Value="profile.TvLibraryPath" />
+                            </div>
+
+                            <div class="col-md-6">
+                                <PathInput Label="TV downloads"
+                                           Placeholder="D:\Torrents\TV"
+                                           EmptyText="Not set, so TV is looked for in the main downloads folder"
+                                           @bind-Value="profile.TvDownloadPath" />
                             </div>
 
                             <div class="col-md-6">
@@ -208,7 +222,12 @@ else
                                            @bind-Value="profile.BookLibraryPath" />
                             </div>
 
-                            <div class="col-md-6"></div>
+                            <div class="col-md-6">
+                                <PathInput Label="Book downloads"
+                                           Placeholder="D:\Torrents\Books"
+                                           EmptyText="Not set, so books are looked for in the main downloads folder"
+                                           @bind-Value="profile.BookDownloadPath" />
+                            </div>
 
                             <div class="col-md-6">
                                 <PathInput Label="Audiobooks"
@@ -254,9 +273,11 @@ else
                         </div>
 
                         <p class="cell-note mt-2 mb-0">
-                            Audiobooks, music and comics each need their own downloads folder,
-                            because an audiobook and a song are the same kind of file and can't
-                            be told apart. It can be a folder inside the main downloads folder.
+                            Movies, TV and books can share the main downloads folder, or each have one
+                            of their own. A movie downloads folder is only searched for movies and a TV
+                            one only for TV. Audiobooks, music and comics always need their own,
+                            because an audiobook and a song are the same kind of file and can't be told
+                            apart. Any of these can be a folder inside the main downloads folder.
                         </p>
 
                         <div class="form-check mt-3">
@@ -919,6 +940,9 @@ else
             {
                 profile.DriveRoot,
                 profile.DownloadPath,
+                profile.MovieDownloadPath,
+                profile.TvDownloadPath,
+                profile.BookDownloadPath,
                 profile.MovieLibraryPath,
                 profile.TvLibraryPath,
                 profile.BookLibraryPath,

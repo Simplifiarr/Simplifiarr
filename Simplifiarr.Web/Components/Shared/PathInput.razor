@@ -24,6 +24,20 @@
         else
         {
             <span class="status-warn">@(IsFile ? "File not found" : "Folder not found")</span>
+
+            @if (!IsFile && CanCreate(Value))
+            {
+                <button type="button"
+                        class="btn btn-secondary btn-sm ms-2 py-0"
+                        @onclick="CreateFolder">
+                    Create folder
+                </button>
+            }
+        }
+
+        @if (_createError is not null)
+        {
+            <span class="status-warn"> · @_createError</span>
         }
 
         @if (!string.IsNullOrWhiteSpace(Help))
@@ -60,8 +74,46 @@
     [Parameter]
     public bool IsFile { get; set; }
 
-    private Task OnInput(ChangeEventArgs args) =>
-        ValueChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty);
+    private string? _createError;
+
+    private Task OnInput(ChangeEventArgs args)
+    {
+        _createError = null;
+
+        return ValueChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty);
+    }
+
+    // Only a full path on a drive that is there: "Torrents\Books" or a
+    // missing drive letter would make a folder somewhere unexpected.
+    private static bool CanCreate(string path)
+    {
+        try
+        {
+            var root = Path.GetPathRoot(path);
+
+            return Path.IsPathFullyQualified(path) &&
+                   !string.IsNullOrEmpty(root) &&
+                   Directory.Exists(root);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private void CreateFolder()
+    {
+        try
+        {
+            Directory.CreateDirectory(Value.Trim());
+
+            _createError = null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            _createError = $"Couldn't create it: {exception.Message}";
+        }
+    }
 
     private bool Exists(string path)
     {

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Simplifiarr.Core.Models;
 
 public class DriveProfile
@@ -12,6 +14,53 @@ public class DriveProfile
 
     public string DownloadPath { get; set; } =
         string.Empty;
+
+    /// <summary>
+    /// Where movie downloads go. Blank: the main <see cref="DownloadPath"/>.
+    /// When set, only movies are looked for here.
+    /// </summary>
+    public string MovieDownloadPath { get; set; } =
+        string.Empty;
+
+    /// <summary>Where TV downloads go. Blank: the main downloads folder.</summary>
+    public string TvDownloadPath { get; set; } =
+        string.Empty;
+
+    /// <summary>Where book downloads go. Blank: the main downloads folder.</summary>
+    public string BookDownloadPath { get; set; } =
+        string.Empty;
+
+    /// <summary>The folder movies are downloaded to, falling back to the main one.</summary>
+    [JsonIgnore]
+    public string MovieDownloads => OrMain(MovieDownloadPath);
+
+    [JsonIgnore]
+    public string TvDownloads => OrMain(TvDownloadPath);
+
+    [JsonIgnore]
+    public string BookDownloads => OrMain(BookDownloadPath);
+
+    /// <summary>
+    /// Every downloads folder this drive has, main and per-kind, without
+    /// blanks or repeats. The seed-only folder is not included.
+    /// </summary>
+    public List<string> AllDownloadPaths() =>
+        new[]
+            {
+                DownloadPath,
+                MovieDownloadPath,
+                TvDownloadPath,
+                BookDownloadPath,
+                AudiobookDownloadPath,
+                MusicDownloadPath,
+                ComicDownloadPath
+            }
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private string OrMain(string path) =>
+        string.IsNullOrWhiteSpace(path) ? DownloadPath : path;
 
     public string MovieLibraryPath { get; set; } =
         string.Empty;

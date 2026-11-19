@@ -353,6 +353,9 @@ public class ScanCoordinator
         return new[]
             {
                 profile.DownloadPath,
+                profile.MovieDownloadPath,
+                profile.TvDownloadPath,
+                profile.BookDownloadPath,
                 profile.MovieLibraryPath,
                 profile.TvLibraryPath,
                 profile.BookLibraryPath,

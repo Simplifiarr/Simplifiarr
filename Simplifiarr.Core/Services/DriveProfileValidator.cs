@@ -39,6 +39,9 @@ public static class DriveProfileValidator
             new[]
             {
                 new Folder("Downloads folder", download, false),
+                new Folder("Movie downloads folder", Normalize(profile.MovieDownloadPath), false),
+                new Folder("TV downloads folder", Normalize(profile.TvDownloadPath), false),
+                new Folder("Book downloads folder", Normalize(profile.BookDownloadPath), false),
                 new Folder("Audiobook downloads folder", Normalize(profile.AudiobookDownloadPath), false),
                 new Folder("Music downloads folder", Normalize(profile.MusicDownloadPath), false),
                 new Folder("Comic downloads folder", Normalize(profile.ComicDownloadPath), false)
@@ -48,7 +51,9 @@ public static class DriveProfileValidator
 
         foreach (var library in libraries)
         {
-            foreach (var downloadFolder in downloads)
+            // A library that is exactly one of the downloads folders says so;
+            // otherwise the main downloads folder is named first.
+            foreach (var downloadFolder in downloads.OrderBy(folder => Same(library.Path, folder.Path) ? 0 : 1))
             {
                 if (Same(library.Path, downloadFolder.Path))
                 {

@@ -71,11 +71,7 @@ public class DownloadCleanupService
         }
 
         var downloadRoots =
-            ExistingFolders(
-                profile.DownloadPath,
-                profile.AudiobookDownloadPath,
-                profile.MusicDownloadPath,
-                profile.ComicDownloadPath);
+            ExistingFolders(profile.AllDownloadPaths().ToArray());
 
         var libraryRoots =
             ExistingFolders(

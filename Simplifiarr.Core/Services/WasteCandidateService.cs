@@ -66,8 +66,16 @@ public class WasteCandidateService
             var newProfileCandidates =
                 new List<WasteCandidate>();
 
-            if (!string.IsNullOrWhiteSpace(profile.DownloadPath) &&
-                Directory.Exists(profile.DownloadPath))
+            // The movie and TV downloads folders (the same main folder unless
+            // they were split). Both are checked for either library, since a
+            // download put in the wrong one is still a copy.
+            var videoDownloads =
+                new[] { profile.MovieDownloads, profile.TvDownloads }
+                    .Where(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+            if (videoDownloads.Count > 0)
             {
                 foreach (var (libraryPath, kind) in GetLibraryPaths(profile, mediaKind))
                 {
@@ -76,12 +84,17 @@ public class WasteCandidateService
                         continue;
                     }
 
-                    var rawCandidates =
-                        await _duplicateCandidateService
-                            .FindVideoCandidatesAsync(
-                                libraryPath,
-                                profile.DownloadPath,
-                                forceRefresh: true);
+                    var rawCandidates = new List<DuplicateCandidate>();
+
+                    foreach (var downloads in videoDownloads)
+                    {
+                        rawCandidates.AddRange(
+                            await _duplicateCandidateService
+                                .FindVideoCandidatesAsync(
+                                    libraryPath,
+                                    downloads,
+                                    forceRefresh: true));
+                    }
 
                     var uniqueLibraryCandidates =
                         rawCandidates

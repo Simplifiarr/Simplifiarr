@@ -230,9 +230,9 @@ public sealed class BookDefinition : MediaTypeDefinition
         profile.BookLibraryPath;
 
     // Books have their own file extensions, so they can safely be picked
-    // out of the shared download folder.
+    // out of the shared download folder when they have none of their own.
     public override string GetDownloadPath(DriveProfile profile) =>
-        profile.DownloadPath;
+        profile.BookDownloads;
 
     public override IReadOnlyList<MediaTypeColumn> Columns { get; } =
     [

@@ -85,13 +85,23 @@ public class MoviePromotionCandidateService
                 .ToList();
         }
 
+        // Movies and TV each have their own downloads folder when one is
+        // set, and the main one otherwise. Deepest first, so a file in a
+        // movie folder inside the main one is read as part of it.
         var downloadPaths =
             profiles
-                .Select(profile => profile.DownloadPath)
+                .SelectMany(profile =>
+                    mediaKind switch
+                    {
+                        MediaKind.Movies => new[] { profile.MovieDownloads },
+                        MediaKind.Tv => new[] { profile.TvDownloads },
+                        _ => new[] { profile.MovieDownloads, profile.TvDownloads }
+                    })
                 .Where(path =>
                     !string.IsNullOrWhiteSpace(path) &&
                     Directory.Exists(path))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(path => path.Length)
                 .ToList();
 
         foreach (var profile in profiles)
@@ -150,8 +160,7 @@ public class MoviePromotionCandidateService
         var allDownloadRoots =
             settings.DriveProfiles
                 .Where(profile => profile.Enabled)
-                .Select(profile => profile.DownloadPath)
-                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .SelectMany(profile => profile.AllDownloadPaths())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
@@ -192,11 +201,7 @@ public class MoviePromotionCandidateService
                 }
 
                 var owningProfile =
-                    profiles
-                        .FirstOrDefault(profile =>
-                            PathContainment.IsPathUnderRoot(
-                                file.FullPath,
-                                profile.DownloadPath));
+                    OwningProfile(profiles, file.FullPath);
 
                 if (owningProfile is not null &&
                     !string.IsNullOrWhiteSpace(owningProfile.SeedOnlyPath) &&
@@ -259,6 +264,16 @@ public class MoviePromotionCandidateService
                     continue;
                 }
 
+                // A movie downloads folder holds movies and a TV one holds
+                // TV: an episode in the movie folder isn't offered as a
+                // movie, and the other way round.
+                if (owningProfile is not null &&
+                    FolderKind(owningProfile, file.FullPath) is { } folderKind &&
+                    folderKind != (release.IsTv ? MediaKind.Tv : MediaKind.Movies))
+                {
+                    continue;
+                }
+
                 var plan =
                     await _promotionPlanService.CreateAsync(
                         release,
@@ -311,9 +326,10 @@ public class MoviePromotionCandidateService
             var newProfileCandidates =
                 sortedResults
                     .Where(candidate =>
-                        PathContainment.IsPathUnderRoot(
-                            candidate.SourcePath,
-                            profile.DownloadPath))
+                        string.Equals(
+                            candidate.DriveProfileName,
+                            profile.Name,
+                            StringComparison.OrdinalIgnoreCase))
                     .ToList();
 
             // Only replace the cache entries for the kind(s) just rescanned -
@@ -349,6 +365,51 @@ public class MoviePromotionCandidateService
         }
 
         return sortedResults;
+    }
+
+    /// <summary>
+    /// The drive whose downloads folders hold this file, the most specific
+    /// folder winning when drive entries overlap.
+    /// </summary>
+    public static DriveProfile? OwningProfile(
+        IEnumerable<DriveProfile> profiles,
+        string path) =>
+        profiles
+            .Select(profile => (
+                Profile: profile,
+                Depth: profile.AllDownloadPaths()
+                    .Where(root => PathContainment.IsPathUnderRoot(path, root))
+                    .Select(root => root.Length)
+                    .DefaultIfEmpty(-1)
+                    .Max()))
+            .Where(match => match.Depth >= 0)
+            .OrderByDescending(match => match.Depth)
+            .Select(match => match.Profile)
+            .FirstOrDefault();
+
+    /// <summary>
+    /// Movies or TV when this file sits in a folder meant for only one of
+    /// them; null when it is in the main downloads folder that both share.
+    /// </summary>
+    public static MediaKind? FolderKind(
+        DriveProfile profile,
+        string path)
+    {
+        var movie = Depth(profile.MovieDownloads);
+        var tv = Depth(profile.TvDownloads);
+
+        if (movie == tv)
+        {
+            return null;
+        }
+
+        return movie > tv ? MediaKind.Movies : MediaKind.Tv;
+
+        int Depth(string root) =>
+            !string.IsNullOrWhiteSpace(root) &&
+            PathContainment.IsPathUnderRoot(path, root)
+                ? root.TrimEnd('\\', '/').Length
+                : -1;
     }
 
     /// <summary>

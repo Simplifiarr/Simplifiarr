@@ -139,12 +139,9 @@ public class PlaybackErrorService : IPlaybackErrorService
         var downloads =
             new[]
             {
-                profile.DownloadPath,
-                profile.SeedOnlyPath,
-                profile.AudiobookDownloadPath,
-                profile.MusicDownloadPath,
-                profile.ComicDownloadPath
+                profile.SeedOnlyPath
             }
+            .Concat(profile.AllDownloadPaths())
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .ToList();
 

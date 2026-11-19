@@ -747,7 +747,7 @@ public class SeedMoveService : ISeedMoveService
 
     // ------------------------------------------------------------- folders
 
-    private enum RootKind { Downloads, Audiobooks, Music, Comics, SeedOnly }
+    private enum RootKind { Downloads, Movies, Tv, Books, Audiobooks, Music, Comics, SeedOnly }
 
     // Most specific first, so a music download folder inside the main one
     // is recognised as music.
@@ -758,6 +758,9 @@ public class SeedMoveService : ISeedMoveService
                 (profile.AudiobookDownloadPath, RootKind.Audiobooks),
                 (profile.MusicDownloadPath, RootKind.Music),
                 (profile.ComicDownloadPath, RootKind.Comics),
+                (profile.MovieDownloadPath, RootKind.Movies),
+                (profile.TvDownloadPath, RootKind.Tv),
+                (profile.BookDownloadPath, RootKind.Books),
                 (profile.SeedOnlyPath, RootKind.SeedOnly),
                 (profile.DownloadPath, RootKind.Downloads)
             }
@@ -774,6 +777,9 @@ public class SeedMoveService : ISeedMoveService
                 RootKind.Audiobooks => target.AudiobookDownloadPath,
                 RootKind.Music => target.MusicDownloadPath,
                 RootKind.Comics => target.ComicDownloadPath,
+                RootKind.Movies => target.MovieDownloadPath,
+                RootKind.Tv => target.TvDownloadPath,
+                RootKind.Books => target.BookDownloadPath,
                 RootKind.SeedOnly => target.SeedOnlyPath,
                 _ => target.DownloadPath
             };
