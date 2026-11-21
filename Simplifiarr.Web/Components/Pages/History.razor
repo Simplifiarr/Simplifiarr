@@ -1,4 +1,4 @@
-﻿@page "/history"
+@page "/history"
 @rendermode InteractiveServer
 
 @using Simplifiarr.Core.Models
@@ -206,6 +206,8 @@ else
             record.ActionType == HistoryActionType.PlaybackErrorFixed),
         new("seeds", "Seeds moved", record =>
             record.ActionType == HistoryActionType.SeedMoved),
+        new("titles", "Titles moved or deleted", record =>
+            record.ActionType is HistoryActionType.TitleMoved or HistoryActionType.TitleDeleted),
         new("failed", "Didn't work", record => !record.Success)
     ];
 
@@ -323,6 +325,10 @@ else
                 record.Success ? "Earlier permissions put back" : "Couldn't put earlier permissions back",
             HistoryActionType.SeedMoved =>
                 record.Success ? "Seed moved to its library's drive" : "Couldn't move seed",
+            HistoryActionType.TitleMoved =>
+                record.Success ? "Title moved to another drive" : "Couldn't move title",
+            HistoryActionType.TitleDeleted =>
+                record.Success ? "Title deleted (Recycle Bin)" : "Couldn't delete title",
             _ => record.ActionType.ToString()
         };
 }

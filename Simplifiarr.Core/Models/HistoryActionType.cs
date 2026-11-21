@@ -1,4 +1,4 @@
-﻿namespace Simplifiarr.Core.Models;
+namespace Simplifiarr.Core.Models;
 
 public enum HistoryActionType
 {
@@ -14,6 +14,8 @@ public enum HistoryActionType
     DuplicateQuarantined,
     PlaybackErrorFixed,
     PermissionsRestored,
-    SeedMoved
+    SeedMoved,
+    TitleMoved,
+    TitleDeleted
 }
 

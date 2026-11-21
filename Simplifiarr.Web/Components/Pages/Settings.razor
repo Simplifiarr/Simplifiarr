@@ -12,6 +12,7 @@
 @inject IArrEnrichmentService ArrEnrichmentService
 @inject ITorrentClient TorrentClient
 @inject IScanCoordinator Scans
+@inject ISeerrClient SeerrClient
 
 <PageTitle>Settings - Simplifiarr</PageTitle>
 
@@ -293,6 +294,27 @@ else
                             </div>
                         </div>
 
+                        <div class="row g-3 mt-1">
+                            <div class="col-md-6">
+                                <label class="form-label" for="@($"drive-full-{index}")">Count this drive as full above</label>
+                                <div class="d-flex align-items-center gap-2">
+                                    <input id="@($"drive-full-{index}")"
+                                           class="form-control"
+                                           type="number"
+                                           min="10"
+                                           max="100"
+                                           style="max-width: 7rem"
+                                           placeholder="@_settings.StorageFullAtPercent"
+                                           @bind="profile.FullAtPercent" />
+                                    <span>% used</span>
+                                </div>
+                                <div class="cell-note">
+                                    Storage suggests moves to keep it under this. Blank: the default,
+                                    @(_settings.StorageFullAtPercent)%, set on the Scanning tab under Storage.
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="form-check mt-2">
                             <input class="form-check-input"
                                    type="checkbox"
@@ -446,6 +468,13 @@ else
                           @bind-ApiKey="_settings.JellyfinApiKey"
                           Test="TestJellyfinAsync" />
 
+        <ConnectionFields Name="Seerr"
+                          Purpose="Optional. Jellyseerr or Overseerr: Storage shows who asked for each title and whether they've watched it"
+                          UrlPlaceholder="http://localhost:5055"
+                          @bind-Url="_settings.SeerrUrl"
+                          @bind-ApiKey="_settings.SeerrApiKey"
+                          Test="@(() => SeerrClient.TestConnectionAsync(_settings.SeerrUrl, _settings.SeerrApiKey))" />
+
         <div class="group-card">
             <div class="group-card-header">
                 <div class="group-card-title">fanart.tv</div>
@@ -522,10 +551,115 @@ else
                 <div class="cell-note mt-3">
                     @NextScanText
                 </div>
+
                 <div class="cell-note">
                     Automatic scans only find things. Nothing is linked, moved or deleted until you press a button.
                     A scan already running is never interrupted, and a scan missed while the computer was off runs
                     a couple of minutes after Simplifiarr starts.
+                </div>
+            </div>
+        </div>
+
+        <div class="group-card">
+            <div class="group-card-header">
+                <div class="group-card-title">Size Reduction</div>
+                <div class="group-card-meta" style="white-space: normal">Searches your indexers for smaller releases by itself and saves what it finds</div>
+            </div>
+
+            <div style="padding: 0 1.1rem 1.1rem">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label" for="sr-auto">Search</label>
+                        <select id="sr-auto" class="form-select" @bind="_settings.SizeReductionAuto">
+                            <option value="@AutoScanMode.Off">Only when I press Search</option>
+                            <option value="@AutoScanMode.EveryHours">Every few days</option>
+                            <option value="@AutoScanMode.Daily">Once a day</option>
+                        </select>
+                    </div>
+
+                    @if (_settings.SizeReductionAuto == AutoScanMode.EveryHours)
+                    {
+                        <div class="col-md-4">
+                            <label class="form-label" for="sr-hours">Every</label>
+                            <select id="sr-hours" class="form-select" @bind="_settings.SizeReductionEveryHours">
+                                <option value="24">day</option>
+                                <option value="72">3 days</option>
+                                <option value="168">week</option>
+                                <option value="336">2 weeks</option>
+                                <option value="720">month</option>
+                            </select>
+                        </div>
+                    }
+                    else if (_settings.SizeReductionAuto == AutoScanMode.Daily)
+                    {
+                        <div class="col-md-4">
+                            <label class="form-label" for="sr-time">At</label>
+                            <input id="sr-time" class="form-control" type="time" @bind="SizeReductionTime" @bind:event="onchange" />
+                        </div>
+                    }
+                </div>
+
+                @if (_settings.SizeReductionAuto != AutoScanMode.Off)
+                {
+                    <div class="mt-3">
+                        <div class="form-label">Drives to search</div>
+                        @foreach (var profile in _settings.DriveProfiles.Where(profile => profile.Enabled))
+                        {
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="@($"sr-drive-{profile.Name}")"
+                                       checked="@SearchesDrive(profile.Name)"
+                                       @onchange="e => SetSearchesDrive(profile.Name, e.Value is true)" />
+                                <label class="form-check-label" for="@($"sr-drive-{profile.Name}")">@profile.Name</label>
+                            </div>
+                        }
+                        <div class="cell-note">
+                            Each drive is searched on its own turn, one at a time, counted from its last search.
+                            All ticked means every drive, including ones added later.
+                        </div>
+                    </div>
+                }
+
+                <div class="cell-note mt-2">
+                    Needs Prowlarr. Results wait on the <a href="size-reduction">Size Reduction</a> page; nothing is downloaded.
+                </div>
+            </div>
+        </div>
+
+        <div class="group-card">
+            <div class="group-card-header">
+                <div class="group-card-title">Storage</div>
+                <div class="group-card-meta" style="white-space: normal">When a drive counts as full, and when an unwatched title is worth a look</div>
+            </div>
+
+            <div style="padding: 0 1.1rem 1.1rem">
+                <div style="max-width: 32rem">
+                    <label class="form-label" for="storage-full">Count a drive as full above</label>
+                    <div class="d-flex align-items-center gap-2">
+                        <input id="storage-full"
+                               class="form-control"
+                               type="number"
+                               min="10"
+                               max="100"
+                               style="max-width: 7rem"
+                               @bind="_settings.StorageFullAtPercent" />
+                        <span>% used</span>
+                    </div>
+                    <div class="cell-note">
+                        Storage suggests moves to keep each drive under this. A drive can have its own
+                        limit on the Drives tab.
+                    </div>
+                </div>
+
+                <div class="mt-3" style="max-width: 32rem">
+                    <label class="form-label" for="storage-unwatched">Suggest reviewing titles nobody has watched after</label>
+                    <select id="storage-unwatched" class="form-select" style="max-width: 12rem" @bind="_settings.StorageUnwatchedMonths">
+                        <option value="3">3 months</option>
+                        <option value="6">6 months</option>
+                        <option value="12">12 months</option>
+                    </select>
+                    <div class="cell-note">Watch history comes from Jellyfin during Scan.</div>
                 </div>
             </div>
         </div>
@@ -709,6 +843,62 @@ else
                 _settings.AutoScanDailyTime = time.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
             }
         }
+    }
+
+    private TimeOnly? SizeReductionTime
+    {
+        get => AutoScanSchedule.ParseTime(_settings?.SizeReductionDailyTime) is { } time
+            ? TimeOnly.FromTimeSpan(time)
+            : null;
+        set
+        {
+            if (_settings is not null && value is { } time)
+            {
+                _settings.SizeReductionDailyTime = time.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+            }
+        }
+    }
+
+    private bool SearchesDrive(string name) =>
+        _settings is not null &&
+        (_settings.SizeReductionDrives.Count == 0 ||
+         _settings.SizeReductionDrives.Contains(name, StringComparer.OrdinalIgnoreCase));
+
+    private void SetSearchesDrive(string name, bool on)
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        var all = _settings.DriveProfiles.Where(profile => profile.Enabled).Select(profile => profile.Name).ToList();
+
+        var chosen =
+            _settings.SizeReductionDrives.Count == 0
+                ? all.ToHashSet(StringComparer.OrdinalIgnoreCase)
+                : _settings.SizeReductionDrives.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (on)
+        {
+            chosen.Add(name);
+        }
+        else
+        {
+            chosen.Remove(name);
+        }
+
+        // Nothing ticked: nothing to search, so automatic searching is off.
+        if (chosen.Count == 0)
+        {
+            _settings.SizeReductionAuto = AutoScanMode.Off;
+            _settings.SizeReductionDrives = [];
+
+            return;
+        }
+
+        // Everything ticked is stored as "all", so new drives are included.
+        _settings.SizeReductionDrives =
+            all.All(chosen.Contains) ? [] : all.Where(chosen.Contains).ToList();
     }
 
     private string NextScanText

@@ -24,7 +24,9 @@ public class DefaultScanStepProvider
         IJunkFileScannerService junk,
         IPlaybackErrorService playbackErrors,
         ISeedMoveService seedMoves,
-        IArrEnrichmentService arrEnrichment)
+        IStorageService storage,
+        IArrEnrichmentService arrEnrichment,
+        IWatchHistoryService watchHistory)
     {
         var steps = new List<ScanStep>
         {
@@ -64,6 +66,11 @@ public class DefaultScanStepProvider
                 "Checking which drive each torrent seeds from",
                 profile => seedMoves.ScanAsync(profile.Name)));
 
+        steps.Add(
+            new ScanStep(
+                "Measuring library folders",
+                profile => storage.ScanAsync(profile.Name)));
+
         _steps = steps;
 
         // Library files get Sonarr's and Radarr's titles, so Duplicates,
@@ -77,7 +84,13 @@ public class DefaultScanStepProvider
                 {
                     await arrEnrichment.EnrichFromSonarrAsync();
                     await arrEnrichment.EnrichFromRadarrAsync();
-                })
+                }),
+
+            // Who has watched what, and who asked for it. Does nothing
+            // when Jellyfin isn't set up.
+            new FinishingStep(
+                "Reading watch history from Jellyfin and Seerr",
+                watchHistory.RefreshAsync)
         ];
     }
 

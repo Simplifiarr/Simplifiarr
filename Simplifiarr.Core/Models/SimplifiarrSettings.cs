@@ -54,6 +54,19 @@ public class SimplifiarrSettings
     public string ProwlarrApiKey { get; set; } =
         string.Empty;
 
+    /// <summary>Jellyseerr or Overseerr: who asked for each title.</summary>
+    public string SeerrUrl { get; set; } =
+        "http://localhost:5055";
+
+    public string SeerrApiKey { get; set; } =
+        string.Empty;
+
+    /// <summary>
+    /// Storage suggests reviewing a title nobody has watched once it has
+    /// been on the server this many months.
+    /// </summary>
+    public int StorageUnwatchedMonths { get; set; } = 6;
+
     public string JellyfinUrl { get; set; } =
         "http://localhost:8096";
 
@@ -117,6 +130,26 @@ public class SimplifiarrSettings
     /// Nothing is added to the torrent client without you.
     /// </summary>
     public bool AutoScanCrossSeed { get; set; }
+
+    /// <summary>
+    /// Storage counts a drive as getting full above this used percentage,
+    /// unless the drive has its own.
+    /// </summary>
+    public int StorageFullAtPercent { get; set; } = 90;
+
+    /// <summary>When Size Reduction searches the indexers by itself. Off by default.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter<AutoScanMode>))]
+    public AutoScanMode SizeReductionAuto { get; set; } =
+        AutoScanMode.Off;
+
+    /// <summary>For <see cref="AutoScanMode.EveryHours"/>; a week by default.</summary>
+    public int SizeReductionEveryHours { get; set; } = 24 * 7;
+
+    /// <summary>For <see cref="AutoScanMode.Daily"/>: local time, "HH:mm".</summary>
+    public string SizeReductionDailyTime { get; set; } = "04:00";
+
+    /// <summary>Drive entries searched automatically; empty means all of them.</summary>
+    public List<string> SizeReductionDrives { get; set; } = [];
 }
 
 public enum AutoScanMode

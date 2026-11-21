@@ -5,7 +5,7 @@
 <PageTitle>Help - Simplifiarr</PageTitle>
 
 <PageHeader Title="Help"
-            Subtitle="Store once. Seed everywhere. Waste nothing. What each page is for, and how Simplifiarr keeps your files safe." />
+            Subtitle="Simple tools for a complex system. What each page is for, and how Simplifiarr keeps your files safe." />
 
 @* Scrolled by hand: Blazor's own navigation doesn't scroll to a #section. *@
 <nav class="help-contents" aria-label="On this page">
@@ -121,7 +121,8 @@
         <p>Simplifiarr is built so a mistake can be undone:</p>
 
         <ul>
-            <li>It never copies a file from one drive to another, and never deletes a file outright.</li>
+            <li>It never deletes a file outright: anything removed goes to the Windows Recycle Bin or to Quarantine.</li>
+            <li>The only time it copies between drives is a <a href="storage">Storage</a> move you asked for. Each file is checked against the original before the old copy is removed, and titles move one at a time.</li>
             <li>Anything taken out of a library goes to <a href="quarantine">Quarantine</a> first. Restore puts it back; Delete sends it to the Windows Recycle Bin.</li>
             <li>A hardlink is only counted as done once Simplifiarr has checked it really is the same file.</li>
             <li>Cross-seeds and rebuilt torrents are only offered once every piece has been checked against your files, and are added to your torrent client stopped.</li>
@@ -161,8 +162,9 @@
             <dt>Connections</dt>
             <dd>
                 Your torrent client, qBittorrent for now (what is still seeding), Radarr and Sonarr (exact titles, genres and episode
-                numbers; Hardlinks uses their folders and folder formats), Prowlarr (searching your indexers), Jellyfin (Collections and Posters) and an
-                optional fanart.tv key (more posters). Each has a Test button.
+                numbers; Hardlinks uses their folders and folder formats; Storage updates them when titles move or are deleted), Prowlarr (searching your
+                indexers), Jellyfin (Collections, Posters and watch history), Seerr (who asked for each title) and an optional fanart.tv key (more
+                posters). Each has a Test button.
             </dd>
 
             <dt>Storage</dt>
@@ -227,7 +229,9 @@
         new("playback-errors", "exclamation-octagon", "Playback Errors",
             "Files your media server may not be able to open: blocked by Windows, permissions it can't read, still packed in an archive, empty, unfinished, or badly named. Several can be fixed in one click."),
         new("size-reduction", "file-earmark-zip", "Size Reduction",
-            "Smaller releases of films and episodes you have, found on your indexers. Report only.")
+            "Smaller releases of films and episodes you have, found on your indexers. Report only."),
+        new("storage", "device-hdd", "Storage",
+            "How full each drive is against a limit you set, and what fills it. Suggests titles to move so no drive fills up, and moves them one at a time, telling Radarr or Sonarr the new folder. Shows who has watched each title (Jellyfin) and who asked for it (Seerr), and lists titles worth a look, which can be deleted through Radarr or Sonarr. Titles still seeding are never moved or deleted.")
     ];
 
     private static readonly HelpPage[] SafetyPages =

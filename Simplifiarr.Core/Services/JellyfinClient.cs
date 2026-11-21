@@ -121,6 +121,85 @@ public class JellyfinClient : IJellyfinClient
             .ToList();
     }
 
+    public async Task<IReadOnlyList<(string Id, string Name)>> GetUsersAsync()
+    {
+        using var document = await SendAsync(HttpMethod.Get, "/Users");
+
+        if (document is null || document.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return document.RootElement.EnumerateArray()
+            .Select(user => (Text(user, "Id"), Text(user, "Name")))
+            .Where(user => user.Item1.Length > 0)
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<JellyfinWatchItem>> GetWatchItemsAsync(string userId)
+    {
+        using var document =
+            await SendAsync(
+                HttpMethod.Get,
+                $"/Users/{Uri.EscapeDataString(userId)}/Items?Recursive=true&IncludeItemTypes=Movie,Series" +
+                "&Fields=Path,DateCreated,RecursiveItemCount&EnableUserData=true");
+
+        if (document is null || !document.RootElement.TryGetProperty("Items", out var items))
+        {
+            return [];
+        }
+
+        var result = new List<JellyfinWatchItem>();
+
+        foreach (var item in items.EnumerateArray())
+        {
+            var path = Text(item, "Path");
+
+            if (path.Length == 0)
+            {
+                continue;
+            }
+
+            var isSeries = Text(item, "Type") == "Series";
+            var data = item.TryGetProperty("UserData", out var userData) ? userData : default;
+
+            var played =
+                data.ValueKind == JsonValueKind.Object &&
+                data.TryGetProperty("Played", out var playedValue) &&
+                playedValue.ValueKind == JsonValueKind.True;
+
+            // A show counts as started once any episode has been watched.
+            var started = played;
+
+            if (isSeries &&
+                data.ValueKind == JsonValueKind.Object &&
+                data.TryGetProperty("UnplayedItemCount", out var unplayed) && unplayed.ValueKind == JsonValueKind.Number &&
+                item.TryGetProperty("RecursiveItemCount", out var count) && count.ValueKind == JsonValueKind.Number)
+            {
+                started = unplayed.GetInt32() < count.GetInt32();
+            }
+
+            result.Add(
+                new JellyfinWatchItem(
+                    Text(item, "Id"),
+                    isSeries,
+                    path,
+                    Date(item, "DateCreated"),
+                    played,
+                    started,
+                    data.ValueKind == JsonValueKind.Object ? Date(data, "LastPlayedDate") : null));
+        }
+
+        return result;
+    }
+
+    private static DateTime? Date(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) &&
+        value.ValueKind == JsonValueKind.String &&
+        DateTime.TryParse(value.GetString(), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var date)
+            ? date
+            : null;
+
     private async Task<string> GetAdministratorIdAsync()
     {
         using var document =

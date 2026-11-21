@@ -1,0 +1,924 @@
+@page "/storage"
+@rendermode InteractiveServer
+@implements IDisposable
+
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+@using Simplifiarr.Core.Utilities
+
+@inject IStorageService StorageService
+@inject IStorageMoveService Mover
+@inject ISettingsService SettingsService
+@inject IScanCoordinator Scans
+@inject IWatchHistoryService WatchHistory
+@inject ISizeReductionCandidateService SizeReduction
+@inject IArrPathService ArrPaths
+@inject IIgnoredItemsService Ignored
+
+<PageTitle>Storage - Simplifiarr</PageTitle>
+
+<PageHeader Title="Storage"
+            Subtitle="How full each drive is, what takes the space, and which titles to move so no drive fills up. Sizes are from the last Scan; free space is live." />
+
+@if (_drives is null)
+{
+    <EmptyState Icon="hourglass-split" Text="Loading..." />
+}
+else if (_drives.Count == 0)
+{
+    <div class="alert alert-warning">
+        No drives with libraries are set up yet. <a href="settings">Add one in Settings</a>.
+    </div>
+}
+else
+{
+    <div class="stat-grid">
+        @foreach (var drive in _drives)
+        {
+            <button type="button"
+                    class="stat-card text-start"
+                    style="cursor: pointer; @(_selectedRoot == drive.Root ? "border-color: var(--app-accent)" : null)"
+                    @onclick="() => SelectDrive(drive.Root)">
+                <div class="stat-label">@drive.Root · @string.Join(", ", drive.ProfileNames)</div>
+
+                @if (!drive.IsAvailable)
+                {
+                    <div class="stat-value status-muted">-</div>
+                    <div class="stat-note">Drive not found</div>
+                }
+                else
+                {
+                    <div class="stat-value @(drive.IsOverLimit ? "status-warn" : null)">@($"{drive.UsedPercent:0}%")</div>
+
+                    <div class="space-bar" title="@($"Limit {drive.LimitPercent}%")">
+                        <div class="space-bar-fill @(drive.IsOverLimit ? "over" : null)"
+                             style="width: @(Math.Min(100, drive.UsedPercent).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></div>
+                        <div class="space-bar-limit"
+                             style="left: @(drive.LimitPercent)%"></div>
+                    </div>
+
+                    <div class="stat-note">
+                        @SizeFormatter.FormatBytes(drive.FreeBytes) free of @SizeFormatter.FormatBytes(drive.TotalBytes)
+                    </div>
+                    <div class="stat-note">
+                        Libraries: @SizeFormatter.FormatBytes(drive.Titles.Sum(title => title.SizeBytes))
+                    </div>
+                    <div class="stat-note @(drive.IsOverLimit ? "status-warn" : null)">
+                        @(drive.IsOverLimit
+                            ? $"{SizeFormatter.FormatBytes(drive.OverLimitBytes)} over its {drive.LimitPercent}% limit"
+                            : $"Under its {drive.LimitPercent}% limit")
+                    </div>
+                }
+            </button>
+        }
+    </div>
+
+    @* ------------------------------------------------------------ Queue *@
+
+    @if (Mover.Current is not null || Mover.Queue.Count > 0 || Mover.Results.Count > 0)
+    {
+        <div class="panel mb-4">
+            <div class="toolbar mb-2">
+                <div class="toolbar-summary">
+                    <strong>Moving</strong>
+                    @if (Mover.Queue.Count > 0)
+                    {
+                        <text> · @Mover.Queue.Count waiting (@SizeFormatter.FormatBytes(Mover.Queue.Sum(request => request.Title.SizeBytes)))</text>
+                    }
+                    @if (Mover.IsPaused)
+                    {
+                        <text> · <span class="status-warn">Paused</span></text>
+                    }
+                </div>
+
+                <div class="toolbar-actions">
+                    @if (Mover.IsPaused)
+                    {
+                        <button type="button" class="btn btn-primary btn-sm" @onclick="Mover.Resume">Resume</button>
+                    }
+                    else if (Mover.Queue.Count > 0)
+                    {
+                        <button type="button" class="btn btn-secondary btn-sm" @onclick="Mover.Pause">Pause after this one</button>
+                    }
+
+                    @if (Mover.Queue.Count > 0)
+                    {
+                        <button type="button" class="btn btn-secondary btn-sm" @onclick="Mover.ClearQueue">Empty the queue</button>
+                    }
+                </div>
+            </div>
+
+            @if (Mover.Current is { } current)
+            {
+                <div>
+                    <strong>@current.Request.Title.Name</strong>
+                    → <code>@current.Request.ToLibraryPath</code>
+                </div>
+                <div class="space-bar">
+                    <div class="space-bar-fill"
+                         style="width: @(current.BytesTotal <= 0 ? 0 : current.BytesDone * 100 / current.BytesTotal)%"></div>
+                </div>
+                <div class="cell-note">
+                    @current.Step · @SizeFormatter.FormatBytes(current.BytesDone) of @SizeFormatter.FormatBytes(current.BytesTotal).
+                    This carries on if you leave the page.
+                </div>
+            }
+
+            @if (Mover.Queue.Count > 0)
+            {
+                <details class="mt-2">
+                    <summary>Waiting</summary>
+                    <ul class="mb-0">
+                        @foreach (var waiting in Mover.Queue)
+                        {
+                            <li>
+                                @waiting.Title.Name
+                                <span class="cell-note">→ @waiting.ToLibraryPath · @SizeFormatter.FormatBytes(waiting.Title.SizeBytes)</span>
+                                <button type="button" class="btn btn-link btn-sm py-0" @onclick="() => Mover.Remove(waiting)">Take off</button>
+                            </li>
+                        }
+                    </ul>
+                </details>
+            }
+
+            @if (Mover.Results.Count > 0)
+            {
+                <details class="mt-2" open="@(Mover.Current is null && Mover.Queue.Count == 0)">
+                    <summary>Done (@Mover.Results.Count(result => result.Succeeded) moved, @Mover.Results.Count(result => !result.Succeeded) not)</summary>
+                    <ul class="mb-0">
+                        @foreach (var result in Mover.Results.Take(30))
+                        {
+                            <li class="@(result.Succeeded ? null : "status-warn")">@result.Message</li>
+                        }
+                    </ul>
+                    @if (Mover.Results.Any(result => result.Succeeded))
+                    {
+                        <div class="cell-note mt-1">Old folders are in the Recycle Bin; empty it to get the space back.</div>
+                    }
+                </details>
+            }
+        </div>
+    }
+
+    @* ------------------------------------------------------ Suggestions *@
+
+    <h2 class="section-title">Suggested moves</h2>
+
+    @if (!_drives.Any(drive => drive.IsOverLimit))
+    {
+        <EmptyState Icon="check-circle" Text="Every drive is under its limit." />
+    }
+    else if (_suggestions.Count == 0)
+    {
+        <div class="alert alert-warning">
+            A drive is over its limit, but no movie or TV title on it fits on another drive without
+            pushing that one over its own limit. Lower a limit in Settings, free some space, or see the
+            largest titles below.
+        </div>
+    }
+    else
+    {
+        <div class="toolbar">
+            <div class="toolbar-summary">
+                <strong>@_suggestions.Count</strong> title(s) ·
+                <strong>@SizeFormatter.FormatBytes(_suggestions.Sum(suggestion => suggestion.Title.SizeBytes))</strong>
+                to move
+                @if (_pickedSuggestions.Count > 0)
+                {
+                    <text> · @_pickedSuggestions.Count selected</text>
+                }
+            </div>
+
+            <div class="toolbar-actions">
+                <button type="button"
+                        class="btn btn-secondary btn-sm"
+                        @onclick="() => _pickedSuggestions = _suggestions.Select(suggestion => suggestion.Title.FolderPath).ToHashSet(StringComparer.OrdinalIgnoreCase)">
+                    Select all
+                </button>
+
+                <button type="button"
+                        class="btn btn-primary btn-sm"
+                        disabled="@(_pickedSuggestions.Count == 0)"
+                        @onclick="MoveSuggestions">
+                    Move selected (@_pickedSuggestions.Count)
+                </button>
+            </div>
+        </div>
+
+        <div class="table-scroll mb-2">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th class="col-check">Select</th>
+                        <th>Title</th>
+                        <th>Move</th>
+                        <th class="col-num">Size</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var suggestion in _suggestions)
+                    {
+                        var queued = IsQueued(suggestion.Title);
+
+                        <tr @key="suggestion.Title.FolderPath" class="@(queued ? "row-disabled" : null)">
+                            <SelectableCheckboxCell Checked="_pickedSuggestions.Contains(suggestion.Title.FolderPath)"
+                                                    Disabled="queued"
+                                                    OnChanged="selected => Toggle(_pickedSuggestions, suggestion.Title, selected)" />
+                            <td>
+                                <div class="file-name">@suggestion.Title.Name</div>
+                                <div class="cell-note">
+                                    @suggestion.Title.Kind · @suggestion.Title.FileCount file(s)
+                                    @if (queued)
+                                    {
+                                        <text> · queued</text>
+                                    }
+                                </div>
+                            </td>
+                            <td>
+                                @suggestion.FromRoot → @suggestion.ToRoot
+                                <div class="cell-note"><code>@suggestion.ToLibraryPath</code></div>
+                            </td>
+                            <td class="col-num">@SizeFormatter.FormatBytes(suggestion.Title.SizeBytes)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <p class="cell-note">
+            Titles still seeding from a torrent are never suggested: moving the library copy alone
+            would leave the seed's copy behind and free nothing.
+        </p>
+    }
+
+    @* ------------------------------------------------------- Worth a look *@
+
+    <h2 class="section-title mt-4">Worth a look</h2>
+
+    @if (WatchHistory.RefreshedUtc is null)
+    {
+        <div class="alert alert-info">
+            Simplifiarr reads who has watched what from Jellyfin, and who asked for it from Seerr,
+            during Scan. Set up Jellyfin (and optionally Seerr) in <a href="settings">Settings</a>,
+            under Connections, then press Scan.
+        </div>
+    }
+    else if (_reviews.Count == 0)
+    {
+        <EmptyState Icon="check-circle" Text="@($"Nothing to review: no title has been watched by the person who asked for it, or sat unwatched for over {_unwatchedMonths} months.")" />
+    }
+    else
+    {
+        <div class="toolbar">
+            <div class="toolbar-summary">
+                <strong>@_reviews.Count</strong> title(s) ·
+                <strong>@SizeFormatter.FormatBytes(_reviews.Sum(review => review.Title.SizeBytes))</strong>
+                · watched by whoever asked for it, or unwatched for over @_unwatchedMonths months
+            </div>
+        </div>
+
+        <div class="table-scroll">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Why</th>
+                        <th class="col-num">Size</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var review in _reviews.Take(_reviewsShown))
+                    {
+                        <tr @key="review.Title.FolderPath">
+                            <td>
+                                <div class="file-name">@review.Title.Name</div>
+                                <div class="cell-note">
+                                    @review.Title.Kind · @review.Title.FolderPath.Substring(0, 3)
+                                    @if (review.Watch.AddedUtc is { } added)
+                                    {
+                                        <text> · added @added.ToLocalTime().ToString("d MMM yyyy")</text>
+                                    }
+                                </div>
+                            </td>
+                            <td>
+                                @review.Reason
+                                @if (review.Watch.StartedBy.Count > 0)
+                                {
+                                    <div class="cell-note">Watched by @string.Join(", ", review.Watch.StartedBy.Distinct())</div>
+                                }
+                            </td>
+                            <td class="col-num">@SizeFormatter.FormatBytes(review.Title.SizeBytes)</td>
+                            <td>
+                                @if (review.Title.IsSeeding)
+                                {
+                                    <span class="cell-note">Seeding - deleting frees nothing</span>
+                                }
+                                else if (_confirmDelete == review.Title.FolderPath)
+                                {
+                                    <div class="d-flex gap-2 flex-wrap">
+                                        <button type="button" class="btn btn-danger btn-sm" disabled="@_deleting" @onclick="() => DeleteAsync(review)">
+                                            @(_deleting ? "Deleting..." : "Delete it")
+                                        </button>
+                                        <button type="button" class="btn btn-secondary btn-sm" disabled="@_deleting" @onclick="() => _confirmDelete = null">Cancel</button>
+                                    </div>
+                                    <div class="cell-note mt-1">
+                                        Removes it from @(review.Title.Kind == StorageKinds.Tv ? "Sonarr" : "Radarr")
+                                        @(review.Watch.SeerrMediaId > 0 ? "and Seerr" : null), and sends the folder to the Recycle Bin.
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="d-flex gap-2 flex-wrap">
+                                        <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => _confirmDelete = review.Title.FolderPath">Delete...</button>
+                                        <button type="button" class="btn btn-secondary btn-sm" title="Stop suggesting it. Undo on the Ignored page." @onclick="() => Keep(review)">Keep</button>
+                                    </div>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (_reviews.Count > _reviewsShown)
+        {
+            <button type="button" class="btn btn-secondary btn-sm mt-2" @onclick="() => _reviewsShown += 50">Show 50 more</button>
+        }
+
+        @if (_deleteMessage is not null)
+        {
+            <div class="alert @(_deleteOk ? "alert-success" : "alert-danger") mt-2">@_deleteMessage</div>
+        }
+    }
+
+    @* ----------------------------------------------------------- Titles *@
+
+    @if (SelectedDrive is { } selected)
+    {
+        <h2 class="section-title mt-4">What takes the space on @selected.Root</h2>
+
+        @if (selected.Titles.Count == 0)
+        {
+            <EmptyState Icon="search" Text="Nothing measured yet. Press Scan at the top of the page." />
+        }
+        else
+        {
+            <div class="toolbar">
+                <div class="toolbar-summary">
+                    <strong>@FilteredTitles.Count</strong> title(s) ·
+                    @SizeFormatter.FormatBytes(FilteredTitles.Sum(title => title.SizeBytes))
+                    @if (FilteredTitles.Sum(title => title.SeedingBytes) is > 0 and var seeding)
+                    {
+                        <text> · @SizeFormatter.FormatBytes(seeding) still seeding</text>
+                    }
+                    @if (_pickedTitles.Count > 0)
+                    {
+                        <text> · @_pickedTitles.Count selected (@SizeFormatter.FormatBytes(PickedTitles.Sum(title => title.SizeBytes)))</text>
+                    }
+                </div>
+
+                <div class="toolbar-actions">
+                    <select class="form-select form-select-sm" aria-label="Kind" @bind="_kind">
+                        <option value="">Everything</option>
+                        @foreach (var kind in selected.Titles.Select(title => title.Kind).Distinct())
+                        {
+                            <option value="@kind">@kind</option>
+                        }
+                    </select>
+
+                    @if (_pickedTitles.Count > 0)
+                    {
+                        <select class="form-select form-select-sm" aria-label="Move to" @bind="_moveTo">
+                            <option value="">Move to...</option>
+                            @foreach (var root in TargetRoots)
+                            {
+                                <option value="@root">@root (@SizeFormatter.FormatBytes(_drives.First(drive => drive.Root == root).FreeBytes) free)</option>
+                            }
+                        </select>
+
+                        <button type="button"
+                                class="btn btn-primary btn-sm"
+                                disabled="@(string.IsNullOrEmpty(_moveTo))"
+                                @onclick="MovePicked">
+                            Move (@_pickedTitles.Count)
+                        </button>
+                    }
+                </div>
+            </div>
+
+            @if (_moveNote is not null)
+            {
+                <div class="alert alert-warning">@_moveNote</div>
+            }
+
+            <div class="table-scroll">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th class="col-check">Select</th>
+                            <th>Title</th>
+                            <th>Kind</th>
+                            <th class="col-num">Size</th>
+                            <th>Watched</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var title in FilteredTitles.Take(_shown))
+                        {
+                            var queued = IsQueued(title);
+
+                            <tr @key="title.FolderPath" class="@(title.CanMove && !queued ? null : "row-disabled")">
+                                <SelectableCheckboxCell Checked="_pickedTitles.Contains(title.FolderPath)"
+                                                        Disabled="!title.CanMove || queued"
+                                                        OnChanged="picked => Toggle(_pickedTitles, title, picked)" />
+                                <td>
+                                    <div class="file-name">@title.Name</div>
+                                    <div class="cell-note">@title.FileCount file(s) · last changed @title.LastWriteUtc.ToLocalTime().ToString("d MMM yyyy")</div>
+                                </td>
+                                <td>@title.Kind</td>
+                                <td class="col-num">@SizeFormatter.FormatBytes(title.SizeBytes)</td>
+                                <td>@WatchText(title)</td>
+                                <td>
+                                    @if (queued)
+                                    {
+                                        <span class="status-muted">Queued to move</span>
+                                    }
+                                    else if (title.IsSeeding)
+                                    {
+                                        <span class="status-muted">Seeding - can't move</span>
+                                        <div class="cell-note">@SizeFormatter.FormatBytes(title.SeedingBytes) is shared with a torrent</div>
+                                    }
+                                    else if (!title.CanMove)
+                                    {
+                                        <span class="status-muted">Only movies and TV can be moved</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="status-ok">Can move</span>
+                                    }
+
+                                    @if (_shrinkable.TryGetValue(title.FolderPath, out var savings))
+                                    {
+                                        <div class="cell-note">
+                                            <a href="size-reduction">A smaller release could save @SizeFormatter.FormatBytes(savings)</a>
+                                        </div>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            @if (FilteredTitles.Count > _shown)
+            {
+                <button type="button" class="btn btn-secondary btn-sm mt-2" @onclick="() => _shown += 100">
+                    Show 100 more
+                </button>
+            }
+        }
+    }
+
+    @* ------------------------------------------------- Arr folder repair *@
+
+    <h2 class="section-title mt-4">Radarr and Sonarr folders</h2>
+
+    <div class="toolbar">
+        <div class="toolbar-summary" style="max-width: 70ch">
+            Movies and shows Radarr or Sonarr point at a folder that no longer exists, usually
+            because the folder was moved by hand. Where the folder is found in your libraries,
+            Simplifiarr can point them at it. Nothing is moved; only the address changes.
+        </div>
+        <div class="toolbar-actions">
+            <button type="button" class="btn btn-secondary btn-sm" disabled="@_checkingArr" @onclick="CheckArrFoldersAsync">
+                @(_checkingArr ? "Checking..." : "Check folders")
+            </button>
+            @if (_arrProblems.Count(problem => problem.CanFix) is > 0 and var fixable)
+            {
+                <button type="button" class="btn btn-primary btn-sm" disabled="@_checkingArr" @onclick="() => FixArrAsync(_arrProblems.Where(problem => problem.CanFix).ToList())">
+                    Fix all found (@fixable)
+                </button>
+            }
+        </div>
+    </div>
+
+    @if (_arrMessage is not null)
+    {
+        <div class="alert @(_arrOk ? "alert-info" : "alert-warning")">@_arrMessage</div>
+    }
+
+    @if (_arrProblems.Count > 0)
+    {
+        <div class="table-scroll">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Points at (gone)</th>
+                        <th>Is now at</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var problem in _arrProblems)
+                    {
+                        <tr @key="(problem.Item.Source, problem.Item.Id)" class="@(problem.CanFix ? null : "row-disabled")">
+                            <td>
+                                <div class="file-name">@problem.Item.Title @(problem.Item.Year is { } year ? $"({year})" : null)</div>
+                                <div class="cell-note">@problem.Item.Source</div>
+                            </td>
+                            <td><code>@problem.Item.Path</code></td>
+                            <td>
+                                @if (problem.FoundFolder is { } found)
+                                {
+                                    <code>@found</code>
+                                }
+                                else
+                                {
+                                    <span class="cell-note">@problem.Note</span>
+                                }
+                            </td>
+                            <td>
+                                @if (problem.CanFix)
+                                {
+                                    <button type="button" class="btn btn-secondary btn-sm" disabled="@_checkingArr" @onclick="() => FixArrAsync([problem])">Fix</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <p class="cell-note mt-4">
+        Titles move one at a time, with a short rest between them. Each file is copied, read back and
+        checked against the original; only then is Radarr or Sonarr given the new folder and the old
+        one sent to the Recycle Bin. If anything fails, the title stays where it was.
+    </p>
+}
+
+@code
+{
+    private List<StorageDrive>? _drives;
+    private List<StorageMoveSuggestion> _suggestions = [];
+    private List<StoragePlanner.Destination> _destinations = [];
+
+    private HashSet<string> _pickedSuggestions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _pickedTitles = new(StringComparer.OrdinalIgnoreCase);
+
+    private string? _selectedRoot;
+    private string _kind = string.Empty;
+    private string _moveTo = string.Empty;
+    private string? _moveNote;
+    private int _shown = 100;
+    private bool _scanWasRunning;
+    private int _resultsSeen;
+
+    private List<StorageReview> _reviews = [];
+
+    // Title folder -> the most Size Reduction has found it could save.
+    private Dictionary<string, long> _shrinkable = new(StringComparer.OrdinalIgnoreCase);
+    private int _unwatchedMonths = 6;
+    private int _reviewsShown = 50;
+    private string? _confirmDelete;
+    private bool _deleting;
+    private string? _deleteMessage;
+    private bool _deleteOk;
+
+    private string WatchText(StorageTitle title)
+    {
+        if (WatchHistory.Find(title) is not { } watch)
+        {
+            return title.Kind is StorageKinds.Movies or StorageKinds.Tv && WatchHistory.RefreshedUtc is not null
+                ? "Not in Jellyfin"
+                : "-";
+        }
+
+        var who =
+            watch.StartedBy.Count == 0
+                ? "Nobody yet"
+                : string.Join(", ", watch.StartedBy.Distinct().Take(3)) + (watch.StartedBy.Distinct().Count() > 3 ? " and others" : string.Empty);
+
+        return watch.RequestedBy is null
+            ? who
+            : $"{who} · asked for by {watch.RequestedBy}" + (watch.RequesterWatched == true ? " (watched)" : watch.RequesterStarted == true ? " (started)" : " (not yet)");
+    }
+
+    private List<ArrFolderProblem> _arrProblems = [];
+    private bool _checkingArr;
+    private string? _arrMessage;
+    private bool _arrOk;
+
+    private void Keep(StorageReview review)
+    {
+        Ignored.Add(
+            new IgnoredItem
+            {
+                SourcePath = review.Title.FolderPath,
+                Title = review.Title.Name,
+                Category = review.Title.Kind == StorageKinds.Tv ? IgnoredCategory.Tv : IgnoredCategory.Movie,
+                DriveProfileName = review.Title.DriveName,
+                IgnoredUtc = DateTime.UtcNow,
+                Reason = "Kept: not suggested on Storage's Worth a look"
+            });
+
+        _reviews.Remove(review);
+    }
+
+    private async Task CheckArrFoldersAsync()
+    {
+        _checkingArr = true;
+        _arrMessage = null;
+
+        try
+        {
+            var titles = _drives?.SelectMany(drive => drive.Titles).ToList() ?? [];
+            var problems = new List<ArrFolderProblem>();
+
+            foreach (var kind in new[] { StorageKinds.Movies, StorageKinds.Tv })
+            {
+                // Radarr's and Sonarr's own root folders count too, even
+                // ones that aren't a library in Settings.
+                var known = titles.Select(title => title.FolderPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var candidates = titles.ToList();
+
+                foreach (var root in await ArrPaths.GetRootFoldersAsync(kind))
+                {
+                    if (!Directory.Exists(root))
+                    {
+                        continue;
+                    }
+
+                    candidates.AddRange(
+                        Directory.EnumerateDirectories(root)
+                            .Where(folder => !known.Contains(folder))
+                            .Select(folder => new StorageTitle { Kind = kind, FolderPath = folder, Name = Path.GetFileName(folder) }));
+                }
+
+                problems.AddRange(ArrFolderRepair.Find(kind, await ArrPaths.GetAllAsync(kind), candidates, Directory.Exists));
+            }
+
+            _arrProblems = problems;
+            _arrOk = true;
+            _arrMessage =
+                problems.Count == 0
+                    ? "Every movie and show in Radarr and Sonarr points at a folder that exists."
+                    : $"{problems.Count} point at a folder that's gone; {problems.Count(problem => problem.CanFix)} were found in your libraries.";
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        {
+            _arrOk = false;
+            _arrMessage = $"Couldn't read Radarr or Sonarr: {exception.Message}";
+        }
+        finally
+        {
+            _checkingArr = false;
+        }
+    }
+
+    private async Task FixArrAsync(List<ArrFolderProblem> problems)
+    {
+        _checkingArr = true;
+
+        var fixedCount = 0;
+        var failures = new List<string>();
+
+        try
+        {
+            foreach (var problem in problems.Where(problem => problem.FoundFolder is not null))
+            {
+                var folder = problem.FoundFolder!;
+                var refusal = await ArrPaths.SetFolderAsync(problem.Kind, problem.Item, folder, Path.GetDirectoryName(folder)!);
+
+                if (refusal is null)
+                {
+                    await ArrPaths.RescanAsync(problem.Kind, problem.Item);
+                    fixedCount++;
+                    _arrProblems.Remove(problem);
+                }
+                else
+                {
+                    failures.Add($"{problem.Item.Title}: {refusal}");
+                }
+
+                StateHasChanged();
+            }
+        }
+        finally
+        {
+            _checkingArr = false;
+        }
+
+        _arrOk = failures.Count == 0;
+        _arrMessage =
+            $"Pointed {fixedCount} at their folders; Radarr and Sonarr are rescanning them." +
+            (failures.Count == 0 ? string.Empty : " Not fixed: " + string.Join("; ", failures.Take(5)));
+    }
+
+    private async Task DeleteAsync(StorageReview review)
+    {
+        _deleting = true;
+
+        try
+        {
+            var result = await Mover.DeleteAsync(review.Title, review.Watch.SeerrMediaId);
+
+            _deleteOk = result.Succeeded;
+            _deleteMessage = result.Message;
+        }
+        finally
+        {
+            _deleting = false;
+            _confirmDelete = null;
+        }
+
+        await LoadAsync();
+    }
+
+    private StorageDrive? SelectedDrive =>
+        _drives?.FirstOrDefault(drive => drive.Root == _selectedRoot);
+
+    private List<StorageTitle> FilteredTitles =>
+        SelectedDrive?.Titles
+            .Where(title => _kind.Length == 0 || title.Kind == _kind)
+            .ToList() ?? [];
+
+    private List<StorageTitle> PickedTitles =>
+        SelectedDrive?.Titles.Where(title => _pickedTitles.Contains(title.FolderPath)).ToList() ?? [];
+
+    /// <summary>Other drives with a library for every kind picked.</summary>
+    private List<string> TargetRoots =>
+        _destinations
+            .Where(destination => destination.Root != _selectedRoot)
+            .GroupBy(destination => destination.Root)
+            .Where(group => PickedTitles.All(title => group.Any(destination => destination.Kind == title.Kind)))
+            .Select(group => group.Key)
+            .OrderBy(root => root)
+            .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _scanWasRunning = Scans.Progress.IsRunning;
+        _resultsSeen = Mover.Results.Count;
+
+        Scans.Changed += OnScanChanged;
+        Mover.Changed += OnMoverChanged;
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var settings = await SettingsService.GetSettingsAsync();
+
+        _destinations = StoragePlanner.Destinations(settings.DriveProfiles);
+        _drives = await StorageService.GetDrivesAsync();
+        _suggestions = await StorageService.GetSuggestionsAsync();
+
+        _unwatchedMonths = settings.StorageUnwatchedMonths;
+
+        // Each file's best saving, added up per title folder.
+        var found = await SizeReduction.GetFoundAsync();
+
+        _shrinkable =
+            _drives
+                .SelectMany(drive => drive.Titles)
+                .Select(title => (
+                    title.FolderPath,
+                    Savings: found
+                        .Where(candidate => PathContainment.IsPathUnderRoot(candidate.CanonicalPath, title.FolderPath))
+                        .GroupBy(candidate => candidate.CanonicalPath, StringComparer.OrdinalIgnoreCase)
+                        .Sum(file => file.Max(candidate => candidate.SavingsBytes))))
+                .Where(entry => entry.Savings > 0)
+                .GroupBy(entry => entry.FolderPath, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First().Savings, StringComparer.OrdinalIgnoreCase);
+        _reviews =
+            WatchHistoryService.Review(
+                _drives.SelectMany(drive => drive.Titles).Where(title => !Ignored.IsIgnored(title.FolderPath)),
+                WatchHistory.Find,
+                _unwatchedMonths,
+                DateTime.UtcNow);
+
+        var present = _suggestions.Select(suggestion => suggestion.Title.FolderPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _pickedSuggestions.IntersectWith(present);
+
+        // Start on the fullest drive.
+        if (_selectedRoot is null || _drives.All(drive => drive.Root != _selectedRoot))
+        {
+            _selectedRoot =
+                _drives
+                    .Where(drive => drive.IsAvailable)
+                    .OrderByDescending(drive => drive.UsedPercent - drive.LimitPercent)
+                    .FirstOrDefault()?.Root;
+        }
+    }
+
+    private void SelectDrive(string root)
+    {
+        if (_selectedRoot == root)
+        {
+            return;
+        }
+
+        _selectedRoot = root;
+        _pickedTitles.Clear();
+        _moveTo = string.Empty;
+        _moveNote = null;
+        _shown = 100;
+    }
+
+    private static void Toggle(HashSet<string> set, StorageTitle title, bool picked)
+    {
+        if (picked)
+        {
+            set.Add(title.FolderPath);
+        }
+        else
+        {
+            set.Remove(title.FolderPath);
+        }
+    }
+
+    private bool IsQueued(StorageTitle title) =>
+        Mover.Queue.Any(request => string.Equals(request.Title.FolderPath, title.FolderPath, StringComparison.OrdinalIgnoreCase)) ||
+        (Mover.Current is { } current && string.Equals(current.Request.Title.FolderPath, title.FolderPath, StringComparison.OrdinalIgnoreCase));
+
+    private void MoveSuggestions()
+    {
+        Mover.Enqueue(
+            _suggestions
+                .Where(suggestion => _pickedSuggestions.Contains(suggestion.Title.FolderPath))
+                .Select(suggestion => new StorageMoveRequest(suggestion.Title, suggestion.ToLibraryPath)));
+
+        _pickedSuggestions.Clear();
+    }
+
+    private void MovePicked()
+    {
+        var requests = new List<StorageMoveRequest>();
+        var skipped = new List<string>();
+
+        foreach (var title in PickedTitles)
+        {
+            var library =
+                _destinations.FirstOrDefault(destination => destination.Root == _moveTo && destination.Kind == title.Kind);
+
+            if (library is null)
+            {
+                skipped.Add(title.Name);
+            }
+            else
+            {
+                requests.Add(new StorageMoveRequest(title, library.LibraryPath));
+            }
+        }
+
+        Mover.Enqueue(requests);
+
+        _pickedTitles.Clear();
+        _moveTo = string.Empty;
+        _moveNote = skipped.Count == 0 ? null : $"Not queued, no library for them on that drive: {string.Join(", ", skipped)}.";
+    }
+
+    private void OnScanChanged()
+    {
+        var running = Scans.Progress.IsRunning;
+        var finished = _scanWasRunning && !running;
+
+        _scanWasRunning = running;
+
+        if (finished)
+        {
+            _ = InvokeAsync(async () =>
+            {
+                await LoadAsync();
+                StateHasChanged();
+            });
+        }
+    }
+
+    private void OnMoverChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            // A title finished: free space and the lists have changed.
+            if (Mover.Results.Count != _resultsSeen)
+            {
+                _resultsSeen = Mover.Results.Count;
+
+                await LoadAsync();
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        Scans.Changed -= OnScanChanged;
+        Mover.Changed -= OnMoverChanged;
+    }
+}

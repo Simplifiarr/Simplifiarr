@@ -116,4 +116,10 @@ public class DriveProfile
     /// SxxExx" form. Folder structure is unaffected either way.
     /// </summary>
     public bool PreserveOriginalFileName { get; set; }
+
+    /// <summary>
+    /// Storage warns when the drive is fuller than this percentage. Null:
+    /// the default in Settings.
+    /// </summary>
+    public int? FullAtPercent { get; set; }
 }

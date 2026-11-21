@@ -59,8 +59,16 @@ public interface IJellyfinClient
         string url,
         string apiKey);
 
+    /// <summary>Every Jellyfin user: id and name.</summary>
+    Task<IReadOnlyList<(string Id, string Name)>> GetUsersAsync();
+
     /// <summary>
-    /// Every film, episode, track, audiobook and book in Jellyfin's
+    /// Each movie and show as one user sees it: when it was added and
+    /// whether that user has watched it.
+    /// </summary>
+    Task<IReadOnlyList<JellyfinWatchItem>> GetWatchItemsAsync(string userId);
+
+    /// <summary>    /// Every film, episode, track, audiobook and book in Jellyfin's
     /// libraries that has a file path.
     /// </summary>
     Task<IReadOnlyList<JellyfinItem>> GetLibraryItemsAsync();
@@ -140,3 +148,13 @@ public interface IJellyfinClient
         byte[] image,
         string contentType);
 }
+
+/// <summary>A movie or show as one Jellyfin user sees it.</summary>
+public sealed record JellyfinWatchItem(
+    string Id,
+    bool IsSeries,
+    string Path,
+    DateTime? AddedUtc,
+    bool Watched,
+    bool Started,
+    DateTime? LastWatchedUtc);

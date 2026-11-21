@@ -21,13 +21,22 @@ public static class AutoScanSchedule
     public static DateTime? NextRunLocal(
         SimplifiarrSettings settings,
         DateTime? lastScanLocal,
+        DateTime nowLocal) =>
+        NextRunLocal(settings.AutoScan, settings.AutoScanEveryHours, settings.AutoScanDailyTime, lastScanLocal, nowLocal);
+
+    /// <summary>The same rules for any schedule: every few hours, or daily at a time.</summary>
+    public static DateTime? NextRunLocal(
+        AutoScanMode mode,
+        int everyHours,
+        string dailyTime,
+        DateTime? lastScanLocal,
         DateTime nowLocal)
     {
-        switch (settings.AutoScan)
+        switch (mode)
         {
             case AutoScanMode.EveryHours:
             {
-                var hours = Math.Clamp(settings.AutoScanEveryHours, 1, 24 * 7);
+                var hours = Math.Clamp(everyHours, 1, 24 * 31);
 
                 return lastScanLocal is { } last
                     ? last.AddHours(hours)
@@ -36,7 +45,7 @@ public static class AutoScanSchedule
 
             case AutoScanMode.Daily:
             {
-                var time = ParseTime(settings.AutoScanDailyTime) ?? new TimeSpan(3, 0, 0);
+                var time = ParseTime(dailyTime) ?? new TimeSpan(3, 0, 0);
 
                 // The most recent set time that has already passed.
                 var latest = nowLocal.Date + time;

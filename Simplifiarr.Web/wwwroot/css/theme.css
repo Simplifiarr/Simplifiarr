@@ -1468,3 +1468,37 @@ a.action-row-title .bi {
 .waste-queue-table td:nth-child(6) {
     white-space: nowrap;
 }
+
+/* Storage: how full a drive is, with a tick where its limit sits. */
+
+.space-bar {
+    position: relative;
+    height: .65rem;
+    margin: .6rem 0 .35rem;
+    background: var(--app-border);
+    border-radius: 999px;
+    overflow: visible;
+}
+
+.space-bar-fill {
+    height: 100%;
+    background: var(--app-accent);
+    border-radius: 999px;
+}
+
+.space-bar-fill.over {
+    background: var(--app-warn);
+}
+
+.space-bar-limit {
+    position: absolute;
+    top: -.2rem;
+    bottom: -.2rem;
+    width: 2px;
+    background: var(--app-text);
+    opacity: .6;
+}
+
+.row-disabled td {
+    color: var(--app-muted);
+}
