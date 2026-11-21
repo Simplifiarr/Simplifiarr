@@ -12,7 +12,9 @@ public sealed record ArrItem(
     int Id,
     string Title,
     string Path,
-    int? Year = null);
+    int? Year = null,
+    bool Monitored = false,
+    bool Upcoming = false);
 
 /// <summary>
 /// Finds which Radarr movie or Sonarr show owns a folder, and tells it the
@@ -165,7 +167,11 @@ public class ArrPathService : IArrPathService
                     path,
                     entry.TryGetProperty("year", out var year) && year.ValueKind == JsonValueKind.Number && year.GetInt32() > 0
                         ? year.GetInt32()
-                        : null));
+                        : null,
+                    entry.TryGetProperty("monitored", out var monitored) && monitored.ValueKind == JsonValueKind.True,
+                    // Not out yet: there is nothing to have on disk.
+                    entry.TryGetProperty("status", out var status) &&
+                    status.GetString() is "tba" or "announced" or "inCinemas" or "upcoming"));
         }
 
         return items;

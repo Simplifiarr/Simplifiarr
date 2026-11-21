@@ -68,6 +68,38 @@ public class ArrFolderRepairTests
     }
 
     [TestMethod]
+    public void Nothing_on_disk_can_be_removed_but_upcoming_films_are_left_alone()
+    {
+        var problems =
+            Find(
+                Movie(1, "Gone For Good", 2006, @"F:\Holiday\Gone For Good (2006)"),
+                new ArrItem("Radarr", 2, "Next Summer", @"C:\Media\Movies\Next Summer (2027)", 2027, Monitored: true, Upcoming: true));
+
+        var problem = problems.Single();
+
+        Assert.AreEqual(1, problem.Item.Id);
+        Assert.IsTrue(problem.CanRemove);
+        Assert.IsFalse(problem.CanFix);
+    }
+
+    [TestMethod]
+    public void An_empty_folder_counts_as_nothing_on_disk()
+    {
+        var empty = @"O:\Movies\Harbour (2019)";
+
+        var problem =
+            ArrFolderRepair.Find(
+                StorageKinds.Movies,
+                [Movie(1, "Harbour", 2019, empty)],
+                [],
+                Existing.Contains,
+                folder => !string.Equals(folder, empty, StringComparison.OrdinalIgnoreCase)).Single();
+
+        Assert.IsTrue(problem.FolderIsEmpty);
+        Assert.IsTrue(problem.CanRemove);
+    }
+
+    [TestMethod]
     public void Moving_finds_a_title_Radarr_has_under_a_folder_that_is_gone()
     {
         var items = new[]

@@ -7,16 +7,26 @@ public sealed record ArrFolderProblem(
     string Kind,
     ArrItem Item,
     string? FoundFolder,
-    int Matches)
+    int Matches,
+    bool FolderIsEmpty = false)
 {
     public bool CanFix => FoundFolder is not null;
+
+    /// <summary>
+    /// Nothing of it is on disk anywhere Simplifiarr can see, so the entry
+    /// can only be removed.
+    /// </summary>
+    public bool CanRemove => FoundFolder is null && Matches == 0;
 
     public string Note =>
         FoundFolder is not null
             ? "Found in your libraries"
             : Matches > 1
                 ? $"{Matches} folders could be it; fix it in {Item.Source}"
-                : "Not found in any library folder in Settings";
+                : (FolderIsEmpty
+                      ? "Its folder is there but has no files, and no other copy was found"
+                      : "Not found in any library folder or root folder") +
+                  (Item.Monitored ? $". It is monitored, so {Item.Source} may still be looking for it" : string.Empty);
 }
 
 /// <summary>
@@ -30,7 +40,8 @@ public static class ArrFolderRepair
         string kind,
         IReadOnlyList<ArrItem> items,
         IReadOnlyList<StorageTitle> libraryTitles,
-        Func<string, bool> folderExists)
+        Func<string, bool> folderExists,
+        Func<string, bool>? folderHasFiles = null)
     {
         // A folder another item already uses is never offered.
         var claimed =
@@ -50,7 +61,16 @@ public static class ArrFolderRepair
 
         foreach (var item in items)
         {
-            if (folderExists(item.Path))
+            // Not released yet: of course there are no files.
+            if (item.Upcoming)
+            {
+                continue;
+            }
+
+            var exists = folderExists(item.Path);
+            var empty = exists && folderHasFiles is not null && !folderHasFiles(item.Path);
+
+            if (exists && !empty)
             {
                 continue;
             }
@@ -72,7 +92,7 @@ public static class ArrFolderRepair
                         .ToList();
             }
 
-            problems.Add(new ArrFolderProblem(kind, item, matches.Count == 1 ? matches[0] : null, matches.Count));
+            problems.Add(new ArrFolderProblem(kind, item, matches.Count == 1 ? matches[0] : null, matches.Count, empty));
         }
 
         return problems
