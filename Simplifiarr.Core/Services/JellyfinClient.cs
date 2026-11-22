@@ -187,7 +187,10 @@ public class JellyfinClient : IJellyfinClient
                     Date(item, "DateCreated"),
                     played,
                     started,
-                    data.ValueKind == JsonValueKind.Object ? Date(data, "LastPlayedDate") : null));
+                    data.ValueKind == JsonValueKind.Object ? Date(data, "LastPlayedDate") : null,
+                    data.ValueKind == JsonValueKind.Object &&
+                    data.TryGetProperty("IsFavorite", out var favorite) &&
+                    favorite.ValueKind == JsonValueKind.True));
         }
 
         return result;

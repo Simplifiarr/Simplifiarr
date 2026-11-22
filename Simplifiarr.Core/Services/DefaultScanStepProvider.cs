@@ -28,7 +28,8 @@ public class DefaultScanStepProvider
         IArrEnrichmentService arrEnrichment,
         IWatchHistoryService watchHistory,
         ISizeReductionDownloadService sizeReductionDownloads,
-        IRollingShowService rollingShows)
+        IRollingShowService rollingShows,
+        IRollingMovieService rollingMovies)
     {
         var steps = new List<ScanStep>
         {
@@ -104,7 +105,12 @@ public class DefaultScanStepProvider
             // missed, and removing torrents that have seeded enough.
             new FinishingStep(
                 "Applying Rolling Shows rules",
-                () => rollingShows.RunAsync())
+                () => rollingShows.RunAsync()),
+
+            // Rolling Movies rules that are on, with the watch history just read.
+            new FinishingStep(
+                "Applying Rolling Movies rules",
+                rollingMovies.RunAsync)
         ];
     }
 

@@ -88,6 +88,8 @@ builder.Services.AddSingleton<IWatchHistoryService, WatchHistoryService>();
 builder.Services.AddSingleton<ISizeReductionDownloadService, SizeReductionDownloadService>();
 builder.Services.AddHttpClient<ISonarrShowClient, SonarrShowClient>();
 builder.Services.AddSingleton<IRollingShowService, RollingShowService>();
+builder.Services.AddHttpClient<IRadarrMovieClient, RadarrMovieClient>();
+builder.Services.AddSingleton<IRollingMovieService, RollingMovieService>();
 builder.Services.AddSingleton<IStorageMoveService>(services => new StorageMoveService(
     services.GetRequiredService<IArrPathService>(),
     services.GetRequiredService<IStorageService>(),

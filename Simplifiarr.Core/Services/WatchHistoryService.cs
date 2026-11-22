@@ -21,6 +21,15 @@ public sealed class WatchRecord
 
     public DateTime? LastWatchedUtc { get; set; }
 
+    /// <summary>Who watched all of it, and when they last played it.</summary>
+    public Dictionary<string, DateTime?> WatchedOn { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Users who marked it a favorite.</summary>
+    public List<string> FavoriteOf { get; set; } = [];
+
+    /// <summary>When the requester watched it, if they have.</summary>
+    public DateTime? RequesterWatchedUtc { get; set; }
+
     /// <summary>From Seerr; null when nobody requested it there.</summary>
     public string? RequestedBy { get; set; }
 
@@ -56,6 +65,9 @@ public interface IWatchHistoryService
     Task RefreshAsync();
 
     WatchRecord? Find(StorageTitle title);
+
+    /// <summary>Every movie and show as last read.</summary>
+    IReadOnlyList<WatchRecord> Records { get; }
 }
 
 public class WatchHistoryService : IWatchHistoryService
@@ -127,7 +139,7 @@ public class WatchHistoryService : IWatchHistoryService
         IEnumerable<(string UserId, string UserName, IReadOnlyList<JellyfinWatchItem> Items)> perUser,
         IReadOnlyList<SeerrRequest> requests)
     {
-        var byItem = new Dictionary<string, (WatchRecord Record, HashSet<string> WatchedIds, HashSet<string> StartedIds)>();
+        var byItem = new Dictionary<string, (WatchRecord Record, HashSet<string> WatchedIds, HashSet<string> StartedIds, Dictionary<string, DateTime?> WatchedOnById)>();
 
         foreach (var (userId, userName, items) in perUser)
         {
@@ -135,14 +147,21 @@ public class WatchHistoryService : IWatchHistoryService
             {
                 if (!byItem.TryGetValue(item.Id, out var entry))
                 {
-                    entry = (new WatchRecord { Path = item.Path, IsSeries = item.IsSeries, AddedUtc = item.AddedUtc }, [], []);
+                    entry = (new WatchRecord { Path = item.Path, IsSeries = item.IsSeries, AddedUtc = item.AddedUtc }, [], [], []);
                     byItem[item.Id] = entry;
                 }
 
                 if (item.Watched)
                 {
                     entry.Record.WatchedBy.Add(userName);
+                    entry.Record.WatchedOn[userName] = item.LastWatchedUtc;
                     entry.WatchedIds.Add(NormaliseId(userId));
+                    entry.WatchedOnById[NormaliseId(userId)] = item.LastWatchedUtc;
+                }
+
+                if (item.Favorite)
+                {
+                    entry.Record.FavoriteOf.Add(userName);
                 }
 
                 if (item.Started || item.Watched)
@@ -179,10 +198,19 @@ public class WatchHistoryService : IWatchHistoryService
             var requester = NormaliseId(request.RequesterJellyfinUserId);
 
             entry.Record.RequesterWatched = requester.Length > 0 && entry.WatchedIds.Contains(requester);
+            entry.Record.RequesterWatchedUtc =
+                entry.Record.RequesterWatched == true
+                    ? entry.WatchedOnById.GetValueOrDefault(requester) ?? entry.Record.AddedUtc ?? DateTime.MinValue
+                    : null;
             entry.Record.RequesterStarted = requester.Length > 0 && entry.StartedIds.Contains(requester);
         }
 
         return byItem.Values.Select(entry => entry.Record).ToList();
+    }
+
+    public IReadOnlyList<WatchRecord> Records
+    {
+        get { lock (_sync) { return _state.Records.ToList(); } }
     }
 
     public WatchRecord? Find(StorageTitle title)

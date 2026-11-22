@@ -235,7 +235,9 @@
         new("folder-fixer", "signpost-split", "Folder Fixer",
             "Movies and shows Radarr or Sonarr point at a folder that no longer exists, usually because it was moved by hand. Points them at where the folder is now, or removes entries with nothing on disk. Nothing is moved."),
         new("rolling-shows", "arrow-repeat", "Rolling Shows",
-            "For daily and weekly shows: keep only the newest episodes, the last so many days, or the current season, and let older ones go as new ones arrive. Can wait until an episode is watched. Sonarr stops looking for each episode before it is deleted. Preview before turning a rule on; runs on every Scan, or the moment Sonarr imports an episode with its webhook.")
+            "For daily and weekly shows: keep only the newest episodes, the last so many days, or the current season, and let older ones go as new ones arrive. Can wait until an episode is watched. Sonarr stops looking for each episode before it is deleted. Preview before turning a rule on; runs on every Scan, or the moment Sonarr imports an episode with its webhook."),
+        new("rolling-movies", "film", "Rolling Movies",
+            "Rules that delete movies by themselves. Pick which movies by Radarr tag, who asked for them in Seerr, folder, or one by one; they go a number of days after being watched (by whoever asked, anyone, or people you pick), after months unwatched, a number of days after arriving, or when their drive is over its limit. Each leaves Radarr, and Seerr so it can be asked for again. Favorites, movies you kept on Storage and the keep tag are never deleted. Preview before turning a rule on; runs on every Scan.")
     ];
 
     private static readonly HelpPage[] SafetyPages =

@@ -1,0 +1,689 @@
+@page "/rolling-movies"
+@rendermode InteractiveServer
+@implements IDisposable
+
+@using System.Text.Json
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+@using Simplifiarr.Core.Utilities
+
+@inject IRollingMovieService Rolling
+@inject IRadarrMovieClient Radarr
+@inject IJellyfinClient Jellyfin
+@inject IWatchHistoryService WatchHistory
+@inject ITorrentClient Client
+
+<PageTitle>Rolling Movies - Simplifiarr</PageTitle>
+
+<PageHeader Title="Rolling Movies"
+            Subtitle="Movies that go by themselves once they've been watched, sat unwatched too long, or their drive gets full." />
+
+@if (_problem is not null)
+{
+    <div class="alert alert-warning">@_problem</div>
+}
+
+@if (_message is not null)
+{
+    <div class="alert alert-info">@_message</div>
+}
+
+@if (_editing is { } edited)
+{
+    @* ------------------------------------------------------------ Editor *@
+
+    <div class="group-card">
+        <div class="group-card-header">
+            <div class="group-card-title">@(IsSaved(edited) ? "Edit rule" : "New rule")</div>
+        </div>
+
+        <div style="padding: 0 1.1rem 1.1rem">
+            @* Which movies: what's picked, and one menu to add more. *@
+            <div class="d-flex flex-wrap gap-1 align-items-center" style="font-size: 1.1rem">
+                <span class="me-1">Movies</span>
+                @foreach (var pick in Picks(edited))
+                {
+                    <span class="badge text-bg-primary d-inline-flex align-items-center gap-1" style="font-size: .9rem; font-weight: 500">
+                        @pick.Label
+                        <button type="button" class="btn-close btn-close-white" style="font-size: .55rem" aria-label="@($"Take off {pick.Label}")" @onclick="pick.Remove"></button>
+                    </span>
+                }
+                <select @key="_pickCount" class="form-select form-select-sm w-auto" aria-label="Add movies" value="" @onchange="e => AddPick(e.Value?.ToString())">
+                    <option value="">@(edited.HasAnyMovies ? "+ or..." : "+ Pick which...")</option>
+                    @if (_requesters.Count > 0)
+                    {
+                        <optgroup label="Asked for in Seerr">
+                            @if (!edited.AnyRequest)
+                            {
+                                <option value="request:*">requested by anyone</option>
+                                @foreach (var person in _requesters.Where(person => !edited.RequestedBy.Contains(person, StringComparer.OrdinalIgnoreCase)))
+                                {
+                                    <option value="@($"request:{person}")">requested by @person</option>
+                                }
+                            }
+                        </optgroup>
+                    }
+                    @if (_tags.Count > 0)
+                    {
+                        <optgroup label="Radarr tag">
+                            @foreach (var tag in _tags.Where(tag => !edited.Tags.Contains(tag, StringComparer.OrdinalIgnoreCase)))
+                            {
+                                <option value="@($"tag:{tag}")">tagged @tag</option>
+                            }
+                        </optgroup>
+                    }
+                    @if (_folders.Count > 0)
+                    {
+                        <optgroup label="Folder">
+                            @foreach (var folder in _folders.Where(folder => !edited.Folders.Contains(folder, StringComparer.OrdinalIgnoreCase)))
+                            {
+                                <option value="@($"folder:{folder}")">in @folder</option>
+                            }
+                        </optgroup>
+                    }
+                    <optgroup label="One at a time">
+                        <option value="movie">a movie I pick...</option>
+                    </optgroup>
+                </select>
+                @if (_pickingMovie)
+                {
+                    <input class="form-control form-control-sm" style="max-width: 18rem" list="rolling-movie-names" placeholder="Type a movie's name" aria-label="Movie name" value="@_movieSearch" @onchange="e => AddMovie(e.Value?.ToString())" />
+                    <datalist id="rolling-movie-names">
+                        @foreach (var movie in _movies.Where(movie => !edited.MovieIds.Contains(movie.Id)))
+                        {
+                            <option value="@movie.Name"></option>
+                        }
+                    </datalist>
+                }
+            </div>
+
+            @* When: one sentence, and its usual partner. *@
+            <div class="form-check mt-3 d-flex flex-wrap align-items-center gap-2" style="font-size: 1.1rem">
+                <input id="when-watched" class="form-check-input" type="checkbox" checked="@(edited.DaysAfterWatched is > 0)" @onchange="e => Set(() => edited.DaysAfterWatched = e.Value is true ? (_lastWatchedDays ?? 14) : null)" />
+                <label class="form-check-label" for="when-watched">Delete them</label>
+                <input class="form-control form-control-sm" type="number" min="1" style="max-width: 5rem" aria-label="Days after watched" value="@(edited.DaysAfterWatched ?? _lastWatchedDays ?? 14)" @oninput="e => SetNumber(e.Value, value => { if (edited.DaysAfterWatched is not null) { edited.DaysAfterWatched = value; } _lastWatchedDays = value; })" />
+                <span>days after they're watched by</span>
+                <select class="form-select form-select-sm w-auto" aria-label="Watched by" value="@edited.WatchedBy" @onchange="e => SetWatcher(e.Value)">
+                    <option value="@MovieWatcher.Requester">whoever asked for it</option>
+                    <option value="@MovieWatcher.Anyone">anyone</option>
+                    @if (_users.Count > 0)
+                    {
+                        <option value="@MovieWatcher.People">these people...</option>
+                    }
+                </select>
+            </div>
+            @if (edited.WatchedBy == MovieWatcher.People)
+            {
+                <div class="ms-4 mt-1 d-flex flex-wrap gap-1" role="group" aria-label="Watched by these people">
+                    @foreach (var user in _users)
+                    {
+                        var on = edited.WatchedByUsers.Contains(user, StringComparer.OrdinalIgnoreCase);
+                        <button type="button" class="btn btn-sm @(on ? "btn-primary" : "btn-outline-secondary")" aria-pressed="@on" @onclick="() => Toggle(edited.WatchedByUsers, user)">@user</button>
+                    }
+                </div>
+                @if (edited.WatchedByUsers.Count > 1)
+                {
+                    <div class="cell-note ms-4">They wait until @(edited.WatchedByUsers.Count == 2 ? "both" : $"all {edited.WatchedByUsers.Count}") of them have watched.</div>
+                }
+            }
+            else if (edited.WatchedBy == MovieWatcher.Requester && (edited.Tags.Count > 0 || edited.Folders.Count > 0 || edited.MovieIds.Count > 0))
+            {
+                <div class="cell-note ms-4">Ones nobody asked for go once anyone has watched them.</div>
+            }
+
+            <div class="form-check mt-2 d-flex flex-wrap align-items-center gap-2">
+                <input id="when-unwatched" class="form-check-input" type="checkbox" checked="@(edited.UnwatchedMonths is > 0)" @onchange="e => Set(() => edited.UnwatchedMonths = e.Value is true ? (_lastUnwatchedMonths ?? 6) : null)" />
+                <label class="form-check-label" for="when-unwatched">Also delete ones nobody has watched in</label>
+                <input class="form-control form-control-sm" type="number" min="1" style="max-width: 5rem" aria-label="Months unwatched" value="@(edited.UnwatchedMonths ?? _lastUnwatchedMonths ?? 6)" @oninput="e => SetNumber(e.Value, value => { if (edited.UnwatchedMonths is not null) { edited.UnwatchedMonths = value; } _lastUnwatchedMonths = value; })" />
+                <span>months</span>
+            </div>
+
+            @* The live answer to "what would this do?" *@
+            <div class="panel mt-3 mb-0">
+                @if (_previewing)
+                {
+                    <span class="cell-note">Checking...</span>
+                }
+                else if (!edited.HasAnyMovies)
+                {
+                    <span class="cell-note">Pick which movies with <strong>+ Pick which...</strong></span>
+                }
+                else if (!edited.HasAnyTrigger)
+                {
+                    <span class="cell-note">Tick when to delete them.</span>
+                }
+                else if (_preview is null)
+                {
+                    <span class="cell-note">Checking...</span>
+                }
+                else if (_preview.Problem is not null)
+                {
+                    <span class="status-warn">@_preview.Problem</span>
+                }
+                else
+                {
+                    var plan = _preview.Plan;
+
+                    @if (plan.Deletions.Count == 0)
+                    {
+                        <span>Right now nothing would be deleted: @plan.Matched movie(s) match and all stay.</span>
+                    }
+                    else
+                    {
+                        <span>
+                            Right now this deletes <strong>@plan.Deletions.Count</strong> of @plan.Matched matching movies
+                            (@SizeFormatter.FormatBytes(plan.Deletions.Sum(deletion => deletion.Facts.Movie.SizeBytes))).
+                        </span>
+                    }
+
+                    @if (plan.Protected > 0)
+                    {
+                        <div class="cell-note">@plan.Protected more match but are protected (favorite, kept or tagged @Rolling.KeepTag).</div>
+                    }
+
+                    @if (plan.Deletions.Count > 0)
+                    {
+                        <details class="mt-2">
+                            <summary>Which ones</summary>
+                            <ul class="cell-note mb-0 mt-1">
+                                @foreach (var deletion in plan.Deletions.Take(200))
+                                {
+                                    <li>
+                                        @deletion.Facts.Movie.Name
+                                        · @SizeFormatter.FormatBytes(deletion.Facts.Movie.SizeBytes)
+                                        · @deletion.Reason
+                                        @if (deletion.Facts.Seeding)
+                                        {
+                                            <text> · still seeding</text>
+                                        }
+                                    </li>
+                                }
+                            </ul>
+                        </details>
+                    }
+                }
+            </div>
+
+            <div class="cell-actions mt-3" style="flex-wrap: wrap; align-items: center">
+                <button type="button" class="btn btn-primary" disabled="@(_busy || !CanSave)" @onclick="() => SaveAsync(turnOn: true)">
+                    @(_busy ? "Working..." : "Turn on")
+                </button>
+                <button type="button" class="btn btn-secondary" disabled="@_busy" @onclick="CloseEditor">Cancel</button>
+                <button type="button" class="btn btn-link btn-sm" disabled="@(_busy || !edited.HasAnyMovies)" @onclick="() => SaveAsync(turnOn: false)">Save but leave off</button>
+            </div>
+            <div class="cell-note">
+                Turning on deletes what's listed above straight away, then checks again after every Scan.
+                Each movie leaves Radarr, and Seerr so it can be asked for again.
+            </div>
+
+            <details class="mt-4">
+                <summary>More options</summary>
+
+                <div class="mt-2">
+                    <div class="detail-label" style="margin-top: 0">Also delete them</div>
+                    <div class="form-check d-flex flex-wrap align-items-center gap-2">
+                        <input id="when-added" class="form-check-input" type="checkbox" checked="@(edited.DaysAfterAdded is > 0)" @onchange="e => Set(() => edited.DaysAfterAdded = e.Value is true ? (_lastAddedDays ?? 90) : null)" />
+                        <input class="form-control form-control-sm" type="number" min="1" style="max-width: 5rem" aria-label="Days after arriving" value="@(edited.DaysAfterAdded ?? _lastAddedDays ?? 90)" @oninput="e => SetNumber(e.Value, value => { if (edited.DaysAfterAdded is not null) { edited.DaysAfterAdded = value; } _lastAddedDays = value; })" />
+                        <label class="form-check-label" for="when-added">days after they arrive, watched or not</label>
+                    </div>
+                    <div class="form-check mt-1">
+                        <input id="when-full" class="form-check-input" type="checkbox" checked="@edited.WhenDriveFull" @onchange="e => Set(() => edited.WhenDriveFull = e.Value is true)" />
+                        <label class="form-check-label" for="when-full">when their drive is over its full limit</label>
+                        <div class="cell-note">Longest since watched first, then the longest unwatched, until the drive is under. Never anything from the last @RollingMoviePlanner.DriveFullGraceDays days.</div>
+                    </div>
+
+                    <div class="detail-label">Deleted movies go</div>
+                    <div class="form-check">
+                        <input id="del-recycle" class="form-check-input" type="radio" name="permanent" checked="@(!edited.Permanent)" @onchange="() => edited.Permanent = false" />
+                        <label class="form-check-label" for="del-recycle">to the Recycle Bin</label>
+                    </div>
+                    <div class="form-check">
+                        <input id="del-permanent" class="form-check-input" type="radio" name="permanent" checked="@edited.Permanent" @onchange="() => edited.Permanent = true" />
+                        <label class="form-check-label" for="del-permanent">for good</label>
+                    </div>
+
+                    <div class="detail-label">Movies still seeding</div>
+                    <div class="cell-note mb-1">
+                        Their library copy goes at once. The torrent keeps seeding, tagged <code>@RollingShowService.DeleteTag</code>,
+                        and is removed from @Client.Name when it stops, or after:
+                    </div>
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <input class="form-control" type="number" min="0" style="max-width: 6rem" placeholder="-" aria-label="Days" @bind="edited.SeedDays" />
+                        <span>days, or ratio</span>
+                        <input class="form-control" type="number" min="0" step="0.1" style="max-width: 6rem" placeholder="-" aria-label="Ratio" @bind="edited.SeedRatio" />
+                    </div>
+
+                    @if (IsSaved(edited))
+                    {
+                        <div class="detail-label">Remove this rule</div>
+                        @if (_confirmRemove)
+                        {
+                            <button type="button" class="btn btn-danger btn-sm" @onclick="() => RemoveRule(edited)">Remove it</button>
+                            <button type="button" class="btn btn-secondary btn-sm" @onclick="() => _confirmRemove = false">Keep</button>
+                        }
+                        else
+                        {
+                            <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => _confirmRemove = true">Remove...</button>
+                        }
+                        <div class="cell-note">Nothing already deleted comes back, and nothing else changes.</div>
+                    }
+                </div>
+            </details>
+        </div>
+    </div>
+}
+else
+{
+    @* ------------------------------------------------------------- Rules *@
+
+    <div class="toolbar">
+        <div class="toolbar-actions">
+            <button type="button" class="btn btn-primary" disabled="@(_movies.Count == 0)" @onclick="StartNew">+ New rule</button>
+        </div>
+    </div>
+
+    @if (Rolling.Rules.Count == 0)
+    {
+        <EmptyState Icon="film" Text="No rules yet. Press New rule to make one." />
+    }
+    else
+    {
+        <div class="table-scroll">
+            <table class="table">
+                <tbody>
+                    @foreach (var rule in Rolling.Rules)
+                    {
+                        <tr @key="rule.Id">
+                            <td>
+                                <div class="file-name">@RollingMoviePlanner.DescribeWhich(rule)</div>
+                                <div class="cell-note">
+                                    @RollingMoviePlanner.DescribeWhen(rule)
+                                    @if (rule.LastRunUtc is { } ran)
+                                    {
+                                        <text> · @LastRunText(rule, ran)</text>
+                                    }
+                                </div>
+                            </td>
+                            <td class="text-nowrap" style="width: 1%">
+                                <div class="form-check form-switch d-inline-block me-2" title="@(rule.IsOn ? "On" : "Off")">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="@($"on-{rule.Id}")" checked="@rule.IsOn" @onchange="e => ToggleOn(rule, e.Value is true)" />
+                                    <label class="form-check-label" for="@($"on-{rule.Id}")">@(rule.IsOn ? "On" : "Off")</label>
+                                </div>
+                                <button type="button" class="btn btn-secondary btn-sm" @onclick="() => EditAsync(rule)">Edit</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <div class="panel mt-3 help-panel">
+        <strong>Never deleted, whatever a rule says:</strong> movies anyone has marked a favorite in Jellyfin,
+        movies you pressed Keep on in Storage, and movies tagged
+        <input class="form-control form-control-sm d-inline-block" style="max-width: 9rem" aria-label="Keep tag" value="@Rolling.KeepTag" @onchange="e => Rolling.KeepTag = e.Value?.ToString() ?? string.Empty" />
+        in Radarr.
+    </div>
+}
+
+@code
+{
+    private IReadOnlyList<RollingMovie> _movies = [];
+    private List<string> _tags = [];
+    private List<string> _requesters = [];
+    private List<string> _folders = [];
+    private List<string> _users = [];
+
+    private RollingMovieRule? _editing;
+    private string? _movieSearch;
+    private bool _pickingMovie;
+
+    // Bumped on every pick, so the menu goes back to "+ or...".
+    private int _pickCount;
+
+    // What a ticked box comes back as after being unticked.
+    private int? _lastWatchedDays;
+    private int? _lastUnwatchedMonths;
+    private int? _lastAddedDays;
+
+    private MovieRulePreview? _preview;
+    private bool _previewing;
+    private CancellationTokenSource? _previewDelay;
+
+    private bool _busy;
+    private bool _confirmRemove;
+    private string? _problem;
+    private string? _message;
+
+    private bool CanSave =>
+        _editing is { HasAnyMovies: true, HasAnyTrigger: true } && _preview is { Problem: null } && !_previewing;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Rolling.Changed += OnChanged;
+
+        try
+        {
+            _movies = await Rolling.GetMoviesAsync(fresh: true);
+            _tags = (await Radarr.GetTagsAsync()).ToList();
+
+            if (_movies.Count == 0)
+            {
+                _problem = "Radarr isn't set up, or has no movies with files. Add it in Settings, under Connections.";
+            }
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _problem = $"Couldn't reach Radarr: {exception.Message}";
+        }
+
+        // Every folder movies sit in, such as Movies, Holiday or Kids.
+        _folders =
+            _movies
+                .Select(movie => Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(movie.FolderPath.Replace('/', '\\'))))
+                .OfType<string>()
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(folder => folder, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+        await Rolling.RefreshWatchHistoryIfOldAsync();
+
+        _requesters =
+            WatchHistory.Records
+                .Where(record => !record.IsSeries && record.RequestedBy is not null)
+                .Select(record => record.RequestedBy!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+        try
+        {
+            _users = (await Jellyfin.GetUsersAsync()).Select(user => user.Name).OrderBy(name => name).ToList();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or HttpRequestException or TaskCanceledException)
+        {
+            // Jellyfin not set up: "these people" isn't offered.
+        }
+    }
+
+    // ---------------------------------------------------------------- Editing
+
+    private bool IsSaved(RollingMovieRule rule) =>
+        Rolling.Rules.Any(saved => saved.Id == rule.Id);
+
+    // The usual case: what people asked for goes two weeks after they watch it.
+    private Task StartNew() =>
+        OpenAsync(new RollingMovieRule { AnyRequest = _requesters.Count > 0, DaysAfterWatched = 14, WatchedBy = MovieWatcher.Requester });
+
+    private sealed record Pick(string Label, Action Remove);
+
+    private List<Pick> Picks(RollingMovieRule rule)
+    {
+        var picks = new List<Pick>();
+
+        if (rule.AnyRequest)
+        {
+            picks.Add(new Pick("requested by anyone", () => Set(() => rule.AnyRequest = false)));
+        }
+
+        picks.AddRange(rule.RequestedBy.Select(person => new Pick($"requested by {person}", () => Toggle(rule.RequestedBy, person))));
+        picks.AddRange(rule.Tags.Select(tag => new Pick($"tagged {tag}", () => Toggle(rule.Tags, tag))));
+        picks.AddRange(rule.Folders.Select(folder => new Pick($"in {folder}", () => Toggle(rule.Folders, folder))));
+        picks.AddRange(rule.MovieIds.Select(id => new Pick(rule.MovieNames.GetValueOrDefault(id, $"movie {id}"), () => RemoveMovie(id))));
+
+        return picks;
+    }
+
+    private void AddPick(string? value)
+    {
+        _pickCount++;
+
+        if (_editing is not { } rule || string.IsNullOrEmpty(value))
+        {
+            return;
+        }
+
+        if (value == "movie")
+        {
+            _pickingMovie = true;
+            return;
+        }
+
+        var (kind, what) = value.IndexOf(':') is var colon and > 0 ? (value[..colon], value[(colon + 1)..]) : (value, string.Empty);
+
+        switch (kind)
+        {
+            case "request" when what == "*":
+                rule.AnyRequest = true;
+                rule.RequestedBy.Clear();
+                Changed();
+                break;
+            case "request":
+                ToggleRequester(what);
+                break;
+            case "tag":
+                Toggle(rule.Tags, what);
+                break;
+            case "folder":
+                Toggle(rule.Folders, what);
+                break;
+        }
+    }
+
+    // Edits a copy, so Cancel leaves the saved rule as it was.
+    private Task EditAsync(RollingMovieRule rule) =>
+        OpenAsync(JsonSerializer.Deserialize<RollingMovieRule>(JsonSerializer.Serialize(rule))!);
+
+    private async Task OpenAsync(RollingMovieRule rule)
+    {
+        _editing = rule;
+        _lastWatchedDays = rule.DaysAfterWatched;
+        _lastUnwatchedMonths = rule.UnwatchedMonths;
+        _lastAddedDays = rule.DaysAfterAdded;
+
+        _message = null;
+        _confirmRemove = false;
+        _pickingMovie = false;
+        _preview = null;
+
+        await RefreshPreviewAsync();
+    }
+
+    private void CloseEditor()
+    {
+        _previewDelay?.Cancel();
+        _editing = null;
+        _preview = null;
+    }
+
+    private void Set(Action change)
+    {
+        change();
+        Changed();
+    }
+
+    private void SetNumber(object? value, Action<int?> apply)
+    {
+        if (int.TryParse(value?.ToString(), out var number) && number > 0)
+        {
+            apply(number);
+            Changed();
+        }
+    }
+
+    private void Toggle(List<string> list, string value)
+    {
+        if (list.RemoveAll(entry => string.Equals(entry, value, StringComparison.OrdinalIgnoreCase)) == 0)
+        {
+            list.Add(value);
+        }
+
+        Changed();
+    }
+
+    private void ToggleRequester(string person)
+    {
+        if (_editing is null)
+        {
+            return;
+        }
+
+        _editing.AnyRequest = false;
+        Toggle(_editing.RequestedBy, person);
+    }
+
+    private void SetWatcher(object? value)
+    {
+        if (_editing is not null && Enum.TryParse<MovieWatcher>(value?.ToString(), out var watcher))
+        {
+            _editing.WatchedBy = watcher;
+            _editing.DaysAfterWatched ??= _lastWatchedDays ?? 14;
+            Changed();
+        }
+    }
+
+    private void AddMovie(string? name)
+    {
+        _movieSearch = string.Empty;
+
+        if (_editing is null ||
+            _movies.FirstOrDefault(movie => string.Equals(movie.Name, name?.Trim(), StringComparison.OrdinalIgnoreCase)) is not { } movie ||
+            _editing.MovieIds.Contains(movie.Id))
+        {
+            return;
+        }
+
+        _editing.MovieIds.Add(movie.Id);
+        _editing.MovieNames[movie.Id] = movie.Name;
+        _pickingMovie = false;
+        Changed();
+    }
+
+    private void RemoveMovie(int id)
+    {
+        if (_editing is null)
+        {
+            return;
+        }
+
+        _editing.MovieIds.Remove(id);
+        _editing.MovieNames.Remove(id);
+        Changed();
+    }
+
+    // Anything that changes what gets deleted refreshes the preview, a
+    // moment after typing stops.
+    private void Changed()
+    {
+        _previewDelay?.Cancel();
+        _previewDelay = new CancellationTokenSource();
+
+        var token = _previewDelay.Token;
+        _previewing = true;
+
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                await Task.Delay(400, token);
+                await RefreshPreviewAsync();
+                StateHasChanged();
+            }
+            catch (TaskCanceledException)
+            {
+                // A newer change is on its way.
+            }
+        });
+    }
+
+    private async Task RefreshPreviewAsync()
+    {
+        if (_editing is null)
+        {
+            return;
+        }
+
+        _previewing = true;
+
+        try
+        {
+            _preview = await Rolling.PreviewAsync(_editing);
+        }
+        finally
+        {
+            _previewing = false;
+        }
+    }
+
+    private async Task SaveAsync(bool turnOn)
+    {
+        if (_editing is not { } rule)
+        {
+            return;
+        }
+
+        _busy = true;
+
+        try
+        {
+            rule.IsOn = turnOn;
+            Rolling.Save(rule);
+
+            _message =
+                turnOn
+                    ? $"The rule is on. {await Rolling.RunRuleAsync(rule.Id)}"
+                    : "Saved but off: nothing is deleted.";
+
+            CloseEditor();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    // ------------------------------------------------------------ The list
+
+    private async Task ToggleOn(RollingMovieRule rule, bool on)
+    {
+        if (on)
+        {
+            // Turning on deletes straight away, so it goes through the
+            // editor, where you see what first.
+            await EditAsync(rule);
+            _message = "Check what it deletes, then press Turn on.";
+
+            return;
+        }
+
+        var copy = JsonSerializer.Deserialize<RollingMovieRule>(JsonSerializer.Serialize(rule))!;
+        copy.IsOn = false;
+        Rolling.Save(copy);
+
+        _message = "The rule is off: nothing more is deleted.";
+    }
+
+    private void RemoveRule(RollingMovieRule rule)
+    {
+        Rolling.Remove(rule.Id);
+        _message = "Rule removed.";
+        CloseEditor();
+    }
+
+    private static string LastRunText(RollingMovieRule rule, DateTime ranUtc)
+    {
+        var when = ranUtc.ToLocalTime();
+        var day = when.Date == DateTime.Today ? "today" : when.ToString("ddd d MMM");
+
+        return $"last run {day}: {rule.LastRunMessage}";
+    }
+
+    private void OnChanged() =>
+        _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        _previewDelay?.Cancel();
+        Rolling.Changed -= OnChanged;
+    }
+}

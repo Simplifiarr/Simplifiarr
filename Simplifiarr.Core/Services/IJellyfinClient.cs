@@ -160,4 +160,5 @@ public sealed record JellyfinWatchItem(
     DateTime? AddedUtc,
     bool Watched,
     bool Started,
-    DateTime? LastWatchedUtc);
+    DateTime? LastWatchedUtc,
+    bool Favorite = false);

@@ -51,6 +51,12 @@ public interface IRollingShowService
 
     /// <summary>Removes tagged torrents that have seeded enough.</summary>
     Task CleanUpSeedsAsync();
+
+    /// <summary>
+    /// Tags a torrent whose library copy has gone, and removes it once it has
+    /// seeded enough. Also used by Rolling Movies.
+    /// </summary>
+    Task KeepSeedingThenRemoveAsync(TorrentRecord torrent, Guid ruleId, int? seedDays, double? seedRatio);
 }
 
 public class RollingShowService : IRollingShowService
@@ -300,7 +306,10 @@ public class RollingShowService : IRollingShowService
                 string.Equals(name, torrent.ContentPath, StringComparison.OrdinalIgnoreCase) ||
                 PathContainment.IsPathUnderRoot(name, torrent.ContentPath)));
 
-    private async Task TagForRemovalAsync(RollingShowRule rule, TorrentRecord torrent)
+    private Task TagForRemovalAsync(RollingShowRule rule, TorrentRecord torrent) =>
+        KeepSeedingThenRemoveAsync(torrent, rule.Id, rule.SeedDays, rule.SeedRatio);
+
+    public async Task KeepSeedingThenRemoveAsync(TorrentRecord torrent, Guid ruleId, int? seedDays, double? seedRatio)
     {
         lock (_sync)
         {
@@ -314,10 +323,10 @@ public class RollingShowService : IRollingShowService
                 {
                     TorrentHash = torrent.TorrentHash,
                     Name = torrent.Name,
-                    RuleId = rule.Id,
+                    RuleId = ruleId,
                     TaggedUtc = UtcNow(),
-                    SeedDays = rule.SeedDays,
-                    SeedRatio = rule.SeedRatio
+                    SeedDays = seedDays,
+                    SeedRatio = seedRatio
                 });
         }
 

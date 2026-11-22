@@ -329,6 +329,8 @@ else
                 record.Success ? "Title moved to another drive" : "Couldn't move title",
             HistoryActionType.EpisodeRolledOff =>
                 "Rolling Shows: episode or seed removed",
+            HistoryActionType.MovieRolledOff =>
+                record.Success ? "Rolling Movies: movie removed" : "Rolling Movies: couldn't remove movie",
             HistoryActionType.SizeReduced =>
                 record.Success ? "Swapped in a smaller release" : "Couldn't swap in a smaller release",
             HistoryActionType.TitleDeleted =>
