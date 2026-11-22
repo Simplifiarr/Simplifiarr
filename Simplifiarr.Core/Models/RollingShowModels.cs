@@ -16,6 +16,16 @@ public enum SeasonSwitch
     AfterDays
 }
 
+/// <summary>The unit in "Keep the last N ...".</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<KeepUnit>))]
+public enum KeepUnit
+{
+    Episodes,
+    Days,
+    Weeks,
+    Seasons
+}
+
 /// <summary>Whose watching counts before an episode may go.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<WatchRequirement>))]
 public enum WatchRequirement
@@ -52,8 +62,41 @@ public sealed class RollingShowRule
     /// <summary>Keep only episodes that aired within this many days.</summary>
     public int? KeepDays { get; set; }
 
-    /// <summary>Keep only the newest season, once the next one has started.</summary>
+    /// <summary>
+    /// Keep only the newest this many seasons: an older season goes once a
+    /// newer one has started (see <see cref="SeasonSwitch"/>).
+    /// </summary>
+    public int? KeepSeasons { get; set; }
+
+    /// <summary>From before seasons could be counted: the same as 1 season.</summary>
     public bool KeepCurrentSeasonOnly { get; set; }
+
+    [JsonIgnore]
+    public int? SeasonsToKeep => KeepSeasons is > 0 ? KeepSeasons : KeepCurrentSeasonOnly ? 1 : null;
+
+    /// <summary>How the page shows the limit; days and weeks are both kept as days.</summary>
+    public KeepUnit? Unit { get; set; }
+
+    /// <summary>"Keep the last N unit", from whichever limit is set.</summary>
+    [JsonIgnore]
+    public (int Count, KeepUnit Unit) Simple =>
+        SeasonsToKeep is { } seasons ? (seasons, KeepUnit.Seasons)
+        : KeepLatest is > 0 and var latest ? (latest, KeepUnit.Episodes)
+        : KeepDays is > 0 and var days
+            ? Unit == KeepUnit.Weeks && days % 7 == 0 ? (days / 7, KeepUnit.Weeks) : (days, KeepUnit.Days)
+            : (7, KeepUnit.Days);
+
+    /// <summary>Sets the one limit the sentence describes, clearing the others.</summary>
+    public void SetSimple(int count, KeepUnit unit)
+    {
+        count = Math.Max(1, count);
+
+        KeepLatest = unit == KeepUnit.Episodes ? count : null;
+        KeepDays = unit switch { KeepUnit.Days => count, KeepUnit.Weeks => count * 7, _ => null };
+        KeepSeasons = unit == KeepUnit.Seasons ? count : null;
+        KeepCurrentSeasonOnly = false;
+        Unit = unit;
+    }
 
     public SeasonSwitch SeasonSwitch { get; set; } = SeasonSwitch.FirstEpisode;
 
@@ -65,8 +108,21 @@ public sealed class RollingShowRule
 
     public WatchRequirement Watched { get; set; } = WatchRequirement.None;
 
-    /// <summary>For <see cref="WatchRequirement.User"/>: the Jellyfin user's name.</summary>
+    /// <summary>
+    /// For <see cref="WatchRequirement.User"/>: the Jellyfin users who must
+    /// all have watched an episode before it goes.
+    /// </summary>
+    public List<string> WatchedByUsers { get; set; } = [];
+
+    /// <summary>From before several people could be picked: one user's name.</summary>
     public string WatchedBy { get; set; } = string.Empty;
+
+    /// <summary>Everyone who must have watched, from either field.</summary>
+    [JsonIgnore]
+    public IReadOnlyList<string> Watchers =>
+        WatchedByUsers.Count > 0 ? WatchedByUsers
+        : string.IsNullOrWhiteSpace(WatchedBy) ? []
+        : [WatchedBy];
 
     /// <summary>
     /// With a watch requirement: an unwatched episode goes anyway once it
@@ -98,7 +154,7 @@ public sealed class RollingShowRule
     public string LastRunMessage { get; set; } = string.Empty;
 
     public bool HasAnyLimit =>
-        KeepLatest is > 0 || KeepDays is > 0 || KeepCurrentSeasonOnly;
+        KeepLatest is > 0 || KeepDays is > 0 || SeasonsToKeep is > 0;
 }
 
 /// <summary>An episode with a file, as Sonarr has it.</summary>

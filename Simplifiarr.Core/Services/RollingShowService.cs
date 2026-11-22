@@ -419,29 +419,27 @@ public class RollingShowService : IRollingShowService
 
     private async Task<HashSet<string>> WatchedPathsAsync(RollingShowRule rule)
     {
-        var watched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
         if (rule.Watched == WatchRequirement.None)
         {
-            return watched;
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         }
 
-        var users = await _jellyfin.GetUsersAsync();
+        var watchers = rule.Watched == WatchRequirement.User ? rule.Watchers : [];
+        var perUser = new List<(string Name, IEnumerable<string> Paths)>();
 
-        foreach (var (id, name) in users)
+        foreach (var (id, name) in await _jellyfin.GetUsersAsync())
         {
-            if (rule.Watched == WatchRequirement.User &&
-                !string.Equals(name, rule.WatchedBy, StringComparison.OrdinalIgnoreCase))
+            if (watchers.Count > 0 && !watchers.Contains(name, StringComparer.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            watched.UnionWith(
-                (await _jellyfin.GetWatchedEpisodePathsAsync(id))
-                    .Where(path => PathContainment.IsPathUnderRoot(path, rule.SeriesPath)));
+            perUser.Add((name, (await _jellyfin.GetWatchedEpisodePathsAsync(id))
+                .Where(path => PathContainment.IsPathUnderRoot(path, rule.SeriesPath))
+                .ToList()));
         }
 
-        return watched;
+        return RollingShowPlanner.WatchedPaths(rule, perUser);
     }
 
     private async Task<List<string>> DownloadRootsAsync()

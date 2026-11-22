@@ -68,6 +68,39 @@ public class RollingShowPlannerTests
     }
 
     [TestMethod]
+    public void Keeping_two_seasons_keeps_the_new_one_and_the_one_before()
+    {
+        var episodes = Weekly(2, season: 34).Concat(Weekly(2, season: 35)).ToList();
+        episodes.Add(Episode(36, 1, 0));
+
+        var rule = new RollingShowRule();
+        rule.SetSimple(2, KeepUnit.Seasons);
+
+        CollectionAssert.AreEqual(new[] { "S34E1", "S34E2" }, Deleted(rule, episodes));
+    }
+
+    [TestMethod]
+    public void The_sentence_sets_one_limit_and_reads_back_the_same()
+    {
+        var rule = new RollingShowRule { KeepLatest = 4 };
+
+        rule.SetSimple(2, KeepUnit.Weeks);
+
+        Assert.AreEqual(14, rule.KeepDays);
+        Assert.IsNull(rule.KeepLatest, "Only one limit at a time.");
+        Assert.AreEqual((2, KeepUnit.Weeks), rule.Simple);
+        Assert.AreEqual("Keeps the last 2 weeks", RollingShowPlanner.Describe(rule));
+
+        // A rule saved before seasons could be counted reads as 1 season.
+        Assert.AreEqual((1, KeepUnit.Seasons), new RollingShowRule { KeepCurrentSeasonOnly = true }.Simple);
+
+        rule.SetSimple(5, KeepUnit.Episodes);
+        rule.Watched = WatchRequirement.Anyone;
+
+        Assert.AreEqual("Keeps the last 5 episodes, once watched", RollingShowPlanner.Describe(rule));
+    }
+
+    [TestMethod]
     public void Unwatched_episodes_wait_unless_they_have_waited_long_enough()
     {
         var episodes = Weekly(6);
@@ -80,6 +113,39 @@ public class RollingShowPlannerTests
 
         // Episode 1 aired 35 days ago, so it goes anyway.
         CollectionAssert.AreEqual(new[] { "S1E1", "S1E2" }, Deleted(rule, episodes, episode => episode.Number == 2));
+    }
+
+    [TestMethod]
+    public void Picking_two_people_waits_for_both_of_them()
+    {
+        var perUser = new List<(string Name, IEnumerable<string> Paths)>
+        {
+            ("Alex", new[] { "E1", "E2" }),
+            ("Sam", new[] { "e2", "E3" }),
+            ("Robin", new[] { "E4" })
+        };
+
+        var rule = new RollingShowRule { Watched = WatchRequirement.User, WatchedByUsers = ["Alex", "Sam"] };
+
+        CollectionAssert.AreEquivalent(new[] { "E2" }, RollingShowPlanner.WatchedPaths(rule, perUser).ToList());
+        Assert.AreEqual("Keeps the last 5 episodes, once Alex and Sam have watched", Describe(rule));
+
+        rule.Watched = WatchRequirement.Anyone;
+        Assert.HasCount(4, RollingShowPlanner.WatchedPaths(rule, perUser));
+
+        // A rule saved with one name still works, and someone gone from Jellyfin holds everything back.
+        var old = new RollingShowRule { Watched = WatchRequirement.User, WatchedBy = "Robin" };
+        CollectionAssert.AreEquivalent(new[] { "E4" }, RollingShowPlanner.WatchedPaths(old, perUser).ToList());
+        Assert.AreEqual("Keeps the last 5 episodes, once Robin has watched", Describe(old));
+
+        old.WatchedByUsers = ["Robin", "Gone"];
+        Assert.IsEmpty(RollingShowPlanner.WatchedPaths(old, perUser));
+
+        static string Describe(RollingShowRule rule)
+        {
+            rule.SetSimple(5, KeepUnit.Episodes);
+            return RollingShowPlanner.Describe(rule);
+        }
     }
 
     [TestMethod]
