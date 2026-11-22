@@ -34,6 +34,15 @@ public interface ITorrentClient
     /// </summary>
     Task<TorrentAddResult> AddTorrentAsync(byte[] torrentBytes, string savePath);
 
+    /// <summary>
+    /// Adds a torrent and starts downloading it straight away, with a tag
+    /// so Simplifiarr can find it again. Only for a download you asked for.
+    /// </summary>
+    Task<TorrentAddResult> DownloadTorrentAsync(byte[] torrentBytes, string savePath, string tag);
+
+    /// <summary>The same, from a magnet link.</summary>
+    Task<TorrentAddResult> DownloadMagnetAsync(string magnet, string savePath, string tag);
+
     /// <summary>The torrent's files, or null if the client can't be reached.</summary>
     Task<List<TorrentContentFile>?> GetTorrentFilesAsync(string torrentHash);
 
@@ -53,6 +62,12 @@ public interface ITorrentClient
     Task<string?> SetLocationAsync(string torrentHash, string location);
 
     Task<string?> RecheckTorrentAsync(string torrentHash);
+
+    /// <summary>
+    /// Removes a torrent from the client, and its downloaded files with it
+    /// when asked. Null when it worked, otherwise what went wrong.
+    /// </summary>
+    Task<string?> RemoveTorrentAsync(string torrentHash, bool deleteFiles);
 
     /// <summary>
     /// Tries the address and login given, saved or not. Null when it

@@ -28,7 +28,10 @@ builder.Services.AddHttpClient<ITorrentClient, QbittorrentClient>()
 
 builder.Services.AddHttpClient<IRadarrClient, RadarrClient>();
 builder.Services.AddHttpClient<ISonarrClient, SonarrClient>();
-builder.Services.AddHttpClient<IProwlarrClient, ProwlarrClient>();
+// Redirects are followed by hand: some lead to magnet links, which the
+// automatic redirect handling can't cope with.
+builder.Services.AddHttpClient<IProwlarrClient, ProwlarrClient>()
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddHttpClient<IJellyfinClient, JellyfinClient>();
 builder.Services.AddHttpClient<IPosterService, PosterService>();
 
@@ -82,6 +85,7 @@ builder.Services.AddSingleton<IStorageService, StorageService>();
 builder.Services.AddHttpClient<IArrPathService, ArrPathService>();
 builder.Services.AddHttpClient<ISeerrClient, SeerrClient>();
 builder.Services.AddSingleton<IWatchHistoryService, WatchHistoryService>();
+builder.Services.AddSingleton<ISizeReductionDownloadService, SizeReductionDownloadService>();
 builder.Services.AddSingleton<IStorageMoveService>(services => new StorageMoveService(
     services.GetRequiredService<IArrPathService>(),
     services.GetRequiredService<IStorageService>(),

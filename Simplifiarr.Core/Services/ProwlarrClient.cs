@@ -75,17 +75,88 @@ public class ProwlarrClient : IProwlarrClient
         }
     }
 
+    public async Task<ReleaseSource?> GetReleaseAsync(string downloadUrl)
+    {
+        if (downloadUrl.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ReleaseSource(null, downloadUrl);
+        }
+
+        try
+        {
+            var (bytes, magnet) = await FetchAsync(downloadUrl);
+
+            if (magnet is not null)
+            {
+                return new ReleaseSource(null, magnet);
+            }
+
+            if (bytes is null)
+            {
+                return null;
+            }
+
+            // Some indexers send the magnet link as the page itself.
+            var start = System.Text.Encoding.ASCII.GetString(bytes, 0, Math.Min(bytes.Length, 7));
+
+            return start.Equals("magnet:", StringComparison.OrdinalIgnoreCase)
+                ? new ReleaseSource(null, System.Text.Encoding.UTF8.GetString(bytes).Trim())
+                : new ReleaseSource(bytes, null);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or InvalidOperationException or UriFormatException)
+        {
+            return null;
+        }
+    }
+
     public async Task<byte[]?> DownloadTorrentAsync(
         string downloadUrl)
     {
         try
         {
-            return await _httpClient.GetByteArrayAsync(downloadUrl);
+            return (await FetchAsync(downloadUrl)).Bytes;
         }
         catch
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Fetches a download link, following web redirects by hand: the
+    /// automatic ones break on a redirect to a magnet link. Returns the
+    /// file, or the magnet link it pointed to.
+    /// </summary>
+    private async Task<(byte[]? Bytes, string? Magnet)> FetchAsync(string url)
+    {
+        var current = new Uri(url);
+
+        for (var hop = 0; hop < 6; hop++)
+        {
+            using var response = await _httpClient.GetAsync(current);
+
+            var status = (int)response.StatusCode;
+
+            if (status is >= 300 and < 400 && response.Headers.Location is { } location)
+            {
+                var target = location.OriginalString;
+
+                if (target.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase))
+                {
+                    return (null, target);
+                }
+
+                current = location.IsAbsoluteUri ? location : new Uri(current, location);
+
+                continue;
+            }
+
+            return response.IsSuccessStatusCode
+                ? (await response.Content.ReadAsByteArrayAsync(), null)
+                : (null, null);
+        }
+
+        return (null, null);
     }
 
     public async Task<bool> TestConnectionAsync()

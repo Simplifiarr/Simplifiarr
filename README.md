@@ -69,6 +69,7 @@ The pages are grouped the same way they are in the app's menu.
 | **Playback Errors** | Files your media server may not be able to open: blocked by Windows, permissions it can't read, still packed in an archive, empty, unfinished, cloud-only or badly named. Blocks, permissions and archives can be fixed; fixes never change what is inside a file. |
 | **Size Reduction** | Smaller releases of films and episodes you already have, found on your indexers. Report only; nothing is downloaded. |
 | **Storage** | How full each drive is, with a limit you set (for example, keep the main drive under 75%), and the titles taking the space. Suggests which titles to move where to keep every drive under its limit. Moves run one title at a time in the background: each file is copied and checked, Radarr or Sonarr is given the new folder, and only then does the old copy go to the Recycle Bin. Also shows who has watched each title in Jellyfin and who asked for it in Seerr, and lists titles worth a look: watched by whoever asked for them, or unwatched for months. Those can be deleted through Radarr or Sonarr. Titles still seeding are never moved or deleted, since that would free nothing. |
+| **Folder Fixer** | Movies and shows Radarr or Sonarr point at a folder that no longer exists, usually because it was moved by hand. Points them at where the folder is now, or removes entries with nothing on disk. Nothing is moved. |
 
 ### Safety net
 

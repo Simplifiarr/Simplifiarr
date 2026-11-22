@@ -26,7 +26,8 @@ public class DefaultScanStepProvider
         ISeedMoveService seedMoves,
         IStorageService storage,
         IArrEnrichmentService arrEnrichment,
-        IWatchHistoryService watchHistory)
+        IWatchHistoryService watchHistory,
+        ISizeReductionDownloadService sizeReductionDownloads)
     {
         var steps = new List<ScanStep>
         {
@@ -90,7 +91,13 @@ public class DefaultScanStepProvider
             // when Jellyfin isn't set up.
             new FinishingStep(
                 "Reading watch history from Jellyfin and Seerr",
-                watchHistory.RefreshAsync)
+                watchHistory.RefreshAsync),
+
+            // Smaller releases you chose to download: finished ones are
+            // swapped in when that is switched on, or wait for you.
+            new FinishingStep(
+                "Checking smaller releases being downloaded",
+                sizeReductionDownloads.CheckAsync)
         ];
     }
 

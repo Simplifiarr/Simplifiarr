@@ -32,4 +32,20 @@ public class TorrentRecord
     public string InfoHashV1 { get; set; } = string.Empty;
 
     public string InfoHashV2 { get; set; } = string.Empty;
+
+    /// <summary>Seeders connected right now, and in the whole swarm.</summary>
+    public int SeedsConnected { get; set; }
+
+    public int SeedsInSwarm { get; set; }
+
+    /// <summary>Leechers connected right now, and in the whole swarm.</summary>
+    public int LeechersConnected { get; set; }
+
+    public int LeechersInSwarm { get; set; }
+
+    /// <summary>Bytes per second.</summary>
+    public long DownloadSpeed { get; set; }
+
+    /// <summary>Time left to finish; null when unknown.</summary>
+    public TimeSpan? TimeLeft { get; set; }
 }

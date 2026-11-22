@@ -8,11 +8,13 @@
 
 @inject ISettingsService SettingsService
 @inject ISizeReductionCandidateService Search
+@inject ISizeReductionDownloadService Downloads
+@inject ITorrentClient Client
 
 <PageTitle>Size Reduction - Simplifiarr</PageTitle>
 
 <PageHeader Title="Size Reduction"
-            Subtitle="Looks on your indexers, through Prowlarr, for smaller releases of films and episodes you already have. It only reports what it finds - nothing is downloaded or replaced.">
+            Subtitle="Looks on your indexers, through Prowlarr, for smaller releases of films and episodes you already have. Nothing is downloaded or replaced unless you press Download.">
     @if (Search.IsSearching)
     {
         <button type="button" class="btn btn-secondary" @onclick="Search.Stop">
@@ -88,6 +90,122 @@ else if (!string.IsNullOrWhiteSpace(Search.LastMessage))
                 </button>
             </div>
         }
+    </div>
+}
+
+@if (_downloadMessage is not null)
+{
+    <div class="alert @(_downloadOk ? "alert-info" : "alert-warning")">@_downloadMessage</div>
+}
+
+@if (Downloads.Downloads.Count > 0)
+{
+    <div class="panel mb-3">
+        <div class="toolbar mb-2">
+            <div class="toolbar-summary">
+                <strong>Downloads</strong> ·
+                @Downloads.Downloads.Count(download => download.Status == SizeReductionDownloadStatus.Downloading) downloading ·
+                @Downloads.Downloads.Count(download => download.Status == SizeReductionDownloadStatus.ReadyToSwap) ready to swap
+            </div>
+            <div class="toolbar-actions">
+                <button type="button" class="btn btn-secondary btn-sm" disabled="@_checking" @onclick="CheckDownloadsAsync">
+                    @(_checking ? "Checking..." : "Check progress")
+                </button>
+            </div>
+        </div>
+
+        <div class="table-scroll">
+            <table class="table mb-0">
+                <thead>
+                    <tr>
+                        <th>Release</th>
+                        <th>Replaces</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var download in Downloads.Downloads.Take(20))
+                    {
+                        <tr @key="download.Id">
+                            <td>
+                                <div class="file-name">@download.ReleaseTitle</div>
+                                <div class="cell-note">@SizeFormatter.FormatBytes(download.ReleaseBytes) · @download.DriveName</div>
+                            </td>
+                            <td>
+                                <code>@System.IO.Path.GetFileName(download.LibraryFilePath)</code>
+                                <div class="cell-note">@SizeFormatter.FormatBytes(download.LibraryFileBytes)</div>
+                            </td>
+                            <td>
+                                @switch (download.Status)
+                                {
+                                    case SizeReductionDownloadStatus.Downloading:
+                                        <span>Downloading @download.Progress.ToString("P0")</span>
+                                        @if (download.Live is { } live)
+                                        {
+                                            <div class="cell-note">
+                                                @(live.DownloadSpeed > 0 ? $"{SizeFormatter.FormatBytes(live.DownloadSpeed)}/s" : "Not downloading right now")
+                                                @if (live.TimeLeft is { } left)
+                                                {
+                                                    <text> · @(left.TotalDays >= 2 ? $"about {(int)Math.Round(left.TotalDays)} days" : left.TotalHours >= 1 ? $"{(int)left.TotalHours} h {left.Minutes} min" : $"{Math.Max(1, left.Minutes)} min") left</text>
+                                                }
+                                            </div>
+                                            <div class="cell-note">
+                                                Seeds @live.SeedsConnected (@live.SeedsInSwarm in swarm) ·
+                                                leechers @live.LeechersConnected (@live.LeechersInSwarm in swarm)
+                                            </div>
+                                        }
+                                        break;
+                                    case SizeReductionDownloadStatus.ReadyToSwap:
+                                        <span class="status-ok">Ready to swap</span>
+                                        break;
+                                    case SizeReductionDownloadStatus.Swapped:
+                                        <span class="status-ok">Swapped</span>
+                                        break;
+                                    case SizeReductionDownloadStatus.Cancelled:
+                                        <span class="status-muted">Cancelled</span>
+                                        break;
+                                    default:
+                                        <span class="status-warn">Stopped</span>
+                                        break;
+                                }
+                                <div class="cell-note">@download.Message</div>
+                            </td>
+                            <td>
+                                <div class="d-flex gap-2 flex-wrap">
+                                    @if (download.Status == SizeReductionDownloadStatus.ReadyToSwap)
+                                    {
+                                        <button type="button" class="btn btn-primary btn-sm" disabled="@_checking" @onclick="() => SwapAsync(download)">Swap now</button>
+                                    }
+                                    @if (download.Status is SizeReductionDownloadStatus.Downloading or SizeReductionDownloadStatus.ReadyToSwap)
+                                    {
+                                        @if (_confirmCancel == download.Id)
+                                        {
+                                            <button type="button" class="btn btn-danger btn-sm" disabled="@_checking" @onclick="() => CancelAsync(download)">Cancel it</button>
+                                            <button type="button" class="btn btn-secondary btn-sm" @onclick="() => _confirmCancel = null">Keep</button>
+                                        }
+                                        else
+                                        {
+                                            <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => _confirmCancel = download.Id">Cancel...</button>
+                                        }
+                                    }
+                                    @if (download.Status is SizeReductionDownloadStatus.Swapped or SizeReductionDownloadStatus.Failed or SizeReductionDownloadStatus.Cancelled)
+                                    {
+                                        <button type="button" class="btn btn-link btn-sm py-0" @onclick="() => Downloads.Forget(download.Id)">Clear</button>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="cell-note mt-2">
+            Downloads are tagged <code>@SizeReductionDownloadService.Tag</code> in @Client.Name. Swapping links the new file into
+            your library (it keeps seeding), sends the old one to the Recycle Bin and asks Radarr or Sonarr to rescan.
+            The old file's torrent, if any, is left alone. Progress is checked on every Scan.
+        </div>
     </div>
 }
 
@@ -208,7 +326,7 @@ else
                                 <th>Quality</th>
                                 <th class="col-num">Size</th>
                                 <th class="col-num">Saves</th>
-                                <th class="col-num">Seeders</th>
+                                <th class="col-num">Seed / leech</th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -247,14 +365,45 @@ else
                                         <div class="cell-note">@release.SavingsPercent.ToString("P0")</div>
                                     </td>
 
-                                    <td class="col-num">@release.Candidate.Seeders</td>
+                                    <td class="col-num">@release.Candidate.Seeders / @release.Candidate.Leechers</td>
 
                                     <td>
-                                        @if (IsWebLink(release.Candidate.InfoUrl))
+                                        <div class="d-flex gap-2 flex-wrap align-items-center">
+                                            @if (_confirmDownload == release)
+                                            {
+                                                <button type="button" class="btn btn-primary btn-sm" disabled="@_starting" @onclick="() => StartDownloadAsync(release)">
+                                                    @(_starting ? "Adding..." : "Download it")
+                                                </button>
+                                                <button type="button" class="btn btn-secondary btn-sm" disabled="@_starting" @onclick="() => _confirmDownload = null">Cancel</button>
+                                            }
+                                            else if (IsDownloading(group.Path))
+                                            {
+                                                <span class="cell-note">Downloading</span>
+                                            }
+                                            else
+                                            {
+                                                <button type="button" class="btn btn-secondary btn-sm" @onclick="() => _confirmDownload = release">Download</button>
+                                            }
+
+                                            @if (IsWebLink(release.Candidate.InfoUrl))
+                                            {
+                                                <a class="text-nowrap" href="@release.Candidate.InfoUrl" target="_blank" rel="noopener noreferrer">
+                                                    Open
+                                                </a>
+                                            }
+                                        </div>
+
+                                        @if (_rowMessage is { } note && note.Release == release)
                                         {
-                                            <a class="text-nowrap" href="@release.Candidate.InfoUrl" target="_blank" rel="noopener noreferrer">
-                                                Open
-                                            </a>
+                                            <div class="@(note.Ok ? "status-ok" : "status-warn") mt-1" style="max-width: 32ch; white-space: normal">@note.Text</div>
+                                        }
+
+                                        @if (_confirmDownload == release)
+                                        {
+                                            <div class="cell-note mt-1" style="max-width: 32ch">
+                                                Starts it in @Client.Name. When it's done, the new file is linked into the library
+                                                and yours goes to the Recycle Bin@(_autoSwap ? "" : " when you press Swap now").
+                                            </div>
                                         }
                                     </td>
                                 </tr>
@@ -314,6 +463,111 @@ else
 
     private List<DriveProfile> _profiles = [];
 
+    private SizeReductionCandidate? _confirmDownload;
+    private (SizeReductionCandidate Release, string Text, bool Ok)? _rowMessage;
+    private bool _starting;
+    private bool _checking;
+    private bool _autoSwap;
+    private string? _downloadMessage;
+    private bool _downloadOk;
+
+    private Guid? _confirmCancel;
+    private Timer? _refresh;
+
+    private async Task CancelAsync(SizeReductionDownload download)
+    {
+        _checking = true;
+
+        try
+        {
+            var problem = await Downloads.CancelAsync(download.Id);
+
+            _downloadOk = problem is null;
+            _downloadMessage = problem ?? $"Cancelled {download.ReleaseTitle}. It and what it downloaded were removed from {Client.Name}; your file is untouched.";
+        }
+        finally
+        {
+            _checking = false;
+            _confirmCancel = null;
+        }
+    }
+
+    // While anything is downloading, the numbers are refreshed every few seconds.
+    private void RefreshWhileDownloading(object? _)
+    {
+        if (Downloads.Downloads.Any(download => download.Status == SizeReductionDownloadStatus.Downloading))
+        {
+            _ = InvokeAsync(Downloads.CheckAsync);
+        }
+    }
+
+    private bool IsDownloading(string libraryFile) =>
+        Downloads.Downloads.Any(download =>
+            download.Status is SizeReductionDownloadStatus.Downloading or SizeReductionDownloadStatus.ReadyToSwap &&
+            string.Equals(download.LibraryFilePath, libraryFile, StringComparison.OrdinalIgnoreCase));
+
+    private async Task StartDownloadAsync(SizeReductionCandidate release)
+    {
+        _starting = true;
+
+        try
+        {
+            string? problem;
+
+            try
+            {
+                problem = await Downloads.StartAsync(release);
+            }
+            catch (Exception exception)
+            {
+                Simplifiarr.Core.Utilities.AppLog.Warn("Starting a Size Reduction download failed.", exception);
+                problem = $"It couldn't be added: {exception.Message}";
+            }
+
+            _downloadOk = problem is null;
+            _downloadMessage = problem ?? $"Added {release.Candidate.Title} to {Client.Name}. It's in Downloads above.";
+
+            // Said next to the button too, where you are looking.
+            _rowMessage = (release, problem ?? $"Added to {Client.Name}; see Downloads at the top.", problem is null);
+        }
+        finally
+        {
+            _starting = false;
+            _confirmDownload = null;
+        }
+    }
+
+    private async Task CheckDownloadsAsync()
+    {
+        _checking = true;
+
+        try
+        {
+            await Downloads.CheckAsync();
+        }
+        finally
+        {
+            _checking = false;
+        }
+    }
+
+    private async Task SwapAsync(SizeReductionDownload download)
+    {
+        _checking = true;
+
+        try
+        {
+            var problem = await Downloads.SwapAsync(download.Id);
+
+            _downloadOk = problem is null;
+            _downloadMessage = problem ?? download.Message;
+        }
+        finally
+        {
+            _checking = false;
+        }
+    }
+
     private List<SizeReductionCandidate> _found = [];
 
     /// <summary>Every file with a release, after the quality filter.</summary>
@@ -343,6 +597,10 @@ else
     {
         _wasSearching = Search.IsSearching;
 
+        Downloads.Changed += OnDownloadsChanged;
+
+        _refresh = new Timer(RefreshWhileDownloading, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+
         Search.Changed += OnSearchChanged;
 
         var settings =
@@ -351,6 +609,11 @@ else
         _prowlarrIsSetUp =
             !string.IsNullOrWhiteSpace(settings.ProwlarrUrl) &&
             !string.IsNullOrWhiteSpace(settings.ProwlarrApiKey);
+
+        _autoSwap = settings.SizeReductionAutoSwap;
+
+        // Fresh progress for anything downloading.
+        _ = InvokeAsync(Downloads.CheckAsync);
 
         _profiles =
             (await SettingsService.GetEnabledDriveProfilesAsync())
@@ -385,6 +648,10 @@ else
                 _wasSearching && !Search.IsSearching;
 
             _wasSearching = Search.IsSearching;
+
+        Downloads.Changed += OnDownloadsChanged;
+
+        _refresh = new Timer(RefreshWhileDownloading, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
 
             if (justFinished)
             {
@@ -495,6 +762,13 @@ else
             .ToLocalTime()
             .ToString("g");
 
-    public void Dispose() =>
+    private void OnDownloadsChanged() =>
+        _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
         Search.Changed -= OnSearchChanged;
+        Downloads.Changed -= OnDownloadsChanged;
+        _refresh?.Dispose();
+    }
 }

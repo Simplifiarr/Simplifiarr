@@ -231,7 +231,9 @@
         new("size-reduction", "file-earmark-zip", "Size Reduction",
             "Smaller releases of films and episodes you have, found on your indexers. Report only."),
         new("storage", "device-hdd", "Storage",
-            "How full each drive is against a limit you set, and what fills it. Suggests titles to move so no drive fills up, and moves them one at a time, telling Radarr or Sonarr the new folder. Shows who has watched each title (Jellyfin) and who asked for it (Seerr), and lists titles worth a look, which can be deleted through Radarr or Sonarr. Titles still seeding are never moved or deleted.")
+            "How full each drive is against a limit you set, and what fills it. Suggests titles to move so no drive fills up, and moves them one at a time, telling Radarr or Sonarr the new folder. Shows who has watched each title (Jellyfin) and who asked for it (Seerr), and lists titles worth a look, which can be deleted through Radarr or Sonarr. Titles still seeding are never moved or deleted."),
+        new("folder-fixer", "signpost-split", "Folder Fixer",
+            "Movies and shows Radarr or Sonarr point at a folder that no longer exists, usually because it was moved by hand. Points them at where the folder is now, or removes entries with nothing on disk. Nothing is moved.")
     ];
 
     private static readonly HelpPage[] SafetyPages =

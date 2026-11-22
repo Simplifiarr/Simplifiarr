@@ -82,6 +82,34 @@ internal sealed class FakeTorrentClient : ITorrentClient
     public Task<byte[]?> GetTorrentExportBytesAsync(string torrentHash) =>
         Task.FromResult<byte[]?>(null);
 
+    public List<(string SavePath, string Tag, byte[] Bytes)> Downloads { get; } = [];
+
+    public List<(string SavePath, string Tag, string Magnet)> MagnetDownloads { get; } = [];
+
+    public List<(string Hash, bool DeleteFiles)> Removed { get; } = [];
+
+    public Task<string?> RemoveTorrentAsync(string torrentHash, bool deleteFiles)
+    {
+        Removed.Add((torrentHash, deleteFiles));
+        Torrents.RemoveAll(torrent => string.Equals(torrent.TorrentHash, torrentHash, StringComparison.OrdinalIgnoreCase));
+
+        return Task.FromResult<string?>(null);
+    }
+
+    public Task<TorrentAddResult> DownloadMagnetAsync(string magnet, string savePath, string tag)
+    {
+        MagnetDownloads.Add((savePath, tag, magnet));
+
+        return Task.FromResult(new TorrentAddResult { Success = true });
+    }
+
+    public Task<TorrentAddResult> DownloadTorrentAsync(byte[] torrentBytes, string savePath, string tag)
+    {
+        Downloads.Add((savePath, tag, torrentBytes));
+
+        return Task.FromResult(new TorrentAddResult { Success = true });
+    }
+
     public Task<TorrentAddResult> AddTorrentAsync(byte[] torrentBytes, string savePath)
     {
         AddedTo.Add(savePath);

@@ -81,6 +81,13 @@ public class QbittorrentClient : ITorrentClient
                             ? progress.GetDouble()
                             : 0,
                         Tracker = GetString(torrent, "tracker"),
+                        SeedsConnected = (int)GetLong(torrent, "num_seeds"),
+                        SeedsInSwarm = (int)GetLong(torrent, "num_complete"),
+                        LeechersConnected = (int)GetLong(torrent, "num_leechs"),
+                        LeechersInSwarm = (int)GetLong(torrent, "num_incomplete"),
+                        DownloadSpeed = GetLong(torrent, "dlspeed"),
+                        // qBittorrent says 8640000 (100 days) when it can't tell.
+                        TimeLeft = GetLong(torrent, "eta") is > 0 and < 8640000 and var eta ? TimeSpan.FromSeconds(eta) : null,
                         InfoHashV1 = GetString(torrent, "infohash_v1"),
                         InfoHashV2 = GetString(torrent, "infohash_v2")
                     };
@@ -215,6 +222,77 @@ public class QbittorrentClient : ITorrentClient
         }
     }
 
+    public Task<TorrentAddResult> DownloadTorrentAsync(
+        byte[] torrentBytes,
+        string savePath,
+        string tag) =>
+        StartDownloadAsync(torrentBytes, null, savePath, tag);
+
+    public Task<TorrentAddResult> DownloadMagnetAsync(
+        string magnet,
+        string savePath,
+        string tag) =>
+        StartDownloadAsync(null, magnet, savePath, tag);
+
+    private async Task<TorrentAddResult> StartDownloadAsync(
+        byte[]? torrentBytes,
+        string? magnet,
+        string savePath,
+        string tag)
+    {
+        try
+        {
+            using var response =
+                await SendAsync(HttpMethod.Post, "/api/v2/torrents/add", () =>
+                {
+                    var content = new MultipartFormDataContent();
+
+                    if (torrentBytes is not null)
+                    {
+                        var file = new ByteArrayContent(torrentBytes);
+                        file.Headers.ContentType = new MediaTypeHeaderValue("application/x-bittorrent");
+
+                        content.Add(file, "torrents", "download.torrent");
+                    }
+                    else
+                    {
+                        content.Add(new StringContent(magnet!), "urls");
+                    }
+
+                    content.Add(new StringContent(savePath), "savepath");
+                    content.Add(new StringContent(tag), "tags");
+                    content.Add(new StringContent("false"), "paused");
+                    content.Add(new StringContent("false"), "stopped");
+
+                    return content;
+                });
+
+            if (response is null)
+            {
+                return new TorrentAddResult { Success = false, ErrorMessage = "qBittorrent's address isn't set (see Settings)." };
+            }
+
+            var body = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return new TorrentAddResult
+                {
+                    Success = false,
+                    ErrorMessage = $"qBittorrent returned HTTP {(int)response.StatusCode} {response.ReasonPhrase}: {body}".Trim()
+                };
+            }
+
+            return body.Trim().Equals("Fails.", StringComparison.OrdinalIgnoreCase)
+                ? new TorrentAddResult { Success = false, ErrorMessage = "qBittorrent refused the torrent (usually because it's already in the client)." }
+                : new TorrentAddResult { Success = true };
+        }
+        catch (Exception exception) when (IsConnectionProblem(exception))
+        {
+            return new TorrentAddResult { Success = false, ErrorMessage = exception.Message };
+        }
+    }
+
     // qBittorrent 5 renamed pause/resume to stop/start; try the new name
     // first and fall back for older versions.
     public Task<string?> StopTorrentAsync(
@@ -233,6 +311,13 @@ public class QbittorrentClient : ITorrentClient
     public Task<string?> RecheckTorrentAsync(
         string torrentHash) =>
         PostFormAsync(["/api/v2/torrents/recheck"], new() { ["hashes"] = torrentHash });
+
+    public Task<string?> RemoveTorrentAsync(
+        string torrentHash,
+        bool deleteFiles) =>
+        PostFormAsync(
+            ["/api/v2/torrents/delete"],
+            new() { ["hashes"] = torrentHash, ["deleteFiles"] = deleteFiles ? "true" : "false" });
 
     private async Task<string?> PostFormAsync(
         string[] paths,

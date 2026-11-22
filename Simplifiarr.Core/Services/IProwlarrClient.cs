@@ -17,5 +17,14 @@ public interface IProwlarrClient
 
     Task<byte[]?> DownloadTorrentAsync(string downloadUrl);
 
+    /// <summary>
+    /// What a release's download link gives: a .torrent file, or a magnet
+    /// link (some indexers only have those). Null when neither can be had.
+    /// </summary>
+    Task<ReleaseSource?> GetReleaseAsync(string downloadUrl);
+
     Task<bool> TestConnectionAsync();
 }
+
+/// <summary>A .torrent file or a magnet link; exactly one is set.</summary>
+public sealed record ReleaseSource(byte[]? TorrentBytes, string? Magnet);

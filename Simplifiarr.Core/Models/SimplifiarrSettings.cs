@@ -150,6 +150,12 @@ public class SimplifiarrSettings
 
     /// <summary>Drive entries searched automatically; empty means all of them.</summary>
     public List<string> SizeReductionDrives { get; set; } = [];
+
+    /// <summary>
+    /// Swap a finished Size Reduction download in by itself. Off: it waits
+    /// for Swap now.
+    /// </summary>
+    public bool SizeReductionAutoSwap { get; set; }
 }
 
 public enum AutoScanMode

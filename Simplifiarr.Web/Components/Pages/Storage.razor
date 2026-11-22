@@ -12,7 +12,6 @@
 @inject IScanCoordinator Scans
 @inject IWatchHistoryService WatchHistory
 @inject ISizeReductionCandidateService SizeReduction
-@inject IArrPathService ArrPaths
 @inject IIgnoredItemsService Ignored
 
 <PageTitle>Storage - Simplifiarr</PageTitle>
@@ -481,108 +480,6 @@ else
         }
     }
 
-    @* ------------------------------------------------- Arr folder repair *@
-
-    <h2 class="section-title mt-4">Radarr and Sonarr folders</h2>
-
-    <div class="toolbar">
-        <div class="toolbar-summary" style="max-width: 70ch">
-            Movies and shows Radarr or Sonarr point at a folder that no longer exists, usually
-            because the folder was moved by hand. Where the folder is found in your libraries,
-            Simplifiarr can point them at it. Nothing is moved; only the address changes.
-        </div>
-        <div class="toolbar-actions">
-            <button type="button" class="btn btn-secondary btn-sm" disabled="@_checkingArr" @onclick="CheckArrFoldersAsync">
-                @(_checkingArr ? "Checking..." : "Check folders")
-            </button>
-            @if (_arrProblems.Count(problem => problem.CanFix) is > 0 and var fixable)
-            {
-                <button type="button" class="btn btn-primary btn-sm" disabled="@_checkingArr" @onclick="() => FixArrAsync(_arrProblems.Where(problem => problem.CanFix).ToList())">
-                    Fix all found (@fixable)
-                </button>
-            }
-            @if (_arrProblems.Count(problem => problem.CanRemove) is > 0 and var removable)
-            {
-                @if (_confirmRemoveAll)
-                {
-                    <button type="button" class="btn btn-danger btn-sm" disabled="@_checkingArr" @onclick="() => RemoveArrAsync(_arrProblems.Where(problem => problem.CanRemove).ToList())">
-                        Remove @removable from Radarr/Sonarr
-                    </button>
-                    <button type="button" class="btn btn-secondary btn-sm" @onclick="() => _confirmRemoveAll = false">Cancel</button>
-                }
-                else
-                {
-                    <button type="button" class="btn btn-outline-danger btn-sm" disabled="@_checkingArr" @onclick="() => _confirmRemoveAll = true">
-                        Remove all not found (@removable)...
-                    </button>
-                }
-            }
-        </div>
-    </div>
-
-    @if (_arrMessage is not null)
-    {
-        <div class="alert @(_arrOk ? "alert-info" : "alert-warning")">@_arrMessage</div>
-    }
-
-    @if (_arrProblems.Count > 0)
-    {
-        <div class="table-scroll">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Title</th>
-                        <th>Points at (gone)</th>
-                        <th>Is now at</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var problem in _arrProblems)
-                    {
-                        <tr @key="(problem.Item.Source, problem.Item.Id)" class="@(problem.CanFix ? null : "row-disabled")">
-                            <td>
-                                <div class="file-name">@problem.Item.Title @(problem.Item.Year is { } year ? $"({year})" : null)</div>
-                                <div class="cell-note">@problem.Item.Source</div>
-                            </td>
-                            <td><code>@problem.Item.Path</code></td>
-                            <td>
-                                @if (problem.FoundFolder is { } found)
-                                {
-                                    <code>@found</code>
-                                }
-                                else
-                                {
-                                    <span class="cell-note">@problem.Note</span>
-                                }
-                            </td>
-                            <td>
-                                @if (problem.CanFix)
-                                {
-                                    <button type="button" class="btn btn-secondary btn-sm" disabled="@_checkingArr" @onclick="() => FixArrAsync([problem])">Fix</button>
-                                }
-                                else if (problem.CanRemove)
-                                {
-                                    @if (_confirmRemove == problem)
-                                    {
-                                        <div class="d-flex gap-2 flex-wrap">
-                                            <button type="button" class="btn btn-danger btn-sm" disabled="@_checkingArr" @onclick="() => RemoveArrAsync([problem])">Remove it</button>
-                                            <button type="button" class="btn btn-secondary btn-sm" @onclick="() => _confirmRemove = null">Cancel</button>
-                                        </div>
-                                    }
-                                    else
-                                    {
-                                        <button type="button" class="btn btn-outline-danger btn-sm" disabled="@_checkingArr" @onclick="() => _confirmRemove = problem">Remove...</button>
-                                    }
-                                }
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
-    }
-
     <p class="cell-note mt-4">
         Titles move one at a time, with a short rest between them. Each file is copied, read back and
         checked against the original; only then is Radarr or Sonarr given the new folder and the old
@@ -637,11 +534,6 @@ else
             : $"{who} · asked for by {watch.RequestedBy}" + (watch.RequesterWatched == true ? " (watched)" : watch.RequesterStarted == true ? " (started)" : " (not yet)");
     }
 
-    private List<ArrFolderProblem> _arrProblems = [];
-    private bool _checkingArr;
-    private string? _arrMessage;
-    private bool _arrOk;
-
     private void Keep(StorageReview review)
     {
         Ignored.Add(
@@ -658,146 +550,6 @@ else
         _reviews.Remove(review);
     }
 
-    private async Task CheckArrFoldersAsync()
-    {
-        _checkingArr = true;
-        _arrMessage = null;
-
-        try
-        {
-            var titles = _drives?.SelectMany(drive => drive.Titles).ToList() ?? [];
-            var problems = new List<ArrFolderProblem>();
-
-            foreach (var kind in new[] { StorageKinds.Movies, StorageKinds.Tv })
-            {
-                // Radarr's and Sonarr's own root folders count too, even
-                // ones that aren't a library in Settings.
-                var known = titles.Select(title => title.FolderPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                var candidates = titles.ToList();
-
-                foreach (var root in await ArrPaths.GetRootFoldersAsync(kind))
-                {
-                    if (!Directory.Exists(root))
-                    {
-                        continue;
-                    }
-
-                    candidates.AddRange(
-                        Directory.EnumerateDirectories(root)
-                            .Where(folder => !known.Contains(folder))
-                            .Select(folder => new StorageTitle { Kind = kind, FolderPath = folder, Name = Path.GetFileName(folder) }));
-                }
-
-                problems.AddRange(
-                    ArrFolderRepair.Find(
-                        kind,
-                        await ArrPaths.GetAllAsync(kind),
-                        candidates,
-                        Directory.Exists,
-                        folder => Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories).Any()));
-            }
-
-            _arrProblems = problems;
-            _arrOk = true;
-            _arrMessage =
-                problems.Count == 0
-                    ? "Every movie and show in Radarr and Sonarr points at a folder that exists."
-                    : $"{problems.Count} point at a folder that's gone; {problems.Count(problem => problem.CanFix)} were found in your libraries.";
-        }
-        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
-        {
-            _arrOk = false;
-            _arrMessage = $"Couldn't read Radarr or Sonarr: {exception.Message}";
-        }
-        finally
-        {
-            _checkingArr = false;
-        }
-    }
-
-    private ArrFolderProblem? _confirmRemove;
-    private bool _confirmRemoveAll;
-
-    /// <summary>
-    /// Takes entries with nothing on disk out of Radarr or Sonarr. No files
-    /// are touched (there are none), and no import exclusion is added, so
-    /// they can be added again later.
-    /// </summary>
-    private async Task RemoveArrAsync(List<ArrFolderProblem> problems)
-    {
-        _checkingArr = true;
-        _confirmRemove = null;
-        _confirmRemoveAll = false;
-
-        var removed = 0;
-        var failures = new List<string>();
-
-        try
-        {
-            foreach (var problem in problems.Where(problem => problem.CanRemove))
-            {
-                if (await ArrPaths.RemoveAsync(problem.Kind, problem.Item) is { } refusal)
-                {
-                    failures.Add($"{problem.Item.Title}: {refusal}");
-                }
-                else
-                {
-                    removed++;
-                    _arrProblems.Remove(problem);
-                }
-
-                StateHasChanged();
-            }
-        }
-        finally
-        {
-            _checkingArr = false;
-        }
-
-        _arrOk = failures.Count == 0;
-        _arrMessage =
-            $"Removed {removed} from Radarr/Sonarr. No files were touched." +
-            (failures.Count == 0 ? string.Empty : " Not removed: " + string.Join("; ", failures.Take(5)));
-    }
-
-    private async Task FixArrAsync(List<ArrFolderProblem> problems)
-    {
-        _checkingArr = true;
-
-        var fixedCount = 0;
-        var failures = new List<string>();
-
-        try
-        {
-            foreach (var problem in problems.Where(problem => problem.FoundFolder is not null))
-            {
-                var folder = problem.FoundFolder!;
-                var refusal = await ArrPaths.SetFolderAsync(problem.Kind, problem.Item, folder, Path.GetDirectoryName(folder)!);
-
-                if (refusal is null)
-                {
-                    await ArrPaths.RescanAsync(problem.Kind, problem.Item);
-                    fixedCount++;
-                    _arrProblems.Remove(problem);
-                }
-                else
-                {
-                    failures.Add($"{problem.Item.Title}: {refusal}");
-                }
-
-                StateHasChanged();
-            }
-        }
-        finally
-        {
-            _checkingArr = false;
-        }
-
-        _arrOk = failures.Count == 0;
-        _arrMessage =
-            $"Pointed {fixedCount} at their folders; Radarr and Sonarr are rescanning them." +
-            (failures.Count == 0 ? string.Empty : " Not fixed: " + string.Join("; ", failures.Take(5)));
-    }
 
     private async Task DeleteAsync(StorageReview review)
     {

@@ -16,6 +16,7 @@ public enum HistoryActionType
     PermissionsRestored,
     SeedMoved,
     TitleMoved,
-    TitleDeleted
+    TitleDeleted,
+    SizeReduced
 }
 

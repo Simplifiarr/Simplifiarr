@@ -56,6 +56,17 @@ internal sealed class FakeProwlarr : IProwlarrClient
     /// <summary>Answers every search, whatever was asked for.</summary>
     public List<ProwlarrSearchResult> EveryQuery { get; } = [];
 
+    /// <summary>Download address -> the magnet link it redirects to.</summary>
+    public Dictionary<string, string> Magnets { get; } = [];
+
+    public Task<ReleaseSource?> GetReleaseAsync(string downloadUrl) =>
+        Task.FromResult<ReleaseSource?>(
+            Magnets.TryGetValue(downloadUrl, out var magnet)
+                ? new ReleaseSource(null, magnet)
+                : Torrents.TryGetValue(downloadUrl, out var bytes)
+                    ? new ReleaseSource(bytes, null)
+                    : null);
+
     public Task<byte[]?> DownloadTorrentAsync(string downloadUrl) =>
         Torrents.TryGetValue(downloadUrl, out var bytes)
             ? Task.FromResult<byte[]?>(bytes)
