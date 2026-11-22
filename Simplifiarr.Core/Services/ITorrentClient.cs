@@ -69,6 +69,9 @@ public interface ITorrentClient
     /// </summary>
     Task<string?> RemoveTorrentAsync(string torrentHash, bool deleteFiles);
 
+    /// <summary>Adds a tag to a torrent. Null on success.</summary>
+    Task<string?> AddTagAsync(string torrentHash, string tag);
+
     /// <summary>
     /// Tries the address and login given, saved or not. Null when it
     /// worked, otherwise what went wrong in words.

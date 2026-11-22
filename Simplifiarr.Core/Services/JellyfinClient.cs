@@ -193,6 +193,24 @@ public class JellyfinClient : IJellyfinClient
         return result;
     }
 
+    public async Task<IReadOnlyList<string>> GetWatchedEpisodePathsAsync(string userId)
+    {
+        using var document =
+            await SendAsync(
+                HttpMethod.Get,
+                $"/Users/{Uri.EscapeDataString(userId)}/Items?Recursive=true&IncludeItemTypes=Episode&IsPlayed=true&Fields=Path");
+
+        if (document is null || !document.RootElement.TryGetProperty("Items", out var items))
+        {
+            return [];
+        }
+
+        return items.EnumerateArray()
+            .Select(item => Text(item, "Path"))
+            .Where(path => path.Length > 0)
+            .ToList();
+    }
+
     private static DateTime? Date(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) &&
         value.ValueKind == JsonValueKind.String &&

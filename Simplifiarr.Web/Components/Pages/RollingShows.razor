@@ -1,0 +1,495 @@
+@page "/rolling-shows"
+@rendermode InteractiveServer
+@implements IDisposable
+
+@using System.Text.Json
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+@using Simplifiarr.Core.Utilities
+
+@inject IRollingShowService Rolling
+@inject ISonarrShowClient Sonarr
+@inject IJellyfinClient Jellyfin
+@inject ITorrentClient Client
+@inject NavigationManager Navigation
+
+<PageTitle>Rolling Shows - Simplifiarr</PageTitle>
+
+<PageHeader Title="Rolling Shows"
+            Subtitle="For daily and weekly shows: keep only the newest episodes and let older ones go as new ones arrive. Sonarr stops looking for each episode before it is deleted, so nothing comes back." />
+
+@if (_problem is not null)
+{
+    <div class="alert alert-warning">@_problem</div>
+}
+
+@if (_message is not null)
+{
+    <div class="alert @(_messageOk ? "alert-info" : "alert-warning")">@_message</div>
+}
+
+@* --------------------------------------------------------------- Editor *@
+
+@if (_editing is { } edited)
+{
+    <div class="group-card">
+        <div class="group-card-header">
+            <div class="group-card-title">@edited.SeriesTitle</div>
+            <div class="group-card-meta">@(Rolling.Rules.Any(existing => existing.Id == edited.Id) ? "Editing the rule" : "New rule")</div>
+        </div>
+
+        <div style="padding: 0 1.1rem 1.1rem">
+            <div class="detail-label" style="margin-top: 0">Keep</div>
+
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label" for="keep-latest">The newest episodes</label>
+                    <input id="keep-latest" class="form-control" type="number" min="1" placeholder="No limit" @bind="edited.KeepLatest" />
+                    <div class="cell-note">Last Week Tonight: 4</div>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label" for="keep-days">Episodes that aired in the last</label>
+                    <div class="d-flex align-items-center gap-2">
+                        <input id="keep-days" class="form-control" type="number" min="1" placeholder="No limit" @bind="edited.KeepDays" />
+                        <span>days</span>
+                    </div>
+                    <div class="cell-note">The Daily Show: 7</div>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label" for="keep-floor">But never fewer than</label>
+                    <input id="keep-floor" class="form-control" type="number" min="0" placeholder="No minimum" @bind="edited.MinimumKeep" />
+                    <div class="cell-note">Keeps something to watch when a show is on a break</div>
+                </div>
+            </div>
+
+            <div class="form-check mt-3">
+                <input id="keep-season" class="form-check-input" type="checkbox" @bind="edited.KeepCurrentSeasonOnly" />
+                <label class="form-check-label" for="keep-season">Only the current season</label>
+            </div>
+
+            @if (edited.KeepCurrentSeasonOnly)
+            {
+                <div class="d-flex flex-wrap align-items-center gap-2 mt-2 ms-4">
+                    <span>The previous season goes</span>
+                    <select class="form-select" style="max-width: 22rem" @bind="edited.SeasonSwitch">
+                        <option value="@SeasonSwitch.FirstEpisode">when episode 1 of a new season arrives</option>
+                        <option value="@SeasonSwitch.AfterEpisodes">once this many new episodes are in</option>
+                        <option value="@SeasonSwitch.AfterDays">this many days after a new season starts</option>
+                    </select>
+                    @if (edited.SeasonSwitch != SeasonSwitch.FirstEpisode)
+                    {
+                        <input class="form-control" type="number" min="1" style="max-width: 6rem" aria-label="How many" @bind="edited.SeasonSwitchValue" />
+                    }
+                </div>
+            }
+
+            <p class="cell-note mt-2 mb-0">
+                Every limit you set applies: an episode goes when any of them says it's too old. Specials are left alone.
+            </p>
+
+            <div class="detail-label">Watched</div>
+
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <select class="form-select" aria-label="Watched" @bind="edited.Watched">
+                        <option value="@WatchRequirement.None">Delete whether watched or not</option>
+                        <option value="@WatchRequirement.Anyone">Only once someone has watched it</option>
+                        <option value="@WatchRequirement.User">Only once a particular person has</option>
+                    </select>
+                </div>
+
+                @if (edited.Watched == WatchRequirement.User)
+                {
+                    <div class="col-md-4">
+                        <select class="form-select" aria-label="Who" @bind="edited.WatchedBy">
+                            <option value="">Choose who...</option>
+                            @foreach (var user in _users)
+                            {
+                                <option value="@user">@user</option>
+                            }
+                        </select>
+                    </div>
+                }
+
+                @if (edited.Watched != WatchRequirement.None)
+                {
+                    <div class="col-md-4">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="text-nowrap">Unless it aired over</span>
+                            <input class="form-control" type="number" min="1" placeholder="Never" aria-label="Days" @bind="edited.UnwatchedAfterDays" />
+                            <span>days ago</span>
+                        </div>
+                        <div class="cell-note">So a show nobody watches can't pile up</div>
+                    </div>
+                }
+            </div>
+
+            <div class="detail-label">Deleting</div>
+
+            <div class="form-check">
+                <input id="del-recycle" class="form-check-input" type="radio" name="permanent" checked="@(!edited.Permanent)" @onchange="() => edited.Permanent = false" />
+                <label class="form-check-label" for="del-recycle">Send to the Recycle Bin</label>
+            </div>
+            <div class="form-check">
+                <input id="del-permanent" class="form-check-input" type="radio" name="permanent" checked="@edited.Permanent" @onchange="() => edited.Permanent = true" />
+                <label class="form-check-label" for="del-permanent">Delete for good (daily shows add up fast in the Recycle Bin)</label>
+            </div>
+
+            <div class="detail-label">Episodes still seeding</div>
+
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <span>The library copy goes at once. The torrent is tagged <code>@RollingShowService.DeleteTag</code> and removed from @Client.Name after</span>
+                <input class="form-control" type="number" min="0" style="max-width: 6rem" placeholder="-" aria-label="Days" @bind="edited.SeedDays" />
+                <span>days seeding, or at ratio</span>
+                <input class="form-control" type="number" min="0" step="0.1" style="max-width: 6rem" placeholder="-" aria-label="Ratio" @bind="edited.SeedRatio" />
+                <span>, whichever comes first.</span>
+            </div>
+            <div class="cell-note">Both blank: when @Client.Name stops it. A season pack keeps seeding until all its episodes have gone.</div>
+
+            <div class="cell-actions mt-4" style="flex-wrap: wrap">
+                <button type="button" class="btn btn-secondary" disabled="@(_busy || !edited.HasAnyLimit)" @onclick="PreviewAsync">
+                    @(_busy ? "Checking..." : "Preview")
+                </button>
+
+                @if (_preview is not null)
+                {
+                    <button type="button" class="btn btn-primary" disabled="@(_busy || !CanSave)" @onclick="() => SaveAsync(turnOn: true)">
+                        @(_preview.Deletions.Count == 0 ? "Save and turn on" : $"Turn on, deleting {_preview.Deletions.Count} now")
+                    </button>
+                }
+
+                <button type="button" class="btn btn-secondary" disabled="@(_busy || !CanSave)" @onclick="() => SaveAsync(turnOn: false)">Save, off</button>
+                <button type="button" class="btn btn-secondary" disabled="@_busy" @onclick="CloseEditor">Cancel</button>
+            </div>
+
+            @if (!edited.HasAnyLimit)
+            {
+                <div class="cell-note mt-2">Set at least one limit to keep.</div>
+            }
+
+            @if (_preview is { } preview)
+            {
+                <div class="mt-3">
+                    @if (preview.Problem is not null)
+                    {
+                        <div class="alert alert-warning">@preview.Problem</div>
+                    }
+                    else if (preview.Deletions.Count == 0)
+                    {
+                        <div class="alert alert-info">Right now nothing would be deleted; @preview.EpisodesWithFiles episode(s) all stay.</div>
+                    }
+                    else
+                    {
+                        <div class="alert alert-warning">
+                            Turning this on deletes <strong>@preview.Deletions.Count</strong> of @preview.EpisodesWithFiles episode(s)
+                            now (@SizeFormatter.FormatBytes(preview.Deletions.Sum(deletion => deletion.Episode.SizeBytes))).
+                        </div>
+
+                        <div class="table-scroll">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Episode</th>
+                                        <th>Aired</th>
+                                        <th>Why</th>
+                                        <th class="col-num">Size</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var deletion in preview.Deletions.Take(200))
+                                    {
+                                        <tr>
+                                            <td>
+                                                S@(deletion.Episode.Season.ToString("00"))E@(deletion.Episode.Number.ToString("00"))
+                                                <div class="cell-note">@deletion.Episode.Title</div>
+                                            </td>
+                                            <td>@(deletion.Episode.AiredUtc?.ToLocalTime().ToString("d MMM yyyy") ?? "-")</td>
+                                            <td>@deletion.Reason</td>
+                                            <td class="col-num">@SizeFormatter.FormatBytes(deletion.Episode.SizeBytes)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@* ---------------------------------------------------------------- Rules *@
+
+@if (_editing is null)
+{
+    <div class="toolbar">
+        <div class="toolbar-summary">
+            <strong>@Rolling.Rules.Count</strong> rule(s) · @Rolling.Rules.Count(rule => rule.IsOn) on
+        </div>
+
+        <div class="toolbar-actions">
+            <select class="form-select form-select-sm" aria-label="Show" @bind="_newSeriesId">
+                <option value="0">Add a rule for...</option>
+                @foreach (var show in _shows.Where(show => Rolling.Rules.All(rule => rule.SeriesId != show.Id)))
+                {
+                    <option value="@show.Id">@show.Title</option>
+                }
+            </select>
+
+            <button type="button" class="btn btn-primary btn-sm" disabled="@(_newSeriesId == 0)" @onclick="StartNew">Set up</button>
+        </div>
+    </div>
+
+    @if (Rolling.Rules.Count == 0)
+    {
+        <EmptyState Icon="arrow-repeat" Text="No rules yet. Pick a show above to set one up." />
+    }
+
+    @foreach (var rule in Rolling.Rules)
+    {
+        <div class="group-card" @key="rule.Id">
+            <div class="group-card-header">
+                <div>
+                    <div class="group-card-title">
+                        @rule.SeriesTitle
+                        <span class="pill">@(rule.IsOn ? "On" : "Off")</span>
+                    </div>
+                    <div class="cell-note">@RollingShowPlanner.Describe(rule)</div>
+                    @if (rule.LastRunUtc is { } ran)
+                    {
+                        <div class="cell-note">Last run @ran.ToLocalTime().ToString("ddd d MMM, h:mm tt"): @rule.LastRunMessage</div>
+                    }
+                </div>
+
+                <div class="d-flex gap-2 flex-wrap">
+                    <button type="button" class="btn btn-secondary btn-sm" disabled="@_busy" @onclick="() => Edit(rule)">Edit</button>
+
+                    @if (rule.IsOn)
+                    {
+                        <button type="button" class="btn btn-secondary btn-sm" disabled="@_busy" @onclick="() => RunNowAsync(rule)">Run now</button>
+                        <button type="button" class="btn btn-secondary btn-sm" disabled="@_busy" @onclick="() => SetOn(rule, false)">Turn off</button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-secondary btn-sm" disabled="@_busy" @onclick="() => Edit(rule)">Preview and turn on</button>
+                    }
+
+                    @if (_confirmRemove == rule.Id)
+                    {
+                        <button type="button" class="btn btn-danger btn-sm" @onclick="() => RemoveRule(rule)">Remove rule</button>
+                        <button type="button" class="btn btn-secondary btn-sm" @onclick="() => _confirmRemove = null">Keep</button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => _confirmRemove = rule.Id">Remove...</button>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (Rolling.Seeds.Count > 0)
+    {
+        <details class="mt-3">
+            <summary>@Rolling.Seeds.Count torrent(s) seeding until they can be removed</summary>
+            <ul class="cell-note">
+                @foreach (var seed in Rolling.Seeds)
+                {
+                    <li>
+                        @seed.Name · tagged @seed.TaggedUtc.ToLocalTime().ToString("d MMM")
+                        @(seed.SeedDays is { } days ? $" · {days} day(s)" : null)
+                        @(seed.SeedRatio is { } ratio ? $" · ratio {ratio:0.##}" : null)
+                    </li>
+                }
+            </ul>
+        </details>
+    }
+
+    <div class="panel mt-4 help-panel">
+        <strong>Run the moment a new episode arrives.</strong>
+        Rules run on every Scan. To run them as soon as Sonarr imports an episode, add a webhook in Sonarr:
+        <ol class="mb-0 mt-2">
+            <li>Settings, Connect, the + button, then <strong>Webhook</strong>.</li>
+            <li>Tick <strong>On Import</strong> and <strong>On Upgrade</strong>.</li>
+            <li>URL: <code>@WebhookUrl</code>, method <strong>POST</strong>.</li>
+            <li>Press Test, then Save.</li>
+        </ol>
+        <div class="cell-note mt-2">
+            If Sonarr runs on another computer, replace the start of the address with this computer's address.
+        </div>
+    </div>
+}
+
+@code
+{
+    private IReadOnlyList<SonarrShow> _shows = [];
+    private List<string> _users = [];
+
+    private RollingShowRule? _editing;
+    private RollingPreview? _preview;
+    private int _newSeriesId;
+    private Guid? _confirmRemove;
+
+    private bool _busy;
+    private string? _problem;
+    private string? _message;
+    private bool _messageOk;
+
+    private string WebhookUrl =>
+        $"{Navigation.BaseUri.TrimEnd('/')}/api/hooks/sonarr/{Rolling.WebhookKey}";
+
+    private bool CanSave =>
+        _editing is { HasAnyLimit: true } rule &&
+        (rule.Watched != WatchRequirement.User || !string.IsNullOrWhiteSpace(rule.WatchedBy));
+
+    protected override async Task OnInitializedAsync()
+    {
+        Rolling.Changed += OnChanged;
+
+        try
+        {
+            _shows = await Sonarr.GetShowsAsync();
+
+            if (_shows.Count == 0)
+            {
+                _problem = "Sonarr isn't set up, or has no shows. Add it in Settings, under Connections.";
+            }
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _problem = $"Couldn't reach Sonarr: {exception.Message}";
+        }
+
+        try
+        {
+            _users = (await Jellyfin.GetUsersAsync()).Select(user => user.Name).OrderBy(name => name).ToList();
+        }
+        catch (InvalidOperationException)
+        {
+            // Jellyfin not set up: "watched by" only offers no one.
+        }
+    }
+
+    private void StartNew()
+    {
+        var show = _shows.FirstOrDefault(entry => entry.Id == _newSeriesId);
+
+        if (show is null)
+        {
+            return;
+        }
+
+        _editing = new RollingShowRule { SeriesId = show.Id, SeriesTitle = show.Title, SeriesPath = show.Path };
+        _preview = null;
+        _message = null;
+        _newSeriesId = 0;
+    }
+
+    // Edits a copy, so Cancel leaves the saved rule as it was.
+    private void Edit(RollingShowRule rule)
+    {
+        _editing = JsonSerializer.Deserialize<RollingShowRule>(JsonSerializer.Serialize(rule));
+        _preview = null;
+        _message = null;
+    }
+
+    private void CloseEditor()
+    {
+        _editing = null;
+        _preview = null;
+    }
+
+    private async Task PreviewAsync()
+    {
+        if (_editing is null)
+        {
+            return;
+        }
+
+        _busy = true;
+
+        try
+        {
+            _preview = await Rolling.PreviewAsync(_editing);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SaveAsync(bool turnOn)
+    {
+        if (_editing is not { } rule)
+        {
+            return;
+        }
+
+        _busy = true;
+
+        try
+        {
+            rule.IsOn = turnOn;
+            Rolling.Save(rule);
+
+            if (turnOn)
+            {
+                var result = await Rolling.RunRuleAsync(rule.Id);
+
+                _message = $"{rule.SeriesTitle} is on. {result}";
+            }
+            else
+            {
+                _message = $"{rule.SeriesTitle} saved, but off: nothing is deleted until you turn it on.";
+            }
+
+            _messageOk = true;
+            CloseEditor();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RunNowAsync(RollingShowRule rule)
+    {
+        _busy = true;
+
+        try
+        {
+            _message = $"{rule.SeriesTitle}: {await Rolling.RunRuleAsync(rule.Id)}";
+            _messageOk = true;
+
+            await Rolling.CleanUpSeedsAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void SetOn(RollingShowRule rule, bool on)
+    {
+        var copy = JsonSerializer.Deserialize<RollingShowRule>(JsonSerializer.Serialize(rule))!;
+
+        copy.IsOn = on;
+        Rolling.Save(copy);
+    }
+
+    private void RemoveRule(RollingShowRule rule)
+    {
+        Rolling.Remove(rule.Id);
+        _confirmRemove = null;
+        _message = $"Removed the rule for {rule.SeriesTitle}. Nothing else changed.";
+        _messageOk = true;
+    }
+
+    private void OnChanged() =>
+        _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() =>
+        Rolling.Changed -= OnChanged;
+}

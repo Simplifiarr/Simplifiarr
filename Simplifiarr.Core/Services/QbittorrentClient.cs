@@ -86,6 +86,9 @@ public class QbittorrentClient : ITorrentClient
                         LeechersConnected = (int)GetLong(torrent, "num_leechs"),
                         LeechersInSwarm = (int)GetLong(torrent, "num_incomplete"),
                         DownloadSpeed = GetLong(torrent, "dlspeed"),
+                        Ratio = torrent.TryGetProperty("ratio", out var ratio) && ratio.ValueKind == JsonValueKind.Number ? ratio.GetDouble() : 0,
+                        SeedingTime = TimeSpan.FromSeconds(GetLong(torrent, "seeding_time")),
+                        Tags = GetString(torrent, "tags"),
                         // qBittorrent says 8640000 (100 days) when it can't tell.
                         TimeLeft = GetLong(torrent, "eta") is > 0 and < 8640000 and var eta ? TimeSpan.FromSeconds(eta) : null,
                         InfoHashV1 = GetString(torrent, "infohash_v1"),
@@ -311,6 +314,11 @@ public class QbittorrentClient : ITorrentClient
     public Task<string?> RecheckTorrentAsync(
         string torrentHash) =>
         PostFormAsync(["/api/v2/torrents/recheck"], new() { ["hashes"] = torrentHash });
+
+    public Task<string?> AddTagAsync(
+        string torrentHash,
+        string tag) =>
+        PostFormAsync(["/api/v2/torrents/addTags"], new() { ["hashes"] = torrentHash, ["tags"] = tag });
 
     public Task<string?> RemoveTorrentAsync(
         string torrentHash,

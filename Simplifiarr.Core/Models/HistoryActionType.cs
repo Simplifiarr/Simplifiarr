@@ -17,6 +17,7 @@ public enum HistoryActionType
     SeedMoved,
     TitleMoved,
     TitleDeleted,
-    SizeReduced
+    SizeReduced,
+    EpisodeRolledOff
 }
 

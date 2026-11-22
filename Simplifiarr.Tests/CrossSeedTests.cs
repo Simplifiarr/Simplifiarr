@@ -88,6 +88,18 @@ internal sealed class FakeTorrentClient : ITorrentClient
 
     public List<(string Hash, bool DeleteFiles)> Removed { get; } = [];
 
+    public Task<string?> AddTagAsync(string torrentHash, string tag)
+    {
+        var torrent = Torrents.FirstOrDefault(entry => string.Equals(entry.TorrentHash, torrentHash, StringComparison.OrdinalIgnoreCase));
+
+        if (torrent is not null)
+        {
+            torrent.Tags = string.IsNullOrEmpty(torrent.Tags) ? tag : $"{torrent.Tags}, {tag}";
+        }
+
+        return Task.FromResult<string?>(null);
+    }
+
     public Task<string?> RemoveTorrentAsync(string torrentHash, bool deleteFiles)
     {
         Removed.Add((torrentHash, deleteFiles));

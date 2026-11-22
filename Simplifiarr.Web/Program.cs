@@ -86,6 +86,8 @@ builder.Services.AddHttpClient<IArrPathService, ArrPathService>();
 builder.Services.AddHttpClient<ISeerrClient, SeerrClient>();
 builder.Services.AddSingleton<IWatchHistoryService, WatchHistoryService>();
 builder.Services.AddSingleton<ISizeReductionDownloadService, SizeReductionDownloadService>();
+builder.Services.AddHttpClient<ISonarrShowClient, SonarrShowClient>();
+builder.Services.AddSingleton<IRollingShowService, RollingShowService>();
 builder.Services.AddSingleton<IStorageMoveService>(services => new StorageMoveService(
     services.GetRequiredService<IArrPathService>(),
     services.GetRequiredService<IStorageService>(),
@@ -173,6 +175,51 @@ app.MapGet(
             return Results.NotFound();
         }
     });
+
+// Sonarr calls this when it imports an episode ("On Import" in its
+// Connect settings), so Rolling Shows can act straight away. The key in
+// the address keeps anything else from triggering it.
+app.MapPost(
+    "/api/hooks/sonarr/{key}",
+    (string key, System.Text.Json.JsonElement body, IRollingShowService rolling) =>
+    {
+        if (!System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                System.Text.Encoding.UTF8.GetBytes(key),
+                System.Text.Encoding.UTF8.GetBytes(rolling.WebhookKey)))
+        {
+            return Results.NotFound();
+        }
+
+        var eventType =
+            body.TryGetProperty("eventType", out var type) ? type.GetString() : null;
+
+        int? seriesId =
+            body.TryGetProperty("series", out var series) &&
+            series.TryGetProperty("id", out var id) &&
+            id.ValueKind == System.Text.Json.JsonValueKind.Number
+                ? id.GetInt32()
+                : null;
+
+        // Sonarr's "Test" button sends eventType "Test": answer and do nothing.
+        if (eventType == "Download" && seriesId is not null &&
+            rolling.Rules.Any(rule => rule.IsOn && rule.SeriesId == seriesId))
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await rolling.RunAsync(seriesId);
+                }
+                catch (Exception exception)
+                {
+                    Simplifiarr.Core.Utilities.AppLog.Warn("Rolling Shows failed after a Sonarr import.", exception);
+                }
+            });
+        }
+
+        return Results.Ok();
+    })
+    .DisableAntiforgery();
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

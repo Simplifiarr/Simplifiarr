@@ -27,7 +27,8 @@ public class DefaultScanStepProvider
         IStorageService storage,
         IArrEnrichmentService arrEnrichment,
         IWatchHistoryService watchHistory,
-        ISizeReductionDownloadService sizeReductionDownloads)
+        ISizeReductionDownloadService sizeReductionDownloads,
+        IRollingShowService rollingShows)
     {
         var steps = new List<ScanStep>
         {
@@ -97,7 +98,13 @@ public class DefaultScanStepProvider
             // swapped in when that is switched on, or wait for you.
             new FinishingStep(
                 "Checking smaller releases being downloaded",
-                sizeReductionDownloads.CheckAsync)
+                sizeReductionDownloads.CheckAsync),
+
+            // Rolling Shows rules that are on, in case Sonarr's webhook was
+            // missed, and removing torrents that have seeded enough.
+            new FinishingStep(
+                "Applying Rolling Shows rules",
+                () => rollingShows.RunAsync())
         ];
     }
 

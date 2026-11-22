@@ -48,4 +48,13 @@ public class TorrentRecord
 
     /// <summary>Time left to finish; null when unknown.</summary>
     public TimeSpan? TimeLeft { get; set; }
+
+    /// <summary>Uploaded divided by downloaded.</summary>
+    public double Ratio { get; set; }
+
+    /// <summary>How long it has seeded in total.</summary>
+    public TimeSpan SeedingTime { get; set; }
+
+    /// <summary>The client's tags, comma separated.</summary>
+    public string Tags { get; set; } = string.Empty;
 }

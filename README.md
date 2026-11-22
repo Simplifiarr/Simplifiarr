@@ -70,6 +70,7 @@ The pages are grouped the same way they are in the app's menu.
 | **Size Reduction** | Smaller releases of films and episodes you already have, found on your indexers. Report only; nothing is downloaded. |
 | **Storage** | How full each drive is, with a limit you set (for example, keep the main drive under 75%), and the titles taking the space. Suggests which titles to move where to keep every drive under its limit. Moves run one title at a time in the background: each file is copied and checked, Radarr or Sonarr is given the new folder, and only then does the old copy go to the Recycle Bin. Also shows who has watched each title in Jellyfin and who asked for it in Seerr, and lists titles worth a look: watched by whoever asked for them, or unwatched for months. Those can be deleted through Radarr or Sonarr. Titles still seeding are never moved or deleted, since that would free nothing. |
 | **Folder Fixer** | Movies and shows Radarr or Sonarr point at a folder that no longer exists, usually because it was moved by hand. Points them at where the folder is now, or removes entries with nothing on disk. Nothing is moved. |
+| **Rolling Shows** | For daily and weekly shows: keep only the newest episodes, the last so many days, or the current season (with a "never fewer than" floor), and let older ones go as new ones arrive. Can wait until an episode is watched, by anyone or by one person. Sonarr stops looking for each episode before it is deleted, to the Recycle Bin or for good. An episode still seeding loses its library copy at once and its torrent is removed once it has seeded enough. Every rule is previewed before it is turned on, and runs on every Scan or, with Sonarr's webhook, the moment an episode arrives. |
 
 ### Safety net
 
@@ -100,7 +101,7 @@ until you press a button.
   checked, and they are added to your torrent client **stopped**.
 - Anything that changes files asks you to confirm first.
 - Radarr and Sonarr are only changed when you move or delete a title on
-  Storage: the title's folder is updated, or the title is removed without
+  Storage, fix a folder, or turn on a Rolling Shows rule: the title's folder is updated, or the title is removed without
   touching its files. Jellyfin and Seerr are only read, apart from the
   collections Simplifiarr made, the posters you choose, and forgetting a
   request you deleted so it can be asked for again.

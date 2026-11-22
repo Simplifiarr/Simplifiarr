@@ -68,6 +68,9 @@ public interface IJellyfinClient
     /// </summary>
     Task<IReadOnlyList<JellyfinWatchItem>> GetWatchItemsAsync(string userId);
 
+    /// <summary>The file paths of every episode this user has watched.</summary>
+    Task<IReadOnlyList<string>> GetWatchedEpisodePathsAsync(string userId);
+
     /// <summary>    /// Every film, episode, track, audiobook and book in Jellyfin's
     /// libraries that has a file path.
     /// </summary>
