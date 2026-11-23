@@ -30,7 +30,7 @@ else
     <div class="stat-grid">
         <StatCard Label="Space saved"
                   Value="@_dashboard.StorageSavedFormatted"
-                  Note="by replacing copies with hardlinks"
+                  Note="@(_dashboard.Savings.Count == 0 ? "nothing freed yet" : $"by {Count(_dashboard.Savings.Count, "tool", "tools")}, all time")"
                   Href="history"
                   Accent="true" />
 
@@ -200,6 +200,37 @@ else
             }
         </div>
     </section>
+
+    @if (_dashboard.Savings.Count > 0)
+    {
+        var biggest = Math.Max(1, _dashboard.Savings.Max(saving => saving.Bytes));
+
+        <section class="section">
+            <h2 class="section-title">Space saved so far</h2>
+
+            <div class="panel">
+                @foreach (var saving in _dashboard.Savings)
+                {
+                    <a class="saving-row" href="@saving.Href" @key="saving.Tool">
+                        <div>
+                            <div>@saving.Tool</div>
+                            <div class="cell-note">@saving.Count.ToString("N0") @saving.Things</div>
+                        </div>
+                        <div class="saving-bar" aria-hidden="true">
+                            <span style="width: @(Math.Max(1, saving.Bytes * 100.0 / biggest).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></span>
+                        </div>
+                        <div class="saving-size">@SizeFormatter.FormatBytes(saving.Bytes)</div>
+                    </a>
+                }
+
+                <div class="saving-row saving-total">
+                    <div>Total</div>
+                    <div class="cell-note fw-normal">Things in Quarantine count now; they come off if you restore them.</div>
+                    <div class="saving-size">@_dashboard.StorageSavedFormatted</div>
+                </div>
+            </div>
+        </section>
+    }
 
     @if (_dashboard.Drives.Count > 0)
     {

@@ -70,6 +70,9 @@ public class FileScannerService : IFileScannerService
         return files;
     }
 
+    public static FileType FileTypeOf(string extension) =>
+        GetFileType(extension);
+
     private static FileType GetFileType(string extension)
     {
         return extension.ToLowerInvariant() switch

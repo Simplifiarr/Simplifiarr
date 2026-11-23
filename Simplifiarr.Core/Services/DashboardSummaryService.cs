@@ -115,12 +115,11 @@ public class DashboardSummaryService : IDashboardSummaryService
         var historyRecords =
             await _historyService.GetHistoryAsync();
 
+        var savings =
+            SpaceSavings.Tally(historyRecords);
+
         var storageSavedBytes =
-            historyRecords
-                .Where(record =>
-                    record.ActionType ==
-                    HistoryActionType.QuarantineDeleted)
-                .Sum(record => record.SizeBytes);
+            savings.Sum(saving => saving.Bytes);
 
         return new DashboardSummary
         {
@@ -171,6 +170,9 @@ public class DashboardSummaryService : IDashboardSummaryService
 
             DuplicateReclaimableFormatted =
                 SizeFormatter.FormatBytes(duplicateReclaimableBytes),
+
+            Savings =
+                savings,
 
             StorageSavedBytes =
                 storageSavedBytes,

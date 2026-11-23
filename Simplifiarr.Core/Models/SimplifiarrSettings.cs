@@ -156,6 +156,9 @@ public class SimplifiarrSettings
     /// for Swap now.
     /// </summary>
     public bool SizeReductionAutoSwap { get; set; }
+
+    /// <summary>What Junk Cleanup looks for. Set on the Junk page.</summary>
+    public JunkRules Junk { get; set; } = new();
 }
 
 public enum AutoScanMode

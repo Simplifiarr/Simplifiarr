@@ -1,3 +1,5 @@
+@inject Simplifiarr.Core.Services.IUpdateService Updates
+
 @*
     The whole app's navigation, grouped by what you're there to do:
       Link        - get downloads into libraries without copying
@@ -87,6 +89,10 @@
     <div class="nav-group nav-group-bottom">
         <NavLink class="nav-link" href="settings">
             <i class="bi bi-gear" aria-hidden="true"></i> Settings
+        </NavLink>
+        <NavLink class="nav-link" href="updates">
+            <i class="bi bi-cloud-arrow-down" aria-hidden="true"></i> Updates
+            <span class="nav-version">v@(Updates.CurrentVersion)</span>
         </NavLink>
         <NavLink class="nav-link" href="help">
             <i class="bi bi-question-circle" aria-hidden="true"></i> Help

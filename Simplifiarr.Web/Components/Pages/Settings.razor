@@ -1094,6 +1094,10 @@ else
                 profile.Name = profile.Name.Trim();
             }
 
+            // The junk rules are set on the Junk page, which saves them as
+            // they change; keep those rather than the copy loaded here.
+            _settings.Junk = (await SettingsService.GetSettingsAsync()).Junk;
+
             await SettingsService.SaveSettingsAsync(_settings);
 
             _savedSnapshot = Snapshot(_settings);

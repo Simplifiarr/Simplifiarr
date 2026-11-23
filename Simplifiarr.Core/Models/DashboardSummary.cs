@@ -1,5 +1,9 @@
 namespace Simplifiarr.Core.Models;
 
+/// <summary>How much one tool has freed, worked out from History.</summary>
+/// <param name="Things">What Count counts, already singular or plural: "episodes".</param>
+public record ToolSaving(string Tool, string Href, int Count, long Bytes, string Things);
+
 public class DashboardSummary
 {
     public int PossibleDuplicateCopyCount { get; set; }
@@ -38,6 +42,10 @@ public class DashboardSummary
 
     public string SeedMoveFormatted { get; set; } = string.Empty;
 
+    /// <summary>What each tool has freed so far, biggest first.</summary>
+    public IReadOnlyList<ToolSaving> Savings { get; set; } = [];
+
+    /// <summary>All of <see cref="Savings"/> together.</summary>
     public long StorageSavedBytes { get; set; }
 
     public string StorageSavedFormatted { get; set; } = string.Empty;

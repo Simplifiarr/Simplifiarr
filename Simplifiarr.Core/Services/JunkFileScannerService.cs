@@ -41,23 +41,46 @@ public class JunkFileScannerService
     {
         _settingsService = settingsService;
         _fileInventory = fileInventory;
+
+        _ = LoadRulesAsync();
     }
 
-    // Scans from before .nfo was excluded may still sit in the cache - hide
-    // those, except a .nfo that's only flagged for being inside a Sample
-    // folder.
+    private async Task LoadRulesAsync()
+    {
+        try
+        {
+            _rules ??= (await _settingsService.GetSettingsAsync()).Junk ?? new JunkRules();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Couldn't read the junk rules; showing the last scan's results as they were.", exception);
+        }
+    }
+
+    // The rules the last scan used, or that were just saved. Results are
+    // checked against them again, so turning a rule off hides its files
+    // straight away (turning one on needs a scan to find new ones).
+    private JunkRules? _rules;
+
     public IReadOnlyList<JunkFileCandidate> GetCandidates(
-        string driveName) =>
-        _cache.GetCandidates(driveName)
-            .Where(candidate =>
-                !string.Equals(
-                    Path.GetExtension(candidate.FileName),
-                    ".nfo",
-                    StringComparison.OrdinalIgnoreCase) ||
-                candidate.Reason.StartsWith(
-                    "Leftover file in a Sample folder",
-                    StringComparison.Ordinal))
+        string driveName)
+    {
+        var rules = _rules;
+
+        return _cache.GetCandidates(driveName)
+            .Select(candidate =>
+                rules is null
+                    ? candidate
+                    : Classify(RecordFor(candidate), isBookLibrary: false, rules) is { } reason
+                        ? WithReason(candidate, reason)
+                        : null)
+            .OfType<JunkFileCandidate>()
             .ToList();
+    }
+
+    public void UseRules(
+        JunkRules rules) =>
+        _rules = rules;
 
     public DateTime? GetLastScanUtc(
         string driveName) =>
@@ -68,6 +91,11 @@ public class JunkFileScannerService
     {
         var settings =
             await _settingsService.GetSettingsAsync();
+
+        var rules =
+            settings.Junk ?? new JunkRules();
+
+        _rules = rules;
 
         var profile =
             settings.DriveProfiles.FirstOrDefault(profile =>
@@ -138,7 +166,7 @@ public class JunkFileScannerService
                 }
 
                 var reason =
-                    Classify(file, isBookLibrary);
+                    Classify(file, isBookLibrary, rules);
 
                 if (reason is null)
                 {
@@ -166,11 +194,41 @@ public class JunkFileScannerService
         string filePath) =>
         _cache.RemoveCandidate(filePath);
 
-    private static string? Classify(
-        FileRecord file,
-        bool isBookLibrary)
+    private static FileRecord RecordFor(
+        JunkFileCandidate candidate) =>
+        new()
+        {
+            FullPath = candidate.FilePath,
+            FileName = candidate.FileName,
+            Extension = Path.GetExtension(candidate.FileName),
+            FileType = FileScannerService.FileTypeOf(Path.GetExtension(candidate.FileName)),
+            SizeBytes = candidate.SizeBytes
+        };
+
+    private static JunkFileCandidate WithReason(
+        JunkFileCandidate candidate,
+        string reason)
     {
-        if (file.FileType == FileType.Video &&
+        candidate.Reason = reason;
+        return candidate;
+    }
+
+    /// <summary>Why <paramref name="file"/> is junk under <paramref name="rules"/>, or null when it isn't.</summary>
+    public static string? Classify(
+        FileRecord file,
+        bool isBookLibrary,
+        JunkRules rules)
+    {
+        // Media is never junk, whatever a rule says, except a sample clip.
+        var isMedia = file.FileType is FileType.Video or FileType.Audio or FileType.Book or FileType.Comic or FileType.Subtitle;
+
+        if (rules.KeepNames.Any(pattern => NameMatches(file.FileName, pattern)))
+        {
+            return null;
+        }
+
+        if (rules.SampleVideos &&
+            file.FileType == FileType.Video &&
             SampleFileDetector.IsSample(file))
         {
             return "Sample video file";
@@ -180,12 +238,13 @@ public class JunkFileScannerService
         // Sample folder describe the sample clip, not the real media - even
         // ones that would otherwise look like artwork (sample-thumb.jpg) or
         // be skipped (.nfo, .nfo-orig).
-        if (SampleFileDetector.IsInSampleFolder(file))
+        if (rules.SampleFolderLeftovers &&
+            SampleFileDetector.IsInSampleFolder(file))
         {
             return "Leftover file in a Sample folder";
         }
 
-        if (file.FileType != FileType.Metadata)
+        if (isMedia)
         {
             return null;
         }
@@ -198,20 +257,21 @@ public class JunkFileScannerService
             return null;
         }
 
-        // Book libraries (Calibre, Audiobookshelf, etc.) use .json/.xml
-        // for their own library metadata (e.g. metadata_db_prefs_backup.json),
-        // not scene-release junk - only flag the unambiguous ones there.
-        var junkExtensions =
-            isBookLibrary
-                ? JunkMetadataExtensions.Where(ext => ext is not (".json" or ".xml"))
-                : JunkMetadataExtensions;
-
-        if (junkExtensions.Contains(extension))
+        if (rules.JunkNames.Any(pattern => NameMatches(file.FileName, pattern)))
         {
-            return "Release metadata/checksum file";
+            return "Name you marked as junk";
         }
 
-        if (ImageExtensions.Contains(extension))
+        // Book libraries (Calibre, Audiobookshelf, etc.) use .json/.xml
+        // for their own library metadata (e.g. metadata_db_prefs_backup.json),
+        // not scene-release junk.
+        if (rules.Extensions.Any(ext => string.Equals(JunkRules.NormalizeExtension(ext), extension, StringComparison.Ordinal)) &&
+            !(isBookLibrary && extension is ".json" or ".xml"))
+        {
+            return $"Junk file type ({extension})";
+        }
+
+        if (rules.UnrecognizedImages && ImageExtensions.Contains(extension))
         {
             var nameWithoutExtension =
                 Path.GetFileNameWithoutExtension(file.FileName);
@@ -232,5 +292,31 @@ public class JunkFileScannerService
         }
 
         return null;
+    }
+
+    /// <summary>A file name against a pattern where * is any text and ? any one character.</summary>
+    public static bool NameMatches(
+        string fileName,
+        string pattern)
+    {
+        pattern = pattern.Trim();
+
+        if (pattern.Length == 0)
+        {
+            return false;
+        }
+
+        var regex =
+            "^" +
+            System.Text.RegularExpressions.Regex.Escape(pattern)
+                .Replace(@"\*", ".*")
+                .Replace(@"\?", ".") +
+            "$";
+
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            fileName,
+            regex,
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+            TimeSpan.FromMilliseconds(100));
     }
 }

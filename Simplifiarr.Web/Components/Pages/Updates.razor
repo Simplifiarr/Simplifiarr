@@ -1,0 +1,200 @@
+@page "/updates"
+@rendermode InteractiveServer
+@implements IDisposable
+
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+@using Simplifiarr.Core.Utilities
+
+@inject IUpdateService Updater
+@inject IScanCoordinator Scans
+
+<PageTitle>Updates · Simplifiarr</PageTitle>
+
+<PageHeader Title="Updates" Subtitle="@($"You're running version {Updater.CurrentVersion}.")" />
+
+@if (Updater.LastResult is { } result)
+{
+    <div class="alert @(result.StartsWith("Updated") ? "alert-success" : "alert-warning")">@result</div>
+}
+
+<section class="section">
+    <div class="panel">
+        <div class="action-row">
+            <div>
+                @if (Updater.Progress is { } progress)
+                {
+                    <div class="action-row-title">
+                        <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span> @progress
+                    </div>
+                }
+                else if (Updater.Available is { } release)
+                {
+                    <div class="action-row-title">Version @release.Version is out</div>
+                    <div class="action-row-detail">
+                        @(release.PublishedUtc is { } published ? $"Released {published.ToLocalTime():d MMMM yyyy}. " : "")
+                        @if (Updater.Install.CanUpdateItself)
+                        {
+                            <text>Updating takes a minute or two. Simplifiarr restarts, and your settings and data stay as they are.</text>
+                        }
+                    </div>
+                }
+                else if (Updater.State.Latest is null && Updater.State.LastCheckedUtc is not null && Updater.State.LastError is null)
+                {
+                    <div class="action-row-title">No release has been published yet</div>
+                }
+                else if (Updater.State.LastCheckedUtc is null)
+                {
+                    <div class="action-row-title">Not checked yet</div>
+                }
+                else
+                {
+                    <div class="action-row-title status-ok">
+                        <i class="bi bi-check-circle" aria-hidden="true"></i> You have the latest version
+                    </div>
+                }
+
+                @if (Updater.State.LastError is { } error)
+                {
+                    <div class="action-row-detail status-warn">@error</div>
+                }
+                else if (Updater.State.LastCheckedUtc is { } checkedUtc && Updater.Progress is null)
+                {
+                    <div class="action-row-detail">Last checked @checkedUtc.ToLocalTime().ToString("g").</div>
+                }
+
+                @if (_problem is not null)
+                {
+                    <div class="action-row-detail status-warn">@_problem</div>
+                }
+            </div>
+
+            <div class="d-flex flex-wrap gap-2">
+                <button type="button" class="btn btn-secondary" disabled="@(Updater.IsChecking || Updater.Progress is not null)" @onclick="CheckAsync">
+                    @(Updater.IsChecking ? "Checking..." : "Check now")
+                </button>
+
+                @if (Updater.Available is { } available && Updater.Progress is null)
+                {
+                    @if (Updater.Install.CanUpdateItself)
+                    {
+                        <button type="button" class="btn btn-primary" disabled="@Scans.Progress.IsRunning" title="@(Scans.Progress.IsRunning ? "Wait for the scan to finish" : null)" @onclick="InstallAsync">
+                            Update to @available.Version
+                        </button>
+                    }
+                    else
+                    {
+                        <a class="btn btn-primary" href="@available.PageUrl" target="_blank" rel="noopener">Download @available.Version</a>
+                    }
+                }
+            </div>
+        </div>
+
+        @if (Updater.Available is { } shown && Updater.Progress is null)
+        {
+            @if (!Updater.Install.CanUpdateItself)
+            {
+                <div class="action-row">
+                    <div class="action-row-detail">@Updater.Install.WhyNot</div>
+                </div>
+            }
+
+            @if (shown.Notes.Length > 0)
+            {
+                <div class="action-row">
+                    <div>
+                        <div class="action-row-title">What's new</div>
+                        <div class="release-notes">@shown.Notes</div>
+                        <a class="cell-note" href="@shown.PageUrl" target="_blank" rel="noopener">See it on GitHub</a>
+                    </div>
+                </div>
+            }
+        }
+    </div>
+</section>
+
+<section class="section">
+    <h2 class="section-title">Automatic updates</h2>
+
+    <div class="panel p-3">
+        <div class="form-check form-switch">
+            <input id="check-auto" class="form-check-input" type="checkbox" role="switch" checked="@_check" @onchange="e => SaveAsync(check: e.Value is true)" />
+            <label class="form-check-label" for="check-auto">Check for new versions twice a day</label>
+        </div>
+        <div class="cell-note ms-4 mb-2">Asks GitHub for the latest release. Nothing about you or your library is sent.</div>
+
+        <div class="form-check form-switch d-flex flex-wrap align-items-center gap-2">
+            <input id="install-auto" class="form-check-input" type="checkbox" role="switch" checked="@_install" disabled="@(!Updater.Install.CanUpdateItself)" @onchange="e => SaveAsync(install: e.Value is true)" />
+            <label class="form-check-label" for="install-auto">Install new versions by themselves at</label>
+            <input type="time" class="form-control form-control-sm" style="max-width: 8rem" aria-label="Install time" value="@_time" disabled="@(!_install || !Updater.Install.CanUpdateItself)" @onchange="e => SaveAsync(time: e.Value?.ToString())" />
+        </div>
+        <div class="cell-note ms-4">
+            @if (!Updater.Install.CanUpdateItself)
+            {
+                @Updater.Install.WhyNot
+            }
+            else
+            {
+                <text>Never while a scan is running; it waits for the next night instead.</text>
+            }
+        </div>
+    </div>
+</section>
+
+@code
+{
+    private bool _check;
+    private bool _install;
+    private string _time = "04:00";
+    private string? _problem;
+
+    protected override void OnInitialized()
+    {
+        _check = Updater.State.CheckAutomatically;
+        _install = Updater.State.InstallAutomatically;
+        _time = Updater.State.InstallTime;
+
+        Updater.Changed += OnChanged;
+        Scans.Changed += OnChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // First visit: look straight away rather than showing "Not checked yet".
+        if (firstRender && Updater.State.LastCheckedUtc is null)
+        {
+            await Updater.CheckAsync();
+        }
+    }
+
+    private async Task CheckAsync()
+    {
+        _problem = null;
+        await Updater.CheckAsync();
+    }
+
+    private async Task InstallAsync()
+    {
+        _problem = await Updater.InstallAsync();
+    }
+
+    private Task SaveAsync(bool? check = null, bool? install = null, string? time = null)
+    {
+        _check = check ?? _check;
+        _install = install ?? _install;
+        _time = time ?? _time;
+
+        Updater.SavePreferences(_check, _install, _time);
+
+        return Task.CompletedTask;
+    }
+
+    private void OnChanged() =>
+        _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Updater.Changed -= OnChanged;
+        Scans.Changed -= OnChanged;
+    }
+}

@@ -104,6 +104,12 @@ builder.Services.AddSingleton<ICrossSeedScanService, CrossSeedScanService>();
 builder.Services.AddSingleton<IScanStepProvider,DefaultScanStepProvider>();
 builder.Services.AddSingleton<IScanCoordinator, ScanCoordinator>();
 builder.Services.AddHostedService<Simplifiarr.Web.AutoScanService>();
+#pragma warning disable CA1416
+builder.Services.AddSingleton<IUpdateLauncher, UpdateLauncher>();
+#pragma warning restore CA1416
+builder.Services.AddSingleton<IUpdateService>(services =>
+    new UpdateService(new HttpClient(), services.GetRequiredService<IUpdateLauncher>()));
+builder.Services.AddHostedService<Simplifiarr.Web.UpdateCheckService>();
 
 var app = builder.Build();
 

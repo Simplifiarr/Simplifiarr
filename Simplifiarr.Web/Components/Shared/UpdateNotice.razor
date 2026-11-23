@@ -1,0 +1,30 @@
+@using Simplifiarr.Core.Services
+@implements IDisposable
+@inject IUpdateService Updates
+
+@* Shown in the top bar only while a newer version is out. *@
+
+@if (Updates.Progress is not null)
+{
+    <a class="update-pill" href="updates">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Updating
+    </a>
+}
+else if (Updates.Available is { } release)
+{
+    <a class="update-pill" href="updates" title="Version @release.Version is out">
+        <i class="bi bi-arrow-up-circle" aria-hidden="true"></i> Update to @release.Version
+    </a>
+}
+
+@code
+{
+    protected override void OnInitialized() =>
+        Updates.Changed += OnChanged;
+
+    private void OnChanged() =>
+        _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() =>
+        Updates.Changed -= OnChanged;
+}

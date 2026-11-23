@@ -15,6 +15,7 @@
     <RootNamespace>Simplifiarr.Web</RootNamespace>
     <AssemblyName>Simplifiarr.Web</AssemblyName>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <ApplicationIcon>..\assets\simplifiarr.ico</ApplicationIcon>
   </PropertyGroup>
 
 </Project>

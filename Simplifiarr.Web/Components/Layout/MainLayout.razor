@@ -1,4 +1,5 @@
 ﻿@inherits LayoutComponentBase
+@inject Simplifiarr.Core.Services.IUpdateService Updater
 
 <div class="app-shell">
     @* Narrow screens: this hidden checkbox is what the menu button toggles;
@@ -22,6 +23,8 @@
 
             <ScanBar @rendermode="InteractiveServer" />
 
+            <UpdateNotice @rendermode="InteractiveServer" />
+
             <button type="button"
                     id="theme-toggle-btn"
                     class="theme-toggle-btn"
@@ -32,6 +35,10 @@
         <main class="app-content">
             @Body
         </main>
+
+        <footer class="app-footer">
+            In memory of Foxxo <span aria-hidden="true">·</span> <a href="updates">v@(Updater.CurrentVersion)</a>
+        </footer>
     </div>
 </div>
 

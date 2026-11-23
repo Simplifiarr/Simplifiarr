@@ -16,15 +16,93 @@
 <PageHeader Title="Junk"
             Subtitle="Release leftovers sitting in your libraries: sample clips, checksum and tracker files, and stray images. Removing one moves it to Quarantine, so it can be put back." />
 
-<details class="mb-3">
-    <summary>What counts as junk, and what never does</summary>
+<details class="panel junk-rules mb-3">
+    <summary>What counts as junk</summary>
 
-    <div class="mt-2 text-muted">
-        Only library folders are checked - downloads are never touched, so a
-        torrent that is still seeding is safe. Standard artwork
-        (<code>folder.jpg</code>, <code>poster.jpg</code>, <code>backdrop.jpg</code>
-        and so on) and <code>.nfo</code> files are always left alone, because
-        Jellyfin, Plex and Kodi use them.
+    <div class="junk-rules-body">
+        <div class="form-check">
+            <input id="junk-samples" class="form-check-input" type="checkbox" checked="@_rules.SampleVideos" @onchange="e => ChangeAsync(() => _rules.SampleVideos = e.Value is true)" />
+            <label class="form-check-label" for="junk-samples">Sample clips (<code>sample.mkv</code>, <code>Movie-sample.mkv</code>)</label>
+        </div>
+        <div class="form-check">
+            <input id="junk-sample-folders" class="form-check-input" type="checkbox" checked="@_rules.SampleFolderLeftovers" @onchange="e => ChangeAsync(() => _rules.SampleFolderLeftovers = e.Value is true)" />
+            <label class="form-check-label" for="junk-sample-folders">Everything inside a release's Sample folder</label>
+        </div>
+        <div class="form-check">
+            <input id="junk-images" class="form-check-input" type="checkbox" checked="@_rules.UnrecognizedImages" @onchange="e => ChangeAsync(() => _rules.UnrecognizedImages = e.Value is true)" />
+            <label class="form-check-label" for="junk-images">Images not named like artwork (keeps <code>poster.jpg</code>, <code>fanart.jpg</code>, <code>folder.jpg</code> and the like)</label>
+        </div>
+
+        <div class="junk-rule-row">
+            <div class="junk-rule-label">These file types</div>
+            <div class="d-flex flex-wrap gap-1 align-items-center">
+                @foreach (var extension in _rules.Extensions)
+                {
+                    <span class="badge text-bg-primary d-inline-flex align-items-center gap-1 junk-chip">
+                        @extension
+                        <button type="button" class="btn-close btn-close-white" aria-label="@($"Stop treating {extension} as junk")" @onclick="() => ChangeAsync(() => _rules.Extensions.Remove(extension))"></button>
+                    </span>
+                }
+                <input class="form-control form-control-sm junk-input" placeholder=".exe" aria-label="Add a file type" value="@_newExtension" @onchange="e => AddExtensionAsync(e.Value?.ToString())" />
+            </div>
+            @if (Suggestions.Count > 0)
+            {
+                <div class="d-flex flex-wrap gap-1 mt-1">
+                    @foreach (var (extension, note) in Suggestions)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-secondary junk-suggestion" title="@note" @onclick="() => AddExtensionAsync(extension)">+ @extension</button>
+                    }
+                </div>
+            }
+            @if (_rules.Extensions.Contains(".nfo"))
+            {
+                <div class="cell-note status-warn">Jellyfin, Plex and Kodi can read .nfo files for titles and artwork. Removing them is only safe if you don't rely on them.</div>
+            }
+        </div>
+
+        <div class="junk-rule-row">
+            <div class="junk-rule-label">Files named</div>
+            <div class="d-flex flex-wrap gap-1 align-items-center">
+                @foreach (var name in _rules.JunkNames)
+                {
+                    <span class="badge text-bg-primary d-inline-flex align-items-center gap-1 junk-chip">
+                        @name
+                        <button type="button" class="btn-close btn-close-white" aria-label="@($"Stop treating {name} as junk")" @onclick="() => ChangeAsync(() => _rules.JunkNames.Remove(name))"></button>
+                    </span>
+                }
+                <input class="form-control form-control-sm junk-input" placeholder="RARBG*.txt" aria-label="Add a junk file name" value="@_newJunkName" @onchange="e => AddNameAsync(_rules.JunkNames, e.Value?.ToString(), keep: false)" />
+            </div>
+        </div>
+
+        <div class="junk-rule-row">
+            <div class="junk-rule-label">Never junk</div>
+            <div class="d-flex flex-wrap gap-1 align-items-center">
+                @foreach (var name in _rules.KeepNames)
+                {
+                    <span class="badge text-bg-secondary d-inline-flex align-items-center gap-1 junk-chip">
+                        @name
+                        <button type="button" class="btn-close btn-close-white" aria-label="@($"Stop keeping {name}")" @onclick="() => ChangeAsync(() => _rules.KeepNames.Remove(name))"></button>
+                    </span>
+                }
+                <input class="form-control form-control-sm junk-input" placeholder="theme.mp3" aria-label="Add a file name to always keep" value="@_newKeepName" @onchange="e => AddNameAsync(_rules.KeepNames, e.Value?.ToString(), keep: true)" />
+            </div>
+        </div>
+
+        <div class="cell-note">
+            Use <code>*</code> for any text in a name: <code>*.exe</code>, <code>RARBG*.txt</code>.
+            Videos, music, books, comics and subtitles are never junk (except sample clips), and
+            downloads are never looked at, so anything still seeding is safe.
+        </div>
+
+        @if (_rulesNote is not null)
+        {
+            <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+                <span class="cell-note">@_rulesNote</span>
+                <button type="button" class="btn btn-sm btn-primary" disabled="@(_lookingAgain || IsScanning)" @onclick="LookAgainAsync">
+                    @(_lookingAgain ? "Looking..." : "Look again now")
+                </button>
+            </div>
+        }
     </div>
 </details>
 
@@ -203,12 +281,114 @@ else
             .Where(candidate => _activeReason is null || candidate.Reason == _activeReason)
             .ToList();
 
+    private JunkRules _rules = new();
+    private string? _rulesNote;
+    private bool _lookingAgain;
+    private string _newExtension = string.Empty;
+    private string _newJunkName = string.Empty;
+    private string _newKeepName = string.Empty;
+
+    private List<(string Extension, string Note)> Suggestions =>
+        JunkRules.Suggestions.Where(suggestion => !_rules.Extensions.Contains(suggestion.Extension)).ToList();
+
     protected override async Task OnInitializedAsync()
     {
         _profiles =
             await SettingsService.GetEnabledDriveProfilesAsync();
 
+        _rules =
+            (await SettingsService.GetSettingsAsync()).Junk ?? new JunkRules();
+
+        JunkFileScannerService.UseRules(_rules);
+
         LoadCandidates();
+    }
+
+    private async Task ChangeAsync(Action change)
+    {
+        change();
+
+        var settings =
+            await SettingsService.GetSettingsAsync();
+
+        settings.Junk = _rules;
+
+        await SettingsService.SaveSettingsAsync(settings);
+
+        JunkFileScannerService.UseRules(_rules);
+        _selection.Clear();
+        CancelConfirm();
+        LoadCandidates();
+
+        _rulesNote = "Saved. Anything a rule no longer covers is already gone from the list; to find files a new rule covers, look again.";
+    }
+
+    private async Task AddExtensionAsync(string? text)
+    {
+        _newExtension = text ?? string.Empty;
+
+        if (JunkRules.NormalizeExtension(text) is not { } extension)
+        {
+            _rulesNote = string.IsNullOrWhiteSpace(text) ? _rulesNote : $"\"{text}\" isn't a file type. Type it like .exe";
+            return;
+        }
+
+        if (FileScannerService.FileTypeOf(extension) is FileType.Video or FileType.Audio or FileType.Book or FileType.Comic or FileType.Subtitle)
+        {
+            _rulesNote = $"{extension} is a media file type, so it can't be junk.";
+            return;
+        }
+
+        _newExtension = string.Empty;
+
+        if (!_rules.Extensions.Contains(extension))
+        {
+            await ChangeAsync(() => _rules.Extensions.Add(extension));
+        }
+    }
+
+    private async Task AddNameAsync(List<string> names, string? text, bool keep)
+    {
+        var name = (text ?? string.Empty).Trim();
+
+        if (keep) { _newKeepName = name; } else { _newJunkName = name; }
+
+        if (name.Length == 0 || name.IndexOfAny(['\\', '/']) >= 0)
+        {
+            _rulesNote = name.Length == 0 ? _rulesNote : "Use just a file name, not a folder path.";
+            return;
+        }
+
+        if (keep) { _newKeepName = string.Empty; } else { _newJunkName = string.Empty; }
+
+        if (!names.Contains(name, StringComparer.OrdinalIgnoreCase))
+        {
+            await ChangeAsync(() => names.Add(name));
+        }
+    }
+
+    private async Task LookAgainAsync()
+    {
+        _lookingAgain = true;
+
+        try
+        {
+            foreach (var profile in _profiles)
+            {
+                await JunkFileScannerService.ScanAsync(profile.Name);
+            }
+
+            _rulesNote = null;
+            LoadCandidates();
+        }
+        catch (Exception exception)
+        {
+            _rulesNote = $"Looking again failed: {exception.Message}";
+        }
+        finally
+        {
+            _lookingAgain = false;
+        }
     }
 
     protected override Task OnScanFinishedAsync()

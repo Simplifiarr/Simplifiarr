@@ -13,6 +13,10 @@ public interface IJunkFileScannerService
     Task<List<JunkFileCandidate>> ScanAsync(
         string driveName);
 
+    /// <summary>Check results against these rules from now on (just saved on the page).</summary>
+    void UseRules(
+        JunkRules rules);
+
     void RemoveCandidate(
         string filePath);
 }

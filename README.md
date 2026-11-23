@@ -64,7 +64,7 @@ The pages are grouped the same way they are in the app's menu.
 | Page | What it's for |
 |---|---|
 | **Duplicates** | The same title more than once in your libraries, usually two qualities of one film or episode. |
-| **Junk** | Sample clips, checksum and tracker files, and stray images left in your libraries. |
+| **Junk** | Sample clips, checksum and tracker files, and stray images left in your libraries. You choose what counts as junk. |
 | **Downloads** | Downloads your library already has, on any drive, that your torrent client is no longer seeding. |
 | **Playback Errors** | Files your media server may not be able to open: blocked by Windows, permissions it can't read, still packed in an archive, empty, unfinished, cloud-only or badly named. Blocks, permissions and archives can be fixed; fixes never change what is inside a file. |
 | **Size Reduction** | Smaller releases of films and episodes you already have, found on your indexers. Report only; nothing is downloaded. |
@@ -115,7 +115,7 @@ until you press a button.
 
 - **Windows** with **NTFS** drives. A hardlink only works within one drive, so
   each download folder must be on the same drive as the libraries it feeds.
-- **.NET 10 SDK** to build and run it.
+- Nothing else to install for the release installer. Building it yourself needs the **.NET 10 SDK**.
 - **ffprobe** (part of [FFmpeg](https://ffmpeg.org/)) for reading video
   resolution. Simplifiarr looks in the usual install locations, or you can set
   its path in Settings.
@@ -139,7 +139,46 @@ Simplifiarr works on its own. Each of these adds more:
 
 ## Getting started
 
-### Try it
+### Install it
+
+Download **Simplifiarr-Setup-x.y.z.exe** from the
+[latest release](https://github.com/Simplifiarr/Simplifiarr/releases/latest)
+and run it. It asks which port the web page should use (6481 by default) and
+where to keep its data, then sets Simplifiarr up as a Windows service that
+starts with Windows, and opens it.
+
+Windows may warn that the installer is from an unknown publisher, because it
+isn't code-signed. Choose **More info**, then **Run anyway**.
+
+Or, from an **administrator** PowerShell, one line downloads the latest
+installer, checks it against the release's checksums and runs it with no
+questions:
+
+```powershell
+irm https://raw.githubusercontent.com/Simplifiarr/Simplifiarr/main/scripts/install.ps1 | iex
+```
+
+To pick the port or data folder:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Simplifiarr/Simplifiarr/main/scripts/install.ps1))) -Port 7000 -DataPath D:\SimplifiarrData
+```
+
+### Update it
+
+Simplifiarr checks GitHub for a new version twice a day. When one is out, an
+**Update to x.y.z** button appears at the top of every page. It opens
+**Updates**, which shows what's new and installs it in a minute or two. Your
+settings and data stay as they are. On the same page you can have new versions
+install themselves overnight, or turn the check off. The check asks GitHub
+for the latest release and sends nothing about you or your library.
+
+Running the installer or the one-line command again also updates it.
+
+To remove it, use **Apps** in Windows Settings. The data folder is left behind
+in case you reinstall; delete it yourself if you don't need it.
+
+### Run it from the source code
 
 ```powershell
 dotnet run --project Simplifiarr.Web
@@ -147,9 +186,8 @@ dotnet run --project Simplifiarr.Web
 
 Then open <http://localhost:6481>.
 
-### Install it as a Windows service
-
-From an **administrator** PowerShell in the repository folder:
+To install your own build as a Windows service, run this from an
+**administrator** PowerShell in the repository folder:
 
 ```powershell
 .\scripts\install-service.ps1
@@ -166,7 +204,6 @@ waits for it to answer on port 6481. To update after pulling new code:
 Your data folder is never touched by either script. Both take `-ServiceName`,
 and the installer also takes `-Port`, `-InstallDir` and `-DataPath`, so a
 second copy can run side by side with its own data.
-
 ### Set up your folders
 
 Each drive needs a downloads folder and its library folders side by side, so
@@ -233,6 +270,22 @@ dotnet test Simplifiarr.slnx
 | `Simplifiarr.Tests` | MSTest tests. They work in temporary folders and talk to stand-in servers, never real ones. |
 
 There are no third-party NuGet packages in the app itself.
+
+### Making a release
+
+The version is in `Directory.Build.props`. Push a tag and
+[`release.yml`](.github/workflows/release.yml) runs the tests, builds a
+self-contained Windows build and the installer ([`installer/Simplifiarr.iss`](installer/Simplifiarr.iss),
+Inno Setup), and publishes them with `SHA256SUMS.txt`. The tag's message
+becomes the release notes that the Updates page shows:
+
+```powershell
+git tag -a v1.1.0 -m "What changed..."
+git push origin v1.1.0
+```
+
+To try a build without releasing, run the workflow by hand from the Actions
+tab; the files are attached to the run.
 
 ## Support
 

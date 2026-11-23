@@ -1,0 +1,98 @@
+# Builds Simplifiarr for Windows and publishes a GitHub release.
+#
+# Release:  push a tag such as v1.2.0. The tag's message becomes the
+#           release notes ("What's new" on the Updates page):
+#             git tag -a v1.2.0 -m "What changed..."
+#             git push origin v1.2.0
+#
+# Try a build without releasing: Actions > Release > Run workflow. The
+# installer and zip are attached to the run as an artifact.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to stamp on the test build'
+        required: false
+        default: '0.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Work out the version
+        id: version
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '${{ inputs.version }}' }
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') { throw "'$version' isn't a version like 1.2.3" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Test
+        run: dotnet test Simplifiarr.Tests --configuration Release --nologo
+
+      - name: Publish
+        shell: pwsh
+        run: >
+          dotnet publish Simplifiarr.Web
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:Version=${{ steps.version.outputs.version }}
+          --output publish
+          --nologo
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path publish\* -DestinationPath "dist\Simplifiarr-${{ steps.version.outputs.version }}-win-x64.zip"
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y | Out-Null }
+          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" "/DPublishDir=..\publish" installer\Simplifiarr.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed." }
+
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -File |
+            ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)" } |
+            Set-Content dist\SHA256SUMS.txt -Encoding ascii
+          Get-Content dist\SHA256SUMS.txt
+
+      - name: Keep the test build
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: simplifiarr-${{ steps.version.outputs.version }}
+          path: dist/*
+
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $prerelease = if ('${{ steps.version.outputs.version }}' -match '-') { '--prerelease' } else { $null }
+          gh release create $env:GITHUB_REF_NAME (Get-ChildItem dist -File).FullName `
+            --title "Simplifiarr ${{ steps.version.outputs.version }}" `
+            --notes-from-tag `
+            $prerelease
