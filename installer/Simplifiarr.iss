@@ -91,6 +91,11 @@ var
   DataPage: TInputDirWizardPage;
   ServiceExisted: Boolean;
 
+  { Set once an existing service has been stopped, and cleared when it has
+    been started again. If Setup stops early for any reason, it is started
+    again on the way out, so a failed update never leaves it off. }
+  StoppedService: String;
+
 { ------------------------------------------------------------ The service }
 
 function ServiceName(): String;
@@ -180,7 +185,7 @@ end;
 
 function IsStopped(Name: String): Boolean;
 begin
-  Result := RunHidden(ExpandConstant('{cmdexe}'), '/C sc.exe query "' + Name + '" | find "STOPPED" >nul') = 0;
+  Result := RunHidden(ExpandConstant('{cmd}'), '/C sc.exe query "' + Name + '" | find "STOPPED" >nul') = 0;
 end;
 
 { Stop the service and make sure its program has really exited, so its
@@ -325,6 +330,7 @@ begin
   if ServiceImagePath(ServiceName(), ImagePath) then
   begin
     WizardForm.StatusLabel.Caption := 'Stopping Simplifiarr...';
+    StoppedService := ServiceName();
     StopService(ServiceName(), ProgramOf(ImagePath));
   end;
 end;
@@ -369,7 +375,17 @@ begin
 
   WizardForm.StatusLabel.Caption := 'Starting Simplifiarr...';
   Sc('start "' + ServiceName() + '"');
+  StoppedService := '';
   WaitForPort(Port);
+end;
+
+procedure DeinitializeSetup();
+begin
+  if StoppedService <> '' then
+  begin
+    Log('Setup ended before finishing; starting ' + StoppedService + ' again.');
+    Sc('start "' + StoppedService + '"');
+  end;
 end;
 
 { ------------------------------------------------------------ Uninstall }

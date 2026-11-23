@@ -49,23 +49,26 @@ public class UpdateLauncher : IUpdateLauncher
             throw new InvalidOperationException(install.WhyNot);
         }
 
-        var start = new ProcessStartInfo(setupPath)
+        var system = Environment.GetFolderPath(Environment.SpecialFolder.System);
+
+        // Run Setup, then start the service whatever happened: if Setup
+        // stops early it must never leave Simplifiarr switched off. Starting
+        // a service that is already running does nothing.
+        var setup =
+            $"\"{setupPath}\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- " +
+            $"\"/DIR={install.InstallFolder}\" \"/SERVICE={install.ServiceName}\" \"/LOG={logPath}\"";
+
+        var startAgain =
+            $"\"{Path.Combine(system, "sc.exe")}\" start \"{install.ServiceName}\"";
+
+        var start = new ProcessStartInfo(Path.Combine(system, "cmd.exe"))
         {
+            // cmd /c drops the outer pair of quotes, so wrap the whole line.
+            Arguments = $"/d /c \"{setup} & {startAgain}\"",
             UseShellExecute = false,
             CreateNoWindow = true,
             WorkingDirectory = Path.GetDirectoryName(setupPath)!
         };
-
-        foreach (var argument in new[]
-                 {
-                     "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
-                     $"/DIR={install.InstallFolder}",
-                     $"/SERVICE={install.ServiceName}",
-                     $"/LOG={logPath}"
-                 })
-        {
-            start.ArgumentList.Add(argument);
-        }
 
         Process.Start(start);
     }

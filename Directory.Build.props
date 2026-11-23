@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
     <!-- The release workflow sets this from the tag (v1.2.3 -> 1.2.3). -->
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
 
     <!-- Keep the version plain: no "+commit" on the end. -->
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
