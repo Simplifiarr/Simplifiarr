@@ -163,6 +163,12 @@ public class SimplifiarrSettings
     /// </summary>
     public bool StorageAutoMove { get; set; }
 
+    /// <summary>
+    /// Detailed logging (every call to the other apps, every decision) is
+    /// on until then. It turns itself off so the log doesn't grow for ever.
+    /// </summary>
+    public DateTime? DetailedLoggingUntilUtc { get; set; }
+
     /// <summary>When Size Reduction searches the indexers by itself. Off by default.</summary>
     [JsonConverter(typeof(JsonStringEnumConverter<AutoScanMode>))]
     public AutoScanMode SizeReductionAuto { get; set; } =

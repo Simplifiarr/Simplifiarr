@@ -26,6 +26,8 @@ public class SettingsService : ISettingsService
             }
         }
 
+        LogSwitch.Apply(settings);
+
         return Task.FromResult(settings);
     }
 
@@ -52,6 +54,8 @@ public class SettingsService : ISettingsService
             throw new IOException(
                 $"Could not save settings to '{AppPaths.SettingsFile}'. Check that the folder exists and is writable.");
         }
+
+        LogSwitch.Apply(settings);
 
         return Task.CompletedTask;
     }

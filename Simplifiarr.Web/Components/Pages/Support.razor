@@ -1,0 +1,191 @@
+@page "/support"
+@rendermode InteractiveServer
+
+@using Simplifiarr.Core.Services
+@using Simplifiarr.Core.Utilities
+
+@inject ISupportBundleService Bundles
+@inject ISettingsService SettingsService
+@inject IUpdateService Updates
+
+<PageTitle>Logs &amp; support - Simplifiarr</PageTitle>
+
+<PageHeader Title="Logs &amp; support"
+            Subtitle="Something not working? Send the logs, and say what you were doing." />
+
+@* ------------------------------------------------------------- Report *@
+
+<h2 class="section-title">Report a problem</h2>
+
+<div class="panel storage-box mb-3">
+    <ol class="support-steps mb-0">
+        <li>
+            <div class="mb-1"><strong>Download the logs.</strong> One zip with the last week of logs and a description of your setup.</div>
+
+            <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" id="hide-names" @bind="_hideNames" />
+                <label class="form-check-label" for="hide-names">Hide movie and show titles, people's names and file names</label>
+                <div class="cell-note">
+                    API keys, passwords, IP addresses, emails and your Windows user name are always taken out.
+                    Leave names in only if you're sending it by email.
+                </div>
+            </div>
+
+            <a class="btn btn-primary btn-sm" href="@($"support/logs.zip?hideNames={(_hideNames ? "true" : "false")}")" download>
+                <i class="bi bi-download" aria-hidden="true"></i> Download logs
+            </a>
+        </li>
+
+        <li class="mt-3">
+            <div class="mb-1"><strong>Say what happened,</strong> and attach the zip.</div>
+
+            <div class="d-flex gap-2 flex-wrap">
+                <a class="btn btn-secondary btn-sm" href="@IssueUrl" target="_blank" rel="noopener">
+                    <i class="bi bi-github" aria-hidden="true"></i> Open a GitHub issue
+                </a>
+                <a class="btn btn-secondary btn-sm" href="@EmailUrl">
+                    <i class="bi bi-envelope" aria-hidden="true"></i> Email @SupportEmail
+                </a>
+            </div>
+            <div class="cell-note mt-1">
+                GitHub issues are public, so keep names hidden there. Drag the zip into the issue to attach it.
+            </div>
+        </li>
+
+        <li class="mt-3">
+            <strong>If it's hard to repeat,</strong> turn on detailed logging below, do the thing again, then download the logs.
+        </li>
+    </ol>
+</div>
+
+@* ----------------------------------------------------------- Detailed *@
+
+<h2 class="section-title">Detailed logging</h2>
+
+<div class="panel storage-box mb-3">
+    @if (LogSwitch.IsDetailed)
+    {
+        <p class="mb-2">
+            <span class="pill pill-warn">On</span>
+            until @LogSwitch.DetailedUntilUtc!.Value.ToLocalTime().ToString("ddd d MMM, h:mm tt"), then it turns itself off.
+        </p>
+        <button type="button" class="btn btn-secondary btn-sm" disabled="@_saving" @onclick="() => SetDetailedAsync(false)">Turn off now</button>
+    }
+    else
+    {
+        <p class="mb-2">
+            <span class="pill pill-muted">Off</span>
+            The log has what Simplifiarr did and anything that went wrong.
+        </p>
+        <button type="button" class="btn btn-primary btn-sm" disabled="@_saving" @onclick="() => SetDetailedAsync(true)">Turn on for 24 hours</button>
+    }
+
+    <div class="cell-note mt-2">
+        Detailed logging also writes every call to Radarr, Sonarr, qBittorrent, Prowlarr, Seerr and Jellyfin
+        (address, answer and how long it took), and why things were skipped. Keys are never written.
+    </div>
+
+    @if (_saveError is not null)
+    {
+        <div class="alert alert-danger mt-2 mb-0">@_saveError</div>
+    }
+</div>
+
+@* -------------------------------------------------------------- Recent *@
+
+<h2 class="section-title">Recent log</h2>
+
+<div class="toolbar">
+    <div class="toolbar-summary">
+        <div class="form-check form-check-inline mb-0">
+            <input class="form-check-input" type="checkbox" id="problems-only" @bind="_problemsOnly" @bind:after="Load" />
+            <label class="form-check-label" for="problems-only">Only warnings and errors</label>
+        </div>
+    </div>
+    <div class="toolbar-actions">
+        <button type="button" class="btn btn-secondary btn-sm" @onclick="Load">
+            <i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Refresh
+        </button>
+    </div>
+</div>
+
+@if (_lines.Count == 0)
+{
+    <EmptyState Icon="journal-check" Text="@(_problemsOnly ? "No warnings or errors in the last week." : "The log is empty.")" />
+}
+else
+{
+    <div class="log-view">
+        @foreach (var line in _lines.Reverse())
+        {
+            <div class="log-line @LineClass(line)">@line</div>
+        }
+    </div>
+}
+
+<p class="cell-note mt-2">
+    Newest first. The log files are in <code>@AppPaths.LogsDirectory</code>, one per day, kept for 14 days.
+</p>
+
+@code
+{
+    private const string SupportEmail = "simplifiarr@proton.me";
+
+    private bool _hideNames = true;
+    private bool _problemsOnly = true;
+    private bool _saving;
+    private string? _saveError;
+    private IReadOnlyList<string> _lines = [];
+
+    private string IssueUrl =>
+        $"https://github.com/{UpdateService.Repository}/issues/new?template=bug_report.yml&version={Uri.EscapeDataString(Updates.CurrentVersion)}";
+
+    private string EmailUrl =>
+        $"mailto:{SupportEmail}" +
+        $"?subject={Uri.EscapeDataString($"Simplifiarr {Updates.CurrentVersion}: ")}" +
+        $"&body={Uri.EscapeDataString("What I was doing:\n\nWhat happened:\n\nWhat I expected:\n\n(Attach the logs zip from Logs & support.)")}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Reading settings also brings the detailed logging switch up to date.
+        await SettingsService.GetSettingsAsync();
+
+        Load();
+    }
+
+    private void Load() =>
+        _lines = Bundles.RecentLines(200, _problemsOnly);
+
+    private async Task SetDetailedAsync(bool on)
+    {
+        _saving = true;
+        _saveError = null;
+
+        try
+        {
+            var settings = await SettingsService.GetSettingsAsync();
+
+            settings.DetailedLoggingUntilUtc = on ? DateTime.UtcNow.AddHours(24) : null;
+
+            await SettingsService.SaveSettingsAsync(settings);
+
+            AppLog.Info(on ? "Detailed logging turned on for 24 hours." : "Detailed logging turned off.");
+
+            Load();
+        }
+        catch (IOException exception)
+        {
+            _saveError = exception.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private static string? LineClass(string line) =>
+        line.Contains("[Error]") || line.Contains("[Critical]") ? "log-error"
+        : line.Contains("[Warning]") ? "log-warn"
+        : line.Contains("[Debug]") ? "log-debug"
+        : null;
+}

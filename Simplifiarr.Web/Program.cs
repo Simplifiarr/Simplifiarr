@@ -19,6 +19,11 @@ builder.Logging.AddProvider(new FileLoggerProvider());
 builder.Services.Configure<HostOptions>(options =>
     options.ShutdownTimeout = TimeSpan.FromSeconds(20));
 
+// One line per call to Radarr, Sonarr, qBittorrent and the rest while
+// detailed logging is on, and always when a call fails.
+builder.Services.AddTransient<HttpLogHandler>();
+builder.Services.ConfigureHttpClientDefaults(http => http.AddHttpMessageHandler<HttpLogHandler>());
+
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
@@ -112,6 +117,7 @@ builder.Services.AddSingleton<IUpdateLauncher, UpdateLauncher>();
 builder.Services.AddSingleton<IUpdateService>(services =>
     new UpdateService(new HttpClient(), services.GetRequiredService<IUpdateLauncher>()));
 builder.Services.AddHostedService<Simplifiarr.Web.UpdateCheckService>();
+builder.Services.AddSingleton<ISupportBundleService, SupportBundleService>();
 
 var app = builder.Build();
 
@@ -125,6 +131,7 @@ AppLog.Sink = (level, message, exception) =>
     coreLogger.Log(
         level switch
         {
+            AppLogLevel.Debug => LogLevel.Debug,
             AppLogLevel.Error => LogLevel.Error,
             AppLogLevel.Warning => LogLevel.Warning,
             _ => LogLevel.Information
@@ -238,6 +245,16 @@ app.MapPost(
         return Results.Ok();
     })
     .DisableAntiforgery();
+
+// The zip people attach when they report a problem.
+app.MapGet(
+    "/support/logs.zip",
+    async (bool? hideNames, ISupportBundleService bundles) =>
+    {
+        var zip = await bundles.CreateAsync(hideNames ?? true);
+
+        return Results.File(zip, "application/zip", $"simplifiarr-logs-{DateTime.Now:yyyy-MM-dd-HHmm}.zip");
+    });
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

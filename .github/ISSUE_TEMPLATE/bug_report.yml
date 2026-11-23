@@ -1,0 +1,50 @@
+name: Something isn't working
+description: Report a problem, with Simplifiarr's logs attached.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this. In Simplifiarr, open **Logs & support**, press **Download logs** (keep "Hide movie and show titles" ticked, since issues are public), and drag the zip into the box at the bottom.
+
+        Would rather not post it publicly? Email it to simplifiarr@proton.me instead.
+  - type: input
+    id: version
+    attributes:
+      label: Simplifiarr version
+      description: Shown at the bottom of every page. Filled in for you when you come from Logs & support.
+      placeholder: "1.0.2"
+    validations:
+      required: true
+  - type: textarea
+    id: doing
+    attributes:
+      label: What were you doing?
+      description: The page, and what you pressed.
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened?
+      description: Any message Simplifiarr showed, word for word if you can.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Drag the zip from Logs & support here. If it's hard to repeat, turn on detailed logging there first and do it again.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Before posting
+      options:
+        - label: I looked through the zip and there's nothing in it I don't want public.
+          required: true

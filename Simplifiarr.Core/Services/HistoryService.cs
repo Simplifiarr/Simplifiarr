@@ -43,6 +43,19 @@ public class HistoryService : IHistoryService
             history.Add(record);
 
             JsonFileStore.Save(historyFile, history, indented: true);
+
+            // Everything Simplifiarr changes on disk also goes in the log, so
+            // a log someone sends in tells the whole story.
+            var line = $"{record.ActionType}: {record.Message}";
+
+            if (record.Success)
+            {
+                AppLog.Info(line);
+            }
+            else
+            {
+                AppLog.Warn(line);
+            }
         }
         finally
         {

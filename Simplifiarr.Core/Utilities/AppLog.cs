@@ -2,6 +2,7 @@ namespace Simplifiarr.Core.Utilities;
 
 public enum AppLogLevel
 {
+    Debug,
     Information,
     Warning,
     Error
@@ -15,6 +16,18 @@ public enum AppLogLevel
 public static class AppLog
 {
     public static Action<AppLogLevel, string, Exception?>? Sink { get; set; }
+
+    /// <summary>
+    /// Only written while detailed logging is on (Logs &amp; support page):
+    /// the small steps that explain why something happened.
+    /// </summary>
+    public static void Debug(string message)
+    {
+        if (LogSwitch.IsDetailed)
+        {
+            Write(AppLogLevel.Debug, message, null);
+        }
+    }
 
     public static void Info(string message) =>
         Write(AppLogLevel.Information, message, null);

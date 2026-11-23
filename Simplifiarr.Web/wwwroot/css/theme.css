@@ -896,6 +896,46 @@ a.stat-card:focus-visible {
     overflow: hidden;
 }
 
+/* Logs & support */
+.support-steps {
+    padding-left: 1.2rem;
+}
+
+.log-view {
+    max-height: 32rem;
+    overflow: auto;
+    padding: .6rem .8rem;
+    background: var(--app-surface);
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius);
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: .78rem;
+    line-height: 1.45;
+}
+
+.log-line {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    padding: .1rem 0;
+    border-bottom: 1px solid var(--app-border);
+}
+
+.log-line:last-child {
+    border-bottom: 0;
+}
+
+.log-warn {
+    color: var(--app-warn);
+}
+
+.log-error {
+    color: var(--app-danger);
+}
+
+.log-debug {
+    color: var(--app-muted);
+}
+
 /* Storage: boxes of text (the plan, moves, what was left alone). */
 .storage-box {
     padding: .75rem 1rem;

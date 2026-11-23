@@ -75,14 +75,19 @@ public sealed class FileLoggerProvider : ILoggerProvider
 
         // Every outgoing web request (qBittorrent, Prowlarr, Radarr...) logs
         // four information lines of its own, which buries everything else
-        // in the file. Keep those only when something went wrong.
-        private readonly LogLevel _minimum =
-            category.StartsWith("System.Net.Http", StringComparison.Ordinal)
-                ? LogLevel.Warning
-                : LogLevel.Information;
+        // in the file. Keep those only when something went wrong; while
+        // detailed logging is on, HttpLogHandler writes one tidy line each.
+        private readonly bool _noisy =
+            category.StartsWith("System.Net.Http", StringComparison.Ordinal);
+
+        private readonly bool _ours =
+            category.StartsWith("Simplifiarr", StringComparison.Ordinal);
 
         public bool IsEnabled(LogLevel logLevel) =>
-            logLevel != LogLevel.None && logLevel >= _minimum;
+            logLevel != LogLevel.None &&
+            logLevel >= (_noisy ? LogLevel.Warning
+                : _ours && LogSwitch.IsDetailed ? LogLevel.Debug
+                : LogLevel.Information);
 
         public void Log<TState>(
             LogLevel logLevel,
@@ -104,7 +109,8 @@ public sealed class FileLoggerProvider : ILoggerProvider
                 line += Environment.NewLine + exception;
             }
 
-            provider.Write(line);
+            // Keys, passwords and tokens never reach the file.
+            provider.Write(LogSwitch.Clean(line));
         }
     }
 }
