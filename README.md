@@ -150,19 +150,22 @@ starts with Windows, and opens it.
 Windows may warn that the installer is from an unknown publisher, because it
 isn't code-signed. Choose **More info**, then **Run anyway**.
 
-Or, from an **administrator** PowerShell, one line downloads the latest
-installer, checks it against the release's checksums and runs it with no
-questions:
+To check the download, compare its SHA-256 with the one listed for it in the
+release's **SHA256SUMS.txt**:
 
 ```powershell
-irm https://raw.githubusercontent.com/Simplifiarr/Simplifiarr/main/scripts/install.ps1 | iex
+Get-FileHash .\Simplifiarr-Setup-1.0.1.exe
 ```
 
-To pick the port or data folder:
+### Open it from other devices
 
-```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Simplifiarr/Simplifiarr/main/scripts/install.ps1))) -Port 7000 -DataPath D:\SimplifiarrData
-```
+Open <http://localhost:6481> on the PC itself. To open it from a phone, another
+computer or over Tailscale, use the PC's address instead (for example
+`http://my-pc:6481`), and tick **Let phones and other computers on my network
+open Simplifiarr** in the installer. That adds a Windows Firewall rule for the
+port; without it Windows blocks other devices. Simplifiarr has no login of its
+own, so keep it on your home network or a private network like Tailscale
+rather than opening it to the internet.
 
 ### Update it
 
@@ -173,7 +176,7 @@ settings and data stay as they are. On the same page you can have new versions
 install themselves overnight, or turn the check off. The check asks GitHub
 for the latest release and sends nothing about you or your library.
 
-Running the installer or the one-line command again also updates it.
+Running a newer installer by hand also updates it, keeping its port and data.
 
 To remove it, use **Apps** in Windows Settings. The data folder is left behind
 in case you reinstall; delete it yourself if you don't need it.
