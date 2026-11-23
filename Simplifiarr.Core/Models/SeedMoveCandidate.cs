@@ -63,10 +63,36 @@ public class SeedMoveFile
 public sealed record SeedMoveResult(
     bool Succeeded,
     string Message,
-    long FreedBytes = 0);
+    long FreedBytes = 0)
+{
+    /// <summary>Moved, but the client wouldn't start it again: why. Null otherwise.</summary>
+    public string? NotStartedBecause { get; init; }
+}
 
 /// <summary>The move in progress, for showing on the page.</summary>
 public sealed record SeedMoveProgress(
     string TorrentHash,
     string TorrentName,
     string Step);
+
+/// <summary>A run of moves started together (Move selected / Move all).</summary>
+public sealed class SeedMoveBatch
+{
+    public int Total { get; init; }
+
+    public int Done { get; set; }
+
+    public int Moved { get; set; }
+
+    public long FreedBytes { get; set; }
+
+    /// <summary>Torrent name and why it didn't move.</summary>
+    public List<(string Torrent, string Why)> Failed { get; } = [];
+
+    /// <summary>Moved but couldn't be started again: torrent name and why.</summary>
+    public List<(string Torrent, string Why)> NotStarted { get; } = [];
+
+    public bool StopRequested { get; set; }
+
+    public bool Finished { get; set; }
+}

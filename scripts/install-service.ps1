@@ -96,17 +96,37 @@ if ($existing -and $existing.Status -ne 'Stopped') {
 }
 Stop-ThisInstallProcess
 
-Step "Publishing to $InstallDir"
-$published = $false
-foreach ($attempt in 1..3) {
-    dotnet publish $project -c Release -o $InstallDir --nologo --verbosity quiet
-    if ($LASTEXITCODE -eq 0) { $published = $true; break }
-    Write-Host "  Publish attempt $attempt failed - retrying in 5s (files may still be locked)." -ForegroundColor Yellow
-    Stop-ThisInstallProcess
-    Start-Sleep -Seconds 5
+# Build into a folder of its own, then copy every file over the install.
+# The build is self-contained (it carries its own .NET), the same as the
+# release installer makes, so the two can be used on the same folder. And
+# every file is copied whatever its date: an installer's files can carry
+# dates newer than this build's, and skipping them would leave a mix of two
+# builds that won't start.
+Step "Building"
+$stage = Join-Path ([IO.Path]::GetTempPath()) ("simplifiarr-build-" + [Guid]::NewGuid().ToString('N').Substring(0, 8))
+dotnet publish $project -c Release -r win-x64 --self-contained true -o $stage --nologo --verbosity quiet
+if ($LASTEXITCODE -ne 0) {
+    Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
+    throw "Build failed. (The old version, if any, is stopped; start it with: sc.exe start $ServiceName)"
 }
-if (-not $published) {
-    throw "Publish failed after 3 attempts. (The old version, if any, is stopped; start it with: Start-Service $ServiceName)"
+
+Step "Copying to $InstallDir"
+New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+$copied = $false
+foreach ($attempt in 1..3) {
+    try {
+        Copy-Item -Path (Join-Path $stage '*') -Destination $InstallDir -Recurse -Force -ErrorAction Stop
+        $copied = $true
+        break
+    } catch {
+        Write-Host "  Copy attempt $attempt failed ($($_.Exception.Message)) - retrying in 5s (files may still be locked)." -ForegroundColor Yellow
+        Stop-ThisInstallProcess
+        Start-Sleep -Seconds 5
+    }
+}
+Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
+if (-not $copied) {
+    throw "Copying failed after 3 attempts. (The old version, if any, is stopped; start it with: sc.exe start $ServiceName)"
 }
 
 if (-not $existing) {
@@ -132,7 +152,7 @@ sc.exe failure $ServiceName reset= 86400 actions= restart/60000/restart/60000/re
 
 Step "Starting the $ServiceName service"
 try {
-    Start-Service -Name $ServiceName -ErrorAction Stop
+    Start-Service -InputObject (Get-Service -Name $ServiceName) -ErrorAction Stop
 } catch {
     Write-Host "  First start failed ($($_.Exception.Message)) - trying once more." -ForegroundColor Yellow
     Start-Sleep -Seconds 5

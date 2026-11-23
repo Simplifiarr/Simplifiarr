@@ -5,6 +5,7 @@
 @using Simplifiarr.Core.Models
 @using Simplifiarr.Core.Services
 @using Simplifiarr.Core.Utilities
+@using Simplifiarr.Web.Support
 
 @inject ISettingsService SettingsService
 @inject ISeedMoveService Seeds
@@ -32,14 +33,78 @@
             copied across by @Client.Name itself.
         </p>
         <p class="mb-0">
-            The torrent is left paused afterwards; start it in @Client.Name when you're ready.
-            This list is updated by Scan, which only compares sizes. @(Client.Name)'s check is
-            what proves a match.
+            Afterwards the torrent starts seeding again, or stays paused if you untick
+            "Start seeding again". Several moves run one after another, and carry on if you
+            leave the page. This list is updated by Scan, which only compares sizes.
+            @(Client.Name)'s check is what proves a match.
         </p>
     </div>
 </details>
 
-@if (Seeds.Current is { } current)
+@if (Seeds.Batch is { } batch)
+{
+    <div class="alert @(batch.Finished ? (batch.Failed.Count == 0 ? "alert-success" : "alert-warning") : "alert-info")">
+        @if (!batch.Finished)
+        {
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <strong>Moving @(batch.Done + 1 > batch.Total ? batch.Total : batch.Done + 1) of @batch.Total</strong>
+                <span class="cell-note">@batch.Moved moved · @batch.Failed.Count didn't · @SizeFormatter.FormatBytes(batch.FreedBytes) freed so far</span>
+                <button type="button" class="btn btn-secondary btn-sm ms-auto" disabled="@batch.StopRequested" @onclick="Seeds.StopBatch">
+                    @(batch.StopRequested ? "Stopping after this one..." : "Stop after this one")
+                </button>
+            </div>
+            <div class="progress mt-2" role="progressbar" aria-label="Moves done" aria-valuenow="@batch.Done" aria-valuemin="0" aria-valuemax="@batch.Total" style="height: .5rem">
+                <div class="progress-bar" style="width: @(batch.Total == 0 ? 0 : batch.Done * 100 / batch.Total)%"></div>
+            </div>
+            @if (Seeds.Current is { } moving)
+            {
+                <div class="cell-note mt-2">@moving.TorrentName: @moving.Step...</div>
+            }
+            <div class="cell-note">This carries on if you leave the page.</div>
+        }
+        else
+        {
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <strong>
+                    @(batch.StopRequested ? "Stopped. " : "Done. ")
+                    Moved @batch.Moved of @batch.Total@(batch.Failed.Count > 0 ? $"; {batch.Failed.Count} didn't move" : "").
+                </strong>
+                <button type="button" class="btn btn-secondary btn-sm ms-auto" @onclick="Seeds.ClearBatch">Close</button>
+            </div>
+            @if (batch.FreedBytes > 0)
+            {
+                <div class="cell-note">@SizeFormatter.FormatBytes(batch.FreedBytes) is in the Recycle Bin; empty it to get the space back.</div>
+            }
+        }
+
+        @if (batch.Failed.Count > 0)
+        {
+            <details class="mt-2">
+                <summary>Why @batch.Failed.Count didn't move</summary>
+                <ul class="mb-0 mt-1">
+                    @foreach (var (torrent, why) in batch.Failed)
+                    {
+                        <li><strong>@torrent</strong>: @why</li>
+                    }
+                </ul>
+            </details>
+        }
+
+        @if (batch.NotStarted.Count > 0)
+        {
+            <details class="mt-2">
+                <summary>@batch.NotStarted.Count moved but didn't start again; start them in @Client.Name</summary>
+                <ul class="mb-0 mt-1">
+                    @foreach (var (torrent, why) in batch.NotStarted)
+                    {
+                        <li><strong>@torrent</strong>: @why</li>
+                    }
+                </ul>
+            </details>
+        }
+    </div>
+}
+else if (Seeds.Current is { } current)
 {
     <div class="alert alert-info">
         <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
@@ -77,12 +142,54 @@ else if (_candidates.Count == 0)
 }
 else
 {
-    <div class="toolbar">
-        <div class="toolbar-summary">
-            <strong>@_candidates.Count</strong> torrent(s) ·
-            <strong>@SizeFormatter.FormatBytes(_candidates.Sum(candidate => candidate.LinkedBytes))</strong> freed by moving them all
+    @if (_pending is not null)
+    {
+        <BatchConfirmBanner IsBusy="IsBusy"
+                            ConfirmLabel="@($"Move {_pending.Count}")"
+                            BusyLabel="Moving..."
+                            OnConfirm="StartBatch"
+                            OnCancel="() => _pending = null">
+            <Message>
+                <strong>Move @_pending.Count torrent(s) to their library's drive?</strong>
+                They're moved one after another, each checked by @Client.Name before its old copy
+                goes to the Recycle Bin. That frees @SizeFormatter.FormatBytes(_pending.Sum(candidate => candidate.LinkedBytes)).
+            </Message>
+        </BatchConfirmBanner>
+    }
+    else
+    {
+        <div class="toolbar">
+            <div class="toolbar-summary">
+                <strong>@_candidates.Count</strong> torrent(s) ·
+                <strong>@SizeFormatter.FormatBytes(_candidates.Sum(candidate => candidate.LinkedBytes))</strong> freed by moving them all
+                @if (_selection.Count > 0)
+                {
+                    <text> · @_selection.Count selected</text>
+                }
+            </div>
+
+            <div class="toolbar-actions">
+                <div class="form-check form-check-inline mb-0 me-2">
+                    <input id="start-after" class="form-check-input" type="checkbox" @bind="_startAfter" />
+                    <label class="form-check-label" for="start-after">Start seeding again</label>
+                </div>
+
+                <button type="button"
+                        class="btn btn-secondary btn-sm"
+                        disabled="@IsBusy"
+                        @onclick="() => _pending = _candidates.ToList()">
+                    Move all
+                </button>
+
+                <button type="button"
+                        class="btn btn-primary btn-sm"
+                        disabled="@(IsBusy || _selection.Count == 0)"
+                        @onclick="() => _pending = _candidates.Where(_selection.IsSelected).ToList()">
+                    Move selected (@_selection.Count)
+                </button>
+            </div>
         </div>
-    </div>
+    }
 
     @if (Causes.Count > 0)
     {
@@ -107,6 +214,13 @@ else
         <table class="table">
             <thead>
                 <tr>
+                    <th class="col-check">
+                        <input type="checkbox"
+                               aria-label="Select all"
+                               checked="@(_candidates.Count > 0 && _selection.Count == _candidates.Count)"
+                               disabled="@IsBusy"
+                               @onchange="() => _selection.ToggleSelectAll(_candidates)" />
+                    </th>
                     <th>Torrent</th>
                     <th>Move</th>
                     <th>Files in library</th>
@@ -119,6 +233,9 @@ else
                 @foreach (var candidate in _candidates)
                 {
                     <tr @key="candidate.TorrentHash">
+                        <SelectableCheckboxCell Checked="_selection.IsSelected(candidate)"
+                                                Disabled="IsBusy"
+                                                OnChanged="selected => _selection.SetSelected(candidate, selected)" />
                         <td>
                             <div class="file-name">@candidate.TorrentName</div>
                             <div class="cell-note">
@@ -182,7 +299,7 @@ else
                                         Cancel
                                     </button>
                                 </div>
-                                <div class="cell-note mt-1">Pauses it in @Client.Name and leaves it paused.</div>
+                                <div class="cell-note mt-1">@(_startAfter ? $"Pauses it in {Client.Name} while it moves, then starts it again." : $"Pauses it in {Client.Name} and leaves it paused.")</div>
                             }
                             else
                             {
@@ -210,11 +327,17 @@ else
     private bool _hasScanned;
 
     private string? _confirmHash;
+    private List<SeedMoveCandidate>? _pending;
+    private bool _startAfter = true;
+    private bool _batchWasRunning;
+
+    private readonly CandidateSelection<SeedMoveCandidate> _selection =
+        new(candidate => candidate.TorrentHash);
     private SeedMoveResult? _result;
     private bool _scanWasRunning;
 
     private bool IsBusy =>
-        Seeds.Current is not null || Scans.Progress.IsRunning;
+        Seeds.Current is not null || Seeds.Batch is { Finished: false } || Scans.Progress.IsRunning;
 
     private List<Cause> Causes =>
         _candidates
@@ -243,6 +366,9 @@ else
                 .ToList();
 
         _hasScanned = _profiles.Any(profile => Seeds.GetLastScanUtc(profile.Name).HasValue);
+
+        // Drop ticks for torrents that are no longer listed.
+        _selection.SelectedKeys.IntersectWith(_candidates.Select(candidate => candidate.TorrentHash));
     }
 
     private async Task MoveAsync(SeedMoveCandidate candidate)
@@ -251,13 +377,53 @@ else
         _result = null;
 
         // Runs in the service, so it finishes even if this page is closed.
-        _result = await Seeds.MoveAsync(candidate);
+        _result = await Seeds.MoveAsync(candidate, startAfter: _startAfter);
 
+        if (_result.NotStartedBecause is { } why)
+        {
+            _result = _result with { Message = $"{_result.Message} It didn't start again ({why}); start it in {Client.Name}." };
+        }
+
+        _selection.Remove(candidate);
         Load();
     }
 
-    private void OnChanged() =>
-        _ = InvokeAsync(StateHasChanged);
+    private void StartBatch()
+    {
+        if (_pending is null)
+        {
+            return;
+        }
+
+        _result = null;
+
+        if (!Seeds.StartBatch(_pending, _startAfter))
+        {
+            _result = new SeedMoveResult(false, "Another move is still running. Wait for it to finish.");
+        }
+
+        _pending = null;
+        _selection.Clear();
+    }
+
+    private void OnChanged()
+    {
+        // Reload the list as moves finish, so moved torrents drop off it.
+        var running = Seeds.Batch is { Finished: false };
+        var reload = _batchWasRunning || running;
+
+        _batchWasRunning = running;
+
+        _ = InvokeAsync(() =>
+        {
+            if (reload)
+            {
+                Load();
+            }
+
+            StateHasChanged();
+        });
+    }
 
     private void OnScanChanged()
     {

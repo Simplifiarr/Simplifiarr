@@ -242,9 +242,96 @@ public class SeedMoveService : ISeedMoveService
 
     // -------------------------------------------------------------- moving
 
+    public SeedMoveBatch? Batch { get; private set; }
+
+    public bool StartBatch(
+        IReadOnlyList<SeedMoveCandidate> candidates,
+        bool startAfter)
+    {
+        if (candidates.Count == 0 || Current is not null || Batch is { Finished: false })
+        {
+            return false;
+        }
+
+        var batch = new SeedMoveBatch { Total = candidates.Count };
+        Batch = batch;
+        Changed?.Invoke();
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                foreach (var candidate in candidates)
+                {
+                    if (batch.StopRequested)
+                    {
+                        break;
+                    }
+
+                    SeedMoveResult result;
+
+                    try
+                    {
+                        result = await MoveAsync(candidate, CancellationToken.None, startAfter);
+                    }
+                    catch (Exception exception)
+                    {
+                        AppLog.Warn($"Moving {candidate.TorrentName} failed.", exception);
+                        result = new SeedMoveResult(false, exception.Message);
+                    }
+
+                    batch.Done++;
+
+                    if (result.Succeeded)
+                    {
+                        batch.Moved++;
+                        batch.FreedBytes += result.FreedBytes;
+
+                        if (result.NotStartedBecause is { } why)
+                        {
+                            batch.NotStarted.Add((candidate.TorrentName, why));
+                        }
+                    }
+                    else
+                    {
+                        batch.Failed.Add((candidate.TorrentName, result.Message));
+                    }
+
+                    Changed?.Invoke();
+                }
+            }
+            finally
+            {
+                batch.Finished = true;
+                Changed?.Invoke();
+            }
+        });
+
+        return true;
+    }
+
+    public void StopBatch()
+    {
+        if (Batch is { Finished: false } batch)
+        {
+            batch.StopRequested = true;
+            Changed?.Invoke();
+        }
+    }
+
+    public void ClearBatch()
+    {
+        if (Batch is { Finished: true })
+        {
+            Batch = null;
+            Changed?.Invoke();
+        }
+    }
+
     public async Task<SeedMoveResult> MoveAsync(
         SeedMoveCandidate candidate,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool startAfter = false)
     {
         if (!await _oneAtATime.WaitAsync(0, cancellationToken))
         {
@@ -256,6 +343,17 @@ public class SeedMoveService : ISeedMoveService
             Report(candidate, "Checking the torrent is unchanged");
 
             var result = await MoveCoreAsync(candidate, cancellationToken);
+
+            if (result.Succeeded && startAfter)
+            {
+                Report(candidate, "Starting it again");
+
+                var startError = await _client.StartTorrentAsync(candidate.TorrentHash);
+
+                result = startError is null
+                    ? result with { Message = result.Message.Replace($" It is paused; start it in {_client.Name} when you're ready.", " It is seeding again.") }
+                    : result with { NotStartedBecause = startError };
+            }
 
             await _history.AddRecordAsync(
                 new HistoryRecord

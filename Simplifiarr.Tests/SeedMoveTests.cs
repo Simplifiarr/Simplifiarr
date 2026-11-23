@@ -166,6 +166,54 @@ public class SeedMoveTests : TempFolderTest
     }
 
     [TestMethod]
+    public async Task Moving_can_start_it_seeding_again()
+    {
+        Seed((@"Night Shift S01\E01.mkv", "episode one"));
+        Write(Path.Combine(_secondTv, @"Night Shift\Season 1\E01.mkv"), "episode one");
+
+        var result = await _service.MoveAsync(await FindAsync(), startAfter: true);
+
+        Assert.IsTrue(result.Succeeded, result.Message);
+        Assert.Contains("start", _qbittorrent.Calls);
+        Assert.Contains("It is seeding again.", result.Message);
+        Assert.DoesNotContain("It is paused", result.Message);
+        Assert.IsNull(result.NotStartedBecause);
+    }
+
+    [TestMethod]
+    public async Task A_batch_moves_each_in_turn_and_keeps_going_past_one_that_fails()
+    {
+        Seed((@"Night Shift S01\E01.mkv", "episode one"));
+        Write(Path.Combine(_secondTv, @"Night Shift\Season 1\E01.mkv"), "episode one");
+
+        var candidate = await FindAsync();
+
+        // The second is the same torrent again: by then it has already moved,
+        // so it fails without touching anything.
+        Assert.IsTrue(_service.StartBatch([candidate, candidate], startAfter: false));
+        Assert.IsFalse(_service.StartBatch([candidate], startAfter: false), "Only one run at a time.");
+
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+
+        while (_service.Batch is { Finished: false } && waited.Elapsed < TimeSpan.FromSeconds(20))
+        {
+            await Task.Delay(20);
+        }
+
+        var batch = _service.Batch!;
+
+        Assert.IsTrue(batch.Finished);
+        Assert.AreEqual(2, batch.Done);
+        Assert.AreEqual(1, batch.Moved);
+        Assert.HasCount(1, batch.Failed);
+        Assert.AreEqual(Encoding.UTF8.GetByteCount("episode one"), batch.FreedBytes);
+        Assert.AreEqual(Path.Combine(_secondDownloads, "tv"), _qbittorrent.Torrents.Single().SavePath);
+
+        _service.ClearBatch();
+        Assert.IsNull(_service.Batch);
+    }
+
+    [TestMethod]
     public async Task A_file_the_library_does_not_have_is_moved_by_qbittorrent()
     {
         Seed(

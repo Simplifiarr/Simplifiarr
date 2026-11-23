@@ -26,8 +26,24 @@ public interface ISeedMoveService
     Task ScanAsync(string driveName, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Moves one torrent's seed onto its library's drive and leaves it
-    /// paused. Undoes what it did if the client's recheck doesn't pass.
+    /// Moves one torrent's seed onto its library's drive. Undoes what it
+    /// did if the client's recheck doesn't pass. Afterwards it is left
+    /// paused, or started again when <paramref name="startAfter"/> is set.
     /// </summary>
-    Task<SeedMoveResult> MoveAsync(SeedMoveCandidate candidate, CancellationToken cancellationToken = default);
+    Task<SeedMoveResult> MoveAsync(SeedMoveCandidate candidate, CancellationToken cancellationToken = default, bool startAfter = false);
+
+    /// <summary>The run of moves under way or just finished, or null.</summary>
+    SeedMoveBatch? Batch { get; }
+
+    /// <summary>
+    /// Moves these one after another in the background, so it carries on if
+    /// the page is closed. False when a move or run is already going.
+    /// </summary>
+    bool StartBatch(IReadOnlyList<SeedMoveCandidate> candidates, bool startAfter);
+
+    /// <summary>Stops the run once the move in progress finishes.</summary>
+    void StopBatch();
+
+    /// <summary>Forgets a finished run's summary.</summary>
+    void ClearBatch();
 }
