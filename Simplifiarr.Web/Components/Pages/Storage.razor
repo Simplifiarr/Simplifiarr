@@ -17,7 +17,7 @@
 <PageTitle>Storage - Simplifiarr</PageTitle>
 
 <PageHeader Title="Storage"
-            Subtitle="How full each drive is, what takes the space, and which titles to move so no drive fills up. Sizes are from the last Scan; free space is live." />
+            Subtitle="How full each drive is, and what to move so none of them fills up." />
 
 @if (_drives is null)
 {
@@ -31,14 +31,17 @@ else if (_drives.Count == 0)
 }
 else
 {
+    @* ------------------------------------------------------------ Drives *@
+
     <div class="stat-grid">
-        @foreach (var drive in _drives)
+        @foreach (var drive in _drives ?? [])
         {
             <button type="button"
                     class="stat-card text-start"
-                    style="cursor: pointer; @(_selectedRoot == drive.Root ? "border-color: var(--app-accent)" : null)"
-                    @onclick="() => SelectDrive(drive.Root)">
-                <div class="stat-label">@drive.Root · @string.Join(", ", drive.ProfileNames)</div>
+                    style="cursor: pointer; @(_tab == BrowseTab && _selectedRoot == drive.Root ? "border-color: var(--app-accent)" : null)"
+                    title="See what takes the space on @drive.Root"
+                    @onclick="() => Browse(drive.Root)">
+                <div class="stat-label">@drive.Root @string.Join(", ", drive.ProfileNames)</div>
 
                 @if (!drive.IsAvailable)
                 {
@@ -47,42 +50,51 @@ else
                 }
                 else
                 {
-                    <div class="stat-value @(drive.IsOverLimit ? "status-warn" : null)">@($"{drive.UsedPercent:0}%")</div>
+                    <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap">
+                        <div class="stat-value @(drive.IsOverLimit ? "status-warn" : null)">@($"{drive.UsedPercent:0}%")</div>
+                        @if (drive.IsOverLimit)
+                        {
+                            <span class="pill pill-warn">Move @SizeFormatter.FormatBytes(drive.ToFreeBytes)</span>
+                        }
+                        else
+                        {
+                            <span class="pill pill-ok">OK</span>
+                        }
+                    </div>
 
-                    <div class="space-bar" title="@($"Limit {drive.LimitPercent}%")">
+                    <div class="space-bar" title="@LimitText(drive)">
                         <div class="space-bar-fill @(drive.IsOverLimit ? "over" : null)"
-                             style="width: @(Math.Min(100, drive.UsedPercent).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></div>
+                             style="width: @Css(Math.Min(100, drive.UsedPercent))%"></div>
                         <div class="space-bar-limit"
-                             style="left: @(drive.LimitPercent)%"></div>
+                             style="left: @Css(Math.Min(100, drive.LimitLinePercent))%"></div>
                     </div>
 
-                    <div class="stat-note">
-                        @SizeFormatter.FormatBytes(drive.FreeBytes) free of @SizeFormatter.FormatBytes(drive.TotalBytes)
-                    </div>
-                    <div class="stat-note">
-                        Libraries: @SizeFormatter.FormatBytes(drive.Titles.Sum(title => title.SizeBytes))
-                    </div>
-                    <div class="stat-note @(drive.IsOverLimit ? "status-warn" : null)">
-                        @(drive.IsOverLimit
-                            ? $"{SizeFormatter.FormatBytes(drive.OverLimitBytes)} over its {drive.LimitPercent}% limit"
-                            : $"Under its {drive.LimitPercent}% limit")
-                    </div>
+                    <div class="stat-note">@SizeFormatter.FormatBytes(drive.FreeBytes) free of @SizeFormatter.FormatBytes(drive.TotalBytes)</div>
+                    <div class="stat-note">@LimitText(drive)</div>
                 }
             </button>
         }
     </div>
 
-    @* ------------------------------------------------------------ Queue *@
+    @* ------------------------------------------------------------ Moving *@
 
-    @if (Mover.Current is not null || Mover.Queue.Count > 0 || Mover.Results.Count > 0)
+    @if (Mover.Current is not null || Mover.Queue.Count > 0)
     {
-        <div class="panel mb-4">
-            <div class="toolbar mb-2">
+        <div class="panel storage-box mb-3">
+            <div class="toolbar mb-1">
                 <div class="toolbar-summary">
-                    <strong>Moving</strong>
+                    @if (Mover.Current is { } current)
+                    {
+                        <strong>Moving @current.Request.Title.Name</strong>
+                        <text> to @StoragePlanner.RootOf(current.Request.ToLibraryPath)</text>
+                    }
+                    else
+                    {
+                        <strong>Waiting to move</strong>
+                    }
                     @if (Mover.Queue.Count > 0)
                     {
-                        <text> · @Mover.Queue.Count waiting (@SizeFormatter.FormatBytes(Mover.Queue.Sum(request => request.Title.SizeBytes)))</text>
+                        <text> · @Mover.Queue.Count more after this (@SizeFormatter.FormatBytes(Mover.Queue.Sum(request => request.Title.SizeBytes)))</text>
                     }
                     @if (Mover.IsPaused)
                     {
@@ -102,325 +114,420 @@ else
 
                     @if (Mover.Queue.Count > 0)
                     {
-                        <button type="button" class="btn btn-secondary btn-sm" @onclick="Mover.ClearQueue">Empty the queue</button>
+                        <button type="button" class="btn btn-secondary btn-sm" @onclick="Mover.ClearQueue">Cancel the rest</button>
                     }
                 </div>
             </div>
 
-            @if (Mover.Current is { } current)
+            @if (Mover.Current is { } running)
             {
-                <div>
-                    <strong>@current.Request.Title.Name</strong>
-                    → <code>@current.Request.ToLibraryPath</code>
-                </div>
                 <div class="space-bar">
                     <div class="space-bar-fill"
-                         style="width: @(current.BytesTotal <= 0 ? 0 : current.BytesDone * 100 / current.BytesTotal)%"></div>
+                         style="width: @(running.BytesTotal <= 0 ? 0 : running.BytesDone * 100 / running.BytesTotal)%"></div>
                 </div>
                 <div class="cell-note">
-                    @current.Step · @SizeFormatter.FormatBytes(current.BytesDone) of @SizeFormatter.FormatBytes(current.BytesTotal).
-                    This carries on if you leave the page.
+                    @running.Step · @SizeFormatter.FormatBytes(running.BytesDone) of @SizeFormatter.FormatBytes(running.BytesTotal).
+                    It carries on if you leave the page.
                 </div>
             }
 
             @if (Mover.Queue.Count > 0)
             {
-                <details class="mt-2">
-                    <summary>Waiting</summary>
+                <details class="mt-1">
+                    <summary>Waiting (@Mover.Queue.Count)</summary>
                     <ul class="mb-0">
                         @foreach (var waiting in Mover.Queue)
                         {
                             <li>
                                 @waiting.Title.Name
-                                <span class="cell-note">→ @waiting.ToLibraryPath · @SizeFormatter.FormatBytes(waiting.Title.SizeBytes)</span>
+                                <span class="cell-note">to @StoragePlanner.RootOf(waiting.ToLibraryPath) · @SizeFormatter.FormatBytes(waiting.Title.SizeBytes)</span>
                                 <button type="button" class="btn btn-link btn-sm py-0" @onclick="() => Mover.Remove(waiting)">Take off</button>
                             </li>
                         }
                     </ul>
                 </details>
             }
+        </div>
+    }
 
-            @if (Mover.Results.Count > 0)
+    @if (Mover.Results.Count > 0)
+    {
+        var moved = Mover.Results.Count(result => result.Succeeded);
+        var failed = Mover.Results.Count - moved;
+
+        <details class="panel storage-box mb-3">
+            <summary>
+                <strong>Moves so far:</strong> @($"{moved} moved" + (failed > 0 ? $", {failed} left where they were" : string.Empty))
+            </summary>
+            <ul class="mb-1 mt-2">
+                @foreach (var result in Mover.Results.Take(30))
+                {
+                    <li class="@(result.Succeeded ? null : "status-warn")">@result.Message</li>
+                }
+            </ul>
+            @if (moved > 0)
             {
-                <details class="mt-2" open="@(Mover.Current is null && Mover.Queue.Count == 0)">
-                    <summary>Done (@Mover.Results.Count(result => result.Succeeded) moved, @Mover.Results.Count(result => !result.Succeeded) not)</summary>
-                    <ul class="mb-0">
-                        @foreach (var result in Mover.Results.Take(30))
+                <div class="cell-note">@RecycleBinNote</div>
+            }
+        </details>
+    }
+
+    @* -------------------------------------------------------------- Tabs *@
+
+    <div class="app-tabs" role="tablist" aria-label="Storage">
+        <button type="button" role="tab" aria-selected="@(_tab == PlanTab)"
+                class="app-tab @(_tab == PlanTab ? "active" : null)"
+                @onclick="() => _tab = PlanTab">
+            Plan <span class="app-tab-count">@_suggestions.Count</span>
+        </button>
+        <button type="button" role="tab" aria-selected="@(_tab == BrowseTab)"
+                class="app-tab @(_tab == BrowseTab ? "active" : null)"
+                @onclick="() => _tab = BrowseTab">
+            Browse a drive
+        </button>
+        <button type="button" role="tab" aria-selected="@(_tab == ReviewTab)"
+                class="app-tab @(_tab == ReviewTab ? "active" : null)"
+                @onclick="() => _tab = ReviewTab">
+            Worth a look <span class="app-tab-count">@_reviews.Count</span>
+        </button>
+    </div>
+
+    @if (_tab == PlanTab)
+    {
+        @* ------------------------------------------------------ Plan *@
+
+        var full = _drives!.Where(drive => drive.IsAvailable && drive.IsOverLimit).ToList();
+
+        @if (full.Count == 0)
+        {
+            <EmptyState Icon="check-circle" Text="Every drive is fine. Nothing needs to move." />
+        }
+        else
+        {
+            @foreach (var drive in full)
+            {
+                var moves = _suggestions.Where(suggestion => suggestion.FromRoot == drive.Root).ToList();
+
+                <div class="panel storage-box mb-3">
+                    <p class="mb-2">@PlanSentence(drive, moves)</p>
+
+                    @if (moves.Count == 0)
+                    {
+                        <div class="cell-note">@NoMovesReason()</div>
+                    }
+                </div>
+            }
+
+            @if (_suggestions.Count > 0)
+            {
+                var waiting = _suggestions.Count(suggestion => !IsQueued(suggestion.Title));
+
+                <div class="toolbar">
+                    <div class="toolbar-summary">
+                        <strong>@_suggestions.Count</strong> title(s), @SizeFormatter.FormatBytes(_suggestions.Sum(suggestion => suggestion.Title.SizeBytes))
+                    </div>
+
+                    <div class="toolbar-actions">
+                        <button type="button"
+                                class="btn btn-secondary btn-sm"
+                                @onclick="() => _showPlanList = !_showPlanList">
+                            @(_showPlanList ? "Hide titles" : "Review titles")
+                        </button>
+
+                        <button type="button"
+                                class="btn btn-primary btn-sm"
+                                disabled="@(waiting == 0)"
+                                @onclick="MoveAllSuggestions">
+                            Move all (@waiting)
+                        </button>
+                    </div>
+                </div>
+
+                @if (_showPlanList)
+                {
+                    <div class="toolbar">
+                        <div class="toolbar-summary cell-note">
+                            Least watched first, then smallest.
+                            @if (_pickedSuggestions.Count > 0)
+                            {
+                                <text> @_pickedSuggestions.Count selected.</text>
+                            }
+                        </div>
+                        <div class="toolbar-actions">
+                            <button type="button"
+                                    class="btn btn-secondary btn-sm"
+                                    disabled="@(_pickedSuggestions.Count == 0)"
+                                    @onclick="MoveSuggestions">
+                                Move only selected (@_pickedSuggestions.Count)
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="table-scroll mb-2">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th class="col-check">Select</th>
+                                    <th>Title</th>
+                                    <th>To</th>
+                                    <th class="col-num">Size</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var suggestion in _suggestions)
+                                {
+                                    var queued = IsQueued(suggestion.Title);
+
+                                    <tr @key="suggestion.Title.FolderPath" class="@(queued ? "row-disabled" : null)">
+                                        <SelectableCheckboxCell Checked="_pickedSuggestions.Contains(suggestion.Title.FolderPath)"
+                                                                Disabled="queued"
+                                                                OnChanged="selected => Toggle(_pickedSuggestions, suggestion.Title, selected)" />
+                                        <td>
+                                            <div class="file-name">@suggestion.Title.Name</div>
+                                            <div class="cell-note">
+                                                @suggestion.Title.Kind · watched: @WatchText(suggestion.Title)
+                                                @if (queued)
+                                                {
+                                                    <text> · queued</text>
+                                                }
+                                            </div>
+                                        </td>
+                                        <td>@suggestion.ToRoot</td>
+                                        <td class="col-num">@SizeFormatter.FormatBytes(suggestion.Title.SizeBytes)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            }
+
+            @if (_heldBack.Count > 0)
+            {
+                <details class="panel storage-box mb-3">
+                    <summary>
+                        <strong>@_heldBack.Count left alone:</strong>
+                        @string.Join(", ", _heldBack.GroupBy(entry => entry.Reason).Select(group => $"{group.Count()} {ShortReason(group.Key)}"))
+                    </summary>
+                    <div class="cell-note mt-2">
+                        Seeding titles would free nothing. Titles added or changed in the last @_recentDays day(s)
+                        are still getting episodes or being watched. Titles over @_largestGb GB are for you to move
+                        on Browse a drive, or to shrink with <a href="size-reduction">Size Reduction</a>.
+                    </div>
+                    <ul class="mb-0 mt-1">
+                        @foreach (var entry in _heldBack.Take(40))
                         {
-                            <li class="@(result.Succeeded ? null : "status-warn")">@result.Message</li>
+                            <li>
+                                @entry.Title.Name
+                                <span class="cell-note">@entry.Reason · @SizeFormatter.FormatBytes(entry.Title.SizeBytes)</span>
+                            </li>
                         }
                     </ul>
-                    @if (Mover.Results.Any(result => result.Succeeded))
-                    {
-                        <div class="cell-note mt-1">Old folders are in the Recycle Bin; empty it to get the space back.</div>
-                    }
                 </details>
             }
-        </div>
+        }
+
+        <details class="mt-3">
+            <summary class="cell-note">How this works</summary>
+            <ul class="cell-note mt-2">
+                <li>
+                    <strong>Protected</strong> drives are kept clear. Once one passes its limit, titles move off it
+                    until it's back down to its target. Nothing is moved onto it.
+                </li>
+                <li>
+                    Everything else is an <strong>overflow</strong> drive. Each title goes to the one with the most
+                    free space, and never past the space it keeps free.
+                </li>
+                <li>
+                    Titles someone is watching, or that another program has open, are skipped when their turn comes.
+                </li>
+                <li>
+                    Each file is copied, read back and checked against the original. Only then is Radarr or Sonarr
+                    given the new folder and the old one removed. If anything fails, the title stays where it was.
+                </li>
+                <li>Set each drive's role in <a href="settings">Settings</a>, under Drives.</li>
+            </ul>
+        </details>
     }
-
-    @* ------------------------------------------------------ Suggestions *@
-
-    <h2 class="section-title">Suggested moves</h2>
-
-    @if (!_drives.Any(drive => drive.IsOverLimit))
+    else if (_tab == ReviewTab)
     {
-        <EmptyState Icon="check-circle" Text="Every drive is under its limit." />
-    }
-    else if (_suggestions.Count == 0)
-    {
-        <div class="alert alert-warning">
-            A drive is over its limit, but no movie or TV title on it fits on another drive without
-            pushing that one over its own limit. Lower a limit in Settings, free some space, or see the
-            largest titles below.
-        </div>
-    }
-    else
-    {
-        <div class="toolbar">
-            <div class="toolbar-summary">
-                <strong>@_suggestions.Count</strong> title(s) ·
-                <strong>@SizeFormatter.FormatBytes(_suggestions.Sum(suggestion => suggestion.Title.SizeBytes))</strong>
-                to move
-                @if (_pickedSuggestions.Count > 0)
-                {
-                    <text> · @_pickedSuggestions.Count selected</text>
-                }
-            </div>
-
-            <div class="toolbar-actions">
-                <button type="button"
-                        class="btn btn-secondary btn-sm"
-                        @onclick="() => _pickedSuggestions = _suggestions.Select(suggestion => suggestion.Title.FolderPath).ToHashSet(StringComparer.OrdinalIgnoreCase)">
-                    Select all
-                </button>
-
-                <button type="button"
-                        class="btn btn-primary btn-sm"
-                        disabled="@(_pickedSuggestions.Count == 0)"
-                        @onclick="MoveSuggestions">
-                    Move selected (@_pickedSuggestions.Count)
-                </button>
-            </div>
-        </div>
-
-        <div class="table-scroll mb-2">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th class="col-check">Select</th>
-                        <th>Title</th>
-                        <th>Move</th>
-                        <th class="col-num">Size</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var suggestion in _suggestions)
-                    {
-                        var queued = IsQueued(suggestion.Title);
-
-                        <tr @key="suggestion.Title.FolderPath" class="@(queued ? "row-disabled" : null)">
-                            <SelectableCheckboxCell Checked="_pickedSuggestions.Contains(suggestion.Title.FolderPath)"
-                                                    Disabled="queued"
-                                                    OnChanged="selected => Toggle(_pickedSuggestions, suggestion.Title, selected)" />
-                            <td>
-                                <div class="file-name">@suggestion.Title.Name</div>
-                                <div class="cell-note">
-                                    @suggestion.Title.Kind · @suggestion.Title.FileCount file(s)
-                                    @if (queued)
-                                    {
-                                        <text> · queued</text>
-                                    }
-                                </div>
-                            </td>
-                            <td>
-                                @suggestion.FromRoot → @suggestion.ToRoot
-                                <div class="cell-note"><code>@suggestion.ToLibraryPath</code></div>
-                            </td>
-                            <td class="col-num">@SizeFormatter.FormatBytes(suggestion.Title.SizeBytes)</td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
+        @* ----------------------------------------------- Worth a look *@
 
         <p class="cell-note">
-            Titles still seeding from a torrent are never suggested: moving the library copy alone
-            would leave the seed's copy behind and free nothing.
+            Titles you might delete instead of moving: watched by whoever asked for them, or unwatched for over
+            @_unwatchedMonths months.
         </p>
-    }
 
-    @* ------------------------------------------------------- Worth a look *@
-
-    <h2 class="section-title mt-4">Worth a look</h2>
-
-    @if (WatchHistory.RefreshedUtc is null)
-    {
-        <div class="alert alert-info">
-            Simplifiarr reads who has watched what from Jellyfin, and who asked for it from Seerr,
-            during Scan. Set up Jellyfin (and optionally Seerr) in <a href="settings">Settings</a>,
-            under Connections, then press Scan.
-        </div>
-    }
-    else if (_reviews.Count == 0)
-    {
-        <EmptyState Icon="check-circle" Text="@($"Nothing to review: no title has been watched by the person who asked for it, or sat unwatched for over {_unwatchedMonths} months.")" />
-    }
-    else
-    {
-        <div class="toolbar">
-            <div class="toolbar-summary">
-                <strong>@_reviews.Count</strong> title(s) ·
-                <strong>@SizeFormatter.FormatBytes(_reviews.Sum(review => review.Title.SizeBytes))</strong>
-                · watched by whoever asked for it, or unwatched for over @_unwatchedMonths months
+        @if (WatchHistory.RefreshedUtc is null)
+        {
+            <div class="alert alert-info">
+                Simplifiarr reads who has watched what from Jellyfin, and who asked for it from Seerr,
+                during Scan. Set up Jellyfin (and optionally Seerr) in <a href="settings">Settings</a>,
+                under Connections, then press Scan.
             </div>
-        </div>
-
-        <div class="table-scroll">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Title</th>
-                        <th>Why</th>
-                        <th class="col-num">Size</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var review in _reviews.Take(_reviewsShown))
-                    {
-                        <tr @key="review.Title.FolderPath">
-                            <td>
-                                <div class="file-name">@review.Title.Name</div>
-                                <div class="cell-note">
-                                    @review.Title.Kind · @review.Title.FolderPath.Substring(0, 3)
-                                    @if (review.Watch.AddedUtc is { } added)
-                                    {
-                                        <text> · added @added.ToLocalTime().ToString("d MMM yyyy")</text>
-                                    }
-                                </div>
-                            </td>
-                            <td>
-                                @review.Reason
-                                @if (review.Watch.StartedBy.Count > 0)
-                                {
-                                    <div class="cell-note">Watched by @string.Join(", ", review.Watch.StartedBy.Distinct())</div>
-                                }
-                            </td>
-                            <td class="col-num">@SizeFormatter.FormatBytes(review.Title.SizeBytes)</td>
-                            <td>
-                                @if (review.Title.IsSeeding)
-                                {
-                                    <span class="cell-note">Seeding - deleting frees nothing</span>
-                                }
-                                else if (_confirmDelete == review.Title.FolderPath)
-                                {
-                                    <div class="d-flex gap-2 flex-wrap">
-                                        <button type="button" class="btn btn-danger btn-sm" disabled="@_deleting" @onclick="() => DeleteAsync(review)">
-                                            @(_deleting ? "Deleting..." : "Delete it")
-                                        </button>
-                                        <button type="button" class="btn btn-secondary btn-sm" disabled="@_deleting" @onclick="() => _confirmDelete = null">Cancel</button>
-                                    </div>
-                                    <div class="cell-note mt-1">
-                                        Removes it from @(review.Title.Kind == StorageKinds.Tv ? "Sonarr" : "Radarr")
-                                        @(review.Watch.SeerrMediaId > 0 ? "and Seerr" : null), and sends the folder to the Recycle Bin.
-                                    </div>
-                                }
-                                else
-                                {
-                                    <div class="d-flex gap-2 flex-wrap">
-                                        <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => _confirmDelete = review.Title.FolderPath">Delete...</button>
-                                        <button type="button" class="btn btn-secondary btn-sm" title="Stop suggesting it. Undo on the Ignored page." @onclick="() => Keep(review)">Keep</button>
-                                    </div>
-                                }
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
-
-        @if (_reviews.Count > _reviewsShown)
-        {
-            <button type="button" class="btn btn-secondary btn-sm mt-2" @onclick="() => _reviewsShown += 50">Show 50 more</button>
         }
-
-        @if (_deleteMessage is not null)
+        else if (_reviews.Count == 0)
         {
-            <div class="alert @(_deleteOk ? "alert-success" : "alert-danger") mt-2">@_deleteMessage</div>
-        }
-    }
-
-    @* ----------------------------------------------------------- Titles *@
-
-    @if (SelectedDrive is { } selected)
-    {
-        <h2 class="section-title mt-4">What takes the space on @selected.Root</h2>
-
-        @if (selected.Titles.Count == 0)
-        {
-            <EmptyState Icon="search" Text="Nothing measured yet. Press Scan at the top of the page." />
+            <EmptyState Icon="check-circle" Text="Nothing to review right now." />
         }
         else
         {
             <div class="toolbar">
                 <div class="toolbar-summary">
-                    <strong>@FilteredTitles.Count</strong> title(s) ·
-                    @SizeFormatter.FormatBytes(FilteredTitles.Sum(title => title.SizeBytes))
-                    @if (FilteredTitles.Sum(title => title.SeedingBytes) is > 0 and var seeding)
-                    {
-                        <text> · @SizeFormatter.FormatBytes(seeding) still seeding</text>
-                    }
-                    @if (_pickedTitles.Count > 0)
-                    {
-                        <text> · @_pickedTitles.Count selected (@SizeFormatter.FormatBytes(PickedTitles.Sum(title => title.SizeBytes)))</text>
-                    }
-                </div>
-
-                <div class="toolbar-actions">
-                    <select class="form-select form-select-sm" aria-label="Kind" @bind="_kind">
-                        <option value="">Everything</option>
-                        @foreach (var kind in selected.Titles.Select(title => title.Kind).Distinct())
-                        {
-                            <option value="@kind">@kind</option>
-                        }
-                    </select>
-
-                    @if (_pickedTitles.Count > 0)
-                    {
-                        <select class="form-select form-select-sm" aria-label="Move to" @bind="_moveTo">
-                            <option value="">Move to...</option>
-                            @foreach (var root in TargetRoots)
-                            {
-                                <option value="@root">@root (@SizeFormatter.FormatBytes(_drives.First(drive => drive.Root == root).FreeBytes) free)</option>
-                            }
-                        </select>
-
-                        <button type="button"
-                                class="btn btn-primary btn-sm"
-                                disabled="@(string.IsNullOrEmpty(_moveTo))"
-                                @onclick="MovePicked">
-                            Move (@_pickedTitles.Count)
-                        </button>
-                    }
+                    <strong>@_reviews.Count</strong> title(s), @SizeFormatter.FormatBytes(_reviews.Sum(review => review.Title.SizeBytes))
                 </div>
             </div>
 
-            @if (_moveNote is not null)
+            <div class="table-scroll">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Why</th>
+                            <th class="col-num">Size</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var review in _reviews.Take(_reviewsShown))
+                        {
+                            <tr @key="review.Title.FolderPath">
+                                <td>
+                                    <div class="file-name">@review.Title.Name</div>
+                                    <div class="cell-note">
+                                        @review.Title.Kind · @review.Title.FolderPath.Substring(0, 3)
+                                        @if (review.Watch.AddedUtc is { } added)
+                                        {
+                                            <text> · added @added.ToLocalTime().ToString("d MMM yyyy")</text>
+                                        }
+                                    </div>
+                                </td>
+                                <td>
+                                    @review.Reason
+                                    @if (review.Watch.StartedBy.Count > 0)
+                                    {
+                                        <div class="cell-note">Watched by @string.Join(", ", review.Watch.StartedBy.Distinct())</div>
+                                    }
+                                </td>
+                                <td class="col-num">@SizeFormatter.FormatBytes(review.Title.SizeBytes)</td>
+                                <td>
+                                    @if (review.Title.IsSeeding)
+                                    {
+                                        <span class="cell-note">Seeding - deleting frees nothing</span>
+                                    }
+                                    else if (_confirmDelete == review.Title.FolderPath)
+                                    {
+                                        <div class="d-flex gap-2 flex-wrap">
+                                            <button type="button" class="btn btn-danger btn-sm" disabled="@_deleting" @onclick="() => DeleteAsync(review)">
+                                                @(_deleting ? "Deleting..." : "Delete it")
+                                            </button>
+                                            <button type="button" class="btn btn-secondary btn-sm" disabled="@_deleting" @onclick="() => _confirmDelete = null">Cancel</button>
+                                        </div>
+                                        <div class="cell-note mt-1">
+                                            Removes it from @(review.Title.Kind == StorageKinds.Tv ? "Sonarr" : "Radarr")
+                                            @(review.Watch.SeerrMediaId > 0 ? "and Seerr" : null), and sends the folder to the Recycle Bin.
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div class="d-flex gap-2 flex-wrap">
+                                            <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => _confirmDelete = review.Title.FolderPath">Delete...</button>
+                                            <button type="button" class="btn btn-secondary btn-sm" title="Stop suggesting it. Undo on the Ignored page." @onclick="() => Keep(review)">Keep</button>
+                                        </div>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            @if (_reviews.Count > _reviewsShown)
             {
-                <div class="alert alert-warning">@_moveNote</div>
+                <button type="button" class="btn btn-secondary btn-sm mt-2" @onclick="() => _reviewsShown += 50">Show 50 more</button>
             }
 
+            @if (_deleteMessage is not null)
+            {
+                <div class="alert @(_deleteOk ? "alert-success" : "alert-danger") mt-2">@_deleteMessage</div>
+            }
+        }
+    }
+    else if (SelectedDrive is not null && _drives is not null)
+    {
+        @* ------------------------------------------------ Browse *@
+
+        <div class="toolbar">
+            <div class="toolbar-summary">
+                <select class="form-select form-select-sm d-inline-block w-auto me-2" aria-label="Drive" value="@_selectedRoot" @onchange="args => Browse(args.Value?.ToString() ?? string.Empty)">
+                    @foreach (var drive in _drives ?? [])
+                    {
+                        <option value="@drive.Root">@drive.Root @string.Join(", ", drive.ProfileNames)</option>
+                    }
+                </select>
+                <strong>@FilteredTitles.Count</strong> title(s), @SizeFormatter.FormatBytes(FilteredTitles.Sum(title => title.SizeBytes))
+                @if (FilteredTitles.Sum(title => title.SeedingBytes) is > 0 and var seeding)
+                {
+                    <text> · @SizeFormatter.FormatBytes(seeding) still seeding</text>
+                }
+            </div>
+
+            <div class="toolbar-actions">
+                <select class="form-select form-select-sm" aria-label="Kind" @bind="_kind">
+                    <option value="">Everything</option>
+                    @foreach (var kind in SelectedDrive!.Titles.Select(title => title.Kind).Distinct())
+                    {
+                        <option value="@kind">@kind</option>
+                    }
+                </select>
+            </div>
+        </div>
+
+        @if (_pickedTitles.Count > 0)
+        {
+            <div class="toolbar">
+                <div class="toolbar-summary">
+                    @_pickedTitles.Count selected (@SizeFormatter.FormatBytes(PickedTitles.Sum(title => title.SizeBytes)))
+                </div>
+                <div class="toolbar-actions">
+                    <select class="form-select form-select-sm" aria-label="Move to" @bind="_moveTo">
+                        <option value="">Move to...</option>
+                        @foreach (var root in TargetRoots)
+                        {
+                            <option value="@root">@root (@SizeFormatter.FormatBytes(_drives!.First(drive => drive.Root == root).FreeBytes) free)</option>
+                        }
+                    </select>
+
+                    <button type="button"
+                            class="btn btn-primary btn-sm"
+                            disabled="@(string.IsNullOrEmpty(_moveTo))"
+                            @onclick="MovePicked">
+                        Move (@_pickedTitles.Count)
+                    </button>
+                </div>
+            </div>
+        }
+
+        @if (_moveNote is not null)
+        {
+            <div class="alert alert-warning">@_moveNote</div>
+        }
+
+        @if (SelectedDrive!.Titles.Count == 0)
+        {
+            <EmptyState Icon="search" Text="Nothing measured on this drive yet. Press Scan at the top of the page." />
+        }
+        else
+        {
             <div class="table-scroll">
                 <table class="table">
                     <thead>
                         <tr>
                             <th class="col-check">Select</th>
                             <th>Title</th>
-                            <th>Kind</th>
                             <th class="col-num">Size</th>
                             <th>Watched</th>
-                            <th>Status</th>
+                            <th>Can it move?</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -434,28 +541,26 @@ else
                                                         OnChanged="picked => Toggle(_pickedTitles, title, picked)" />
                                 <td>
                                     <div class="file-name">@title.Name</div>
-                                    <div class="cell-note">@title.FileCount file(s) · last changed @title.LastWriteUtc.ToLocalTime().ToString("d MMM yyyy")</div>
+                                    <div class="cell-note">@title.Kind · added @title.ContentChangedUtc.ToLocalTime().ToString("d MMM yyyy")</div>
                                 </td>
-                                <td>@title.Kind</td>
                                 <td class="col-num">@SizeFormatter.FormatBytes(title.SizeBytes)</td>
                                 <td>@WatchText(title)</td>
                                 <td>
                                     @if (queued)
                                     {
-                                        <span class="status-muted">Queued to move</span>
+                                        <span class="status-muted">Queued</span>
                                     }
                                     else if (title.IsSeeding)
                                     {
-                                        <span class="status-muted">Seeding - can't move</span>
-                                        <div class="cell-note">@SizeFormatter.FormatBytes(title.SeedingBytes) is shared with a torrent</div>
+                                        <span class="status-muted">No, still seeding</span>
                                     }
                                     else if (!title.CanMove)
                                     {
-                                        <span class="status-muted">Only movies and TV can be moved</span>
+                                        <span class="status-muted">No, only movies and TV</span>
                                     }
                                     else
                                     {
-                                        <span class="status-ok">Can move</span>
+                                        <span class="status-ok">Yes</span>
                                     }
 
                                     @if (_shrinkable.TryGetValue(title.FolderPath, out var savings))
@@ -479,18 +584,22 @@ else
             }
         }
     }
-
-    <p class="cell-note mt-4">
-        Titles move one at a time, with a short rest between them. Each file is copied, read back and
-        checked against the original; only then is Radarr or Sonarr given the new folder and the old
-        one sent to the Recycle Bin. If anything fails, the title stays where it was.
-    </p>
 }
 
 @code
 {
+    private const string PlanTab = "plan";
+    private const string BrowseTab = "browse";
+    private const string ReviewTab = "review";
+
+    private string _tab = PlanTab;
+    private bool _showPlanList;
+
     private List<StorageDrive>? _drives;
     private List<StorageMoveSuggestion> _suggestions = [];
+    private List<(StorageTitle Title, string Reason)> _heldBack = [];
+    private int _largestGb;
+    private int _recentDays;
     private List<StoragePlanner.Destination> _destinations = [];
 
     private HashSet<string> _pickedSuggestions = new(StringComparer.OrdinalIgnoreCase);
@@ -609,7 +718,16 @@ else
 
         _destinations = StoragePlanner.Destinations(settings.DriveProfiles);
         _drives = await StorageService.GetDrivesAsync();
-        _suggestions = await StorageService.GetSuggestionsAsync();
+        _suggestions = await StorageService.GetSuggestionsAsync(WatchHistory.Find);
+
+        _largestGb = settings.StorageLargestToMoveGb;
+        _recentDays = settings.StorageRecentDays;
+        _heldBack =
+            StoragePlanner.HeldBack(
+                _drives,
+                WatchHistory.Find,
+                StoragePlanner.LargestToMoveBytes(settings),
+                StoragePlanner.RecentAfterUtc(settings, DateTime.UtcNow));
 
         _unwatchedMonths = settings.StorageUnwatchedMonths;
 
@@ -644,7 +762,7 @@ else
             _selectedRoot =
                 _drives
                     .Where(drive => drive.IsAvailable)
-                    .OrderByDescending(drive => drive.UsedPercent - drive.LimitPercent)
+                    .OrderByDescending(drive => drive.UsedPercent - drive.LimitLinePercent)
                     .FirstOrDefault()?.Root;
         }
     }
@@ -687,6 +805,80 @@ else
                 .Select(suggestion => new StorageMoveRequest(suggestion.Title, suggestion.ToLibraryPath)));
 
         _pickedSuggestions.Clear();
+    }
+
+    private void MoveAllSuggestions()
+    {
+        Mover.Enqueue(
+            _suggestions
+                .Where(suggestion => !IsQueued(suggestion.Title))
+                .Select(suggestion => new StorageMoveRequest(suggestion.Title, suggestion.ToLibraryPath)));
+
+        _pickedSuggestions.Clear();
+    }
+
+    private static string LimitText(StorageDrive drive) =>
+        drive.IsProtected
+            ? $"Protected · moves start at {drive.LimitPercent}%"
+            : $"Overflow · keeps {SizeFormatter.FormatBytes(drive.KeepFreeBytes)} free";
+
+    private static string Css(double value) =>
+        value.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string ShortReason(string reason) =>
+        reason switch
+        {
+            "Still seeding" => "seeding",
+            "Added or changed recently" => "added recently",
+            "Too big to move by itself" => "too big",
+            _ => reason.ToLowerInvariant()
+        };
+
+    // The plan for one full drive, in a sentence.
+    private static string PlanSentence(StorageDrive drive, List<StorageMoveSuggestion> moves)
+    {
+        var where =
+            drive.IsProtected
+                ? $"{drive.Root} is at {drive.UsedPercent:0}%, over its {drive.LimitPercent}% limit."
+                : $"{drive.Root} has {SizeFormatter.FormatBytes(drive.FreeBytes)} free, less than the {SizeFormatter.FormatBytes(drive.KeepFreeBytes)} it keeps free.";
+
+        if (moves.Count == 0)
+        {
+            return where;
+        }
+
+        var moving = moves.Sum(move => move.Title.SizeBytes);
+        var after = drive.TotalBytes <= 0 ? 0 : (drive.UsedBytes - moving) * 100.0 / drive.TotalBytes;
+        var to = string.Join(" and ", moves.Select(move => move.ToRoot).Distinct());
+
+        var result =
+            $"{where} Moving {moves.Count} title(s) ({SizeFormatter.FormatBytes(moving)}) to {to} brings it to about {after:0}%.";
+
+        if (drive.UsedBytes - moving > drive.TargetBytes)
+        {
+            result += " That's as far as it can go with the titles that are allowed to move.";
+        }
+
+        return result;
+    }
+
+    private string NoMovesReason() =>
+        _drives!.Any(drive => drive.IsAvailable && !drive.IsProtected && !drive.IsOverLimit)
+            ? "Nothing on it can move right now: every title is left alone (see below) or too big for the overflow drives' room."
+            : "There's no overflow drive with room. In Settings, leave at least one drive unprotected, or lower what it keeps free.";
+
+    // The service runs as Windows' own account, whose Recycle Bin isn't yours.
+    private static string RecycleBinNote =>
+        string.Equals(Environment.UserName, "SYSTEM", StringComparison.OrdinalIgnoreCase) ||
+        Environment.UserName.EndsWith('$')
+            ? "The old folders are gone from their drives, and the space they took is free again."
+            : "Old folders are in the Recycle Bin. Empty it to get the space back.";
+
+    private void Browse(string root)
+    {
+        SelectDrive(root);
+
+        _tab = BrowseTab;
     }
 
     private void MovePicked()

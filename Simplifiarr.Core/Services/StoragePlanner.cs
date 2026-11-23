@@ -18,27 +18,62 @@ public static class StoragePlanner
         string Kind,
         string LibraryPath);
 
+    private const long Gb = 1024L * 1024 * 1024;
+
+    /// <summary>Titles added or changed after this are left where they are.</summary>
+    public static DateTime RecentAfterUtc(SimplifiarrSettings settings, DateTime nowUtc) =>
+        settings.StorageRecentDays <= 0 ? DateTime.MaxValue : nowUtc.AddDays(-settings.StorageRecentDays);
+
+    /// <summary>
+    /// Added to Jellyfin, or its video written, after the cutoff. New
+    /// artwork or an .nfo doesn't count.
+    /// </summary>
+    public static bool IsRecent(StorageTitle title, WatchRecord? watch, DateTime recentAfterUtc) =>
+        title.ContentChangedUtc > recentAfterUtc ||
+        watch?.AddedUtc > recentAfterUtc;
+
+    /// <summary>Titles bigger than this are left to move by hand.</summary>
+    public static long LargestToMoveBytes(SimplifiarrSettings settings) =>
+        settings.StorageLargestToMoveGb <= 0 ? long.MaxValue : settings.StorageLargestToMoveGb * Gb;
+
+    /// <summary>
+    /// Brings every drive that is over its limit back to its target.
+    /// Protected drives give titles and never take any; each title goes to
+    /// the overflow drive with the most free space that still keeps its
+    /// own free space afterwards. Least watched titles go first, then the
+    /// smallest; titles over <paramref name="largestBytes"/> are left alone.
+    /// </summary>
     public static List<StorageMoveSuggestion> Suggest(
         IReadOnlyList<StorageDrive> drives,
-        IReadOnlyList<Destination> destinations)
+        IReadOnlyList<Destination> destinations,
+        Func<StorageTitle, WatchRecord?>? watch = null,
+        long largestBytes = long.MaxValue,
+        DateTime? recentAfterUtc = null)
     {
+        var recent = recentAfterUtc ?? DateTime.MaxValue;
+
         var suggestions = new List<StorageMoveSuggestion>();
 
         // Space each drive would have once the suggestions so far are done.
         var used =
             drives.ToDictionary(drive => drive.Root, drive => drive.UsedBytes, StringComparer.OrdinalIgnoreCase);
 
-        foreach (var drive in drives.Where(drive => drive.IsAvailable).OrderByDescending(drive => drive.OverLimitBytes))
+        foreach (var drive in drives.Where(drive => drive.IsAvailable && drive.IsOverLimit).OrderByDescending(drive => drive.ToFreeBytes))
         {
-            var needed = used[drive.Root] - drive.LimitBytes;
+            var needed = used[drive.Root] - drive.TargetBytes;
 
             if (needed <= 0)
             {
                 continue;
             }
 
-            // Largest first: the fewest moves that free enough.
-            foreach (var title in drive.Titles.Where(title => title.CanMove).OrderByDescending(title => title.SizeBytes))
+            var movable =
+                drive.Titles.Where(title =>
+                    title.CanMove &&
+                    title.SizeBytes <= largestBytes &&
+                    !IsRecent(title, watch?.Invoke(title), recent));
+
+            foreach (var title in MoveOrder(movable, watch))
             {
                 if (needed <= 0)
                 {
@@ -54,11 +89,11 @@ public static class StoragePlanner
                             Destination: destination,
                             Drive: drives.FirstOrDefault(other =>
                                 string.Equals(other.Root, destination.Root, StringComparison.OrdinalIgnoreCase))))
-                        .Where(pair => pair.Drive is { IsAvailable: true })
-                        // It must still be under its own limit afterwards.
-                        .Select(pair => (pair.Destination, Room: pair.Drive!.LimitBytes - used[pair.Drive.Root]))
-                        .Where(pair => pair.Room >= title.SizeBytes)
-                        .OrderByDescending(pair => pair.Room)
+                        .Where(pair => pair.Drive is { IsAvailable: true, IsProtected: false })
+                        // It must still keep its own free space afterwards.
+                        .Where(pair => pair.Drive!.LimitBytes - used[pair.Drive.Root] >= title.SizeBytes)
+                        // The most free space in bytes, not the lowest percentage.
+                        .OrderByDescending(pair => pair.Drive!.TotalBytes - used[pair.Drive.Root])
                         .Select(pair => pair.Destination)
                         .FirstOrDefault();
 
@@ -83,6 +118,46 @@ public static class StoragePlanner
 
         return suggestions;
     }
+
+    /// <summary>
+    /// The order titles leave a full drive: favorites last, then fewest
+    /// people watching, longest since anyone played it, and smallest.
+    /// </summary>
+    public static List<StorageTitle> MoveOrder(IEnumerable<StorageTitle> titles, Func<StorageTitle, WatchRecord?>? watch) =>
+        titles
+            .Select(title => (Title: title, Watch: watch?.Invoke(title)))
+            .OrderBy(entry => entry.Watch is { FavoriteOf.Count: > 0 } ? 1 : 0)
+            .ThenBy(entry => entry.Watch?.StartedBy.Distinct(StringComparer.OrdinalIgnoreCase).Count() ?? 0)
+            .ThenBy(entry => entry.Watch?.LastWatchedUtc ?? DateTime.MinValue)
+            .ThenBy(entry => entry.Title.SizeBytes)
+            .Select(entry => entry.Title)
+            .ToList();
+
+    /// <summary>
+    /// Movies and shows on full drives that are held back from suggestions,
+    /// and why: still seeding, added recently, or too big.
+    /// </summary>
+    public static List<(StorageTitle Title, string Reason)> HeldBack(
+        IEnumerable<StorageDrive> drives,
+        Func<StorageTitle, WatchRecord?>? watch,
+        long largestBytes,
+        DateTime recentAfterUtc) =>
+        drives
+            .Where(drive => drive.IsAvailable && drive.IsOverLimit)
+            .SelectMany(drive => drive.Titles)
+            .Where(title => title.Kind is StorageKinds.Movies or StorageKinds.Tv)
+            .Select(title => (
+                Title: title,
+                Reason:
+                    title.IsSeeding ? "Still seeding"
+                    : IsRecent(title, watch?.Invoke(title), recentAfterUtc) ? "Added or changed recently"
+                    : title.SizeBytes > largestBytes ? "Too big to move by itself"
+                    : null))
+            .Where(entry => entry.Reason is not null)
+            .Select(entry => (entry.Title, entry.Reason!))
+            .OrderBy(entry => entry.Item2)
+            .ThenByDescending(entry => entry.Title.SizeBytes)
+            .ToList();
 
     /// <summary>
     /// The library folders, by kind, that titles can be moved into.

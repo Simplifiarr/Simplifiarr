@@ -294,25 +294,81 @@ else
                             </div>
                         </div>
 
-                        <div class="row g-3 mt-1">
-                            <div class="col-md-6">
-                                <label class="form-label" for="@($"drive-full-{index}")">Count this drive as full above</label>
-                                <div class="d-flex align-items-center gap-2">
-                                    <input id="@($"drive-full-{index}")"
-                                           class="form-control"
-                                           type="number"
-                                           min="10"
-                                           max="100"
-                                           style="max-width: 7rem"
-                                           placeholder="@_settings.StorageFullAtPercent"
-                                           @bind="profile.FullAtPercent" />
-                                    <span>% used</span>
-                                </div>
-                                <div class="cell-note">
-                                    Storage suggests moves to keep it under this. Blank: the default,
-                                    @(_settings.StorageFullAtPercent)%, set on the Scanning tab under Storage.
-                                </div>
+                        <div class="form-check mt-3">
+                            <input class="form-check-input"
+                                   type="checkbox"
+                                   id="@($"drive-protected-{index}")"
+                                   @bind="profile.IsProtected" />
+                            <label class="form-check-label" for="@($"drive-protected-{index}")">
+                                Protected: keep this drive clear
+                            </label>
+                            <div class="cell-note">
+                                Titles move off a protected drive once it gets too full, and nothing is moved onto it.
+                                Every other drive is an overflow drive: it takes what full drives send it.
                             </div>
+                        </div>
+
+                        <div class="row g-3 mt-1">
+                            @if (profile.IsProtected)
+                            {
+                                <div class="col-md-6">
+                                    <label class="form-label" for="@($"drive-full-{index}")">Start moving titles off above</label>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <input id="@($"drive-full-{index}")"
+                                               class="form-control"
+                                               type="number"
+                                               min="10"
+                                               max="100"
+                                               style="max-width: 7rem"
+                                               placeholder="@_settings.StorageFullAtPercent"
+                                               @bind="profile.FullAtPercent" />
+                                        <span>% used</span>
+                                    </div>
+                                    <div class="cell-note">
+                                        Blank: the default, @(_settings.StorageFullAtPercent)%, set on the Scanning tab under Storage.
+                                    </div>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <label class="form-label" for="@($"drive-back-{index}")">And bring it back down to</label>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <input id="@($"drive-back-{index}")"
+                                               class="form-control"
+                                               type="number"
+                                               min="5"
+                                               max="100"
+                                               style="max-width: 7rem"
+                                               placeholder="@((profile.FullAtPercent ?? _settings.StorageFullAtPercent) - 10)"
+                                               @bind="profile.BringBackToPercent" />
+                                        <span>% used</span>
+                                    </div>
+                                    <div class="cell-note">
+                                        Going lower than the start means it doesn't creep back over every few days.
+                                        Blank: 10 points under the start.
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="col-md-6">
+                                    <label class="form-label" for="@($"drive-keep-free-{index}")">Always leave free</label>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <input id="@($"drive-keep-free-{index}")"
+                                               class="form-control"
+                                               type="number"
+                                               min="0"
+                                               style="max-width: 7rem"
+                                               placeholder="@TenthOfDriveGb(profile)"
+                                               @bind="profile.KeepFreeGb" />
+                                        <span>GB</span>
+                                    </div>
+                                    <div class="cell-note">
+                                        Nothing is moved onto it past this, and if it drops below, titles move off it.
+                                        Blank: a tenth of the drive@(TenthOfDriveGb(profile) is { } tenth ? $", about {tenth} GB" : null),
+                                        the usual advice for keeping a drive quick.
+                                    </div>
+                                </div>
+                            }
                         </div>
 
                         <div class="form-check mt-2">
@@ -644,7 +700,7 @@ else
 
             <div style="padding: 0 1.1rem 1.1rem">
                 <div style="max-width: 32rem">
-                    <label class="form-label" for="storage-full">Count a drive as full above</label>
+                    <label class="form-label" for="storage-full">Protected drives start moving titles off above</label>
                     <div class="d-flex align-items-center gap-2">
                         <input id="storage-full"
                                class="form-control"
@@ -656,8 +712,56 @@ else
                         <span>% used</span>
                     </div>
                     <div class="cell-note">
-                        Storage suggests moves to keep each drive under this. A drive can have its own
-                        limit on the Drives tab.
+                        Unless a drive has its own. Which drives are protected, and how much an overflow
+                        drive keeps free, is set for each drive on the Drives tab.
+                    </div>
+                </div>
+
+                <div class="mt-3" style="max-width: 32rem">
+                    <label class="form-label" for="storage-largest">Leave titles bigger than this for me to move</label>
+                    <div class="d-flex align-items-center gap-2">
+                        <input id="storage-largest"
+                               class="form-control"
+                               type="number"
+                               min="0"
+                               style="max-width: 7rem"
+                               @bind="_settings.StorageLargestToMoveGb" />
+                        <span>GB</span>
+                    </div>
+                    <div class="cell-note">
+                        Big titles take hours to copy, and a smaller release from Size Reduction often frees
+                        more. They're listed on Storage for you to decide. 0: no limit.
+                    </div>
+                </div>
+
+                <div class="mt-3" style="max-width: 32rem">
+                    <label class="form-label" for="storage-recent">Leave titles added or changed in the last</label>
+                    <div class="d-flex align-items-center gap-2">
+                        <input id="storage-recent"
+                               class="form-control"
+                               type="number"
+                               min="0"
+                               style="max-width: 7rem"
+                               @bind="_settings.StorageRecentDays" />
+                        <span>days</span>
+                    </div>
+                    <div class="cell-note">
+                        A show still getting episodes, or a new movie, is what people are watching. 0: no wait.
+                    </div>
+                </div>
+
+                <div class="form-check mt-3" style="max-width: 32rem">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           id="storage-auto-move"
+                           @bind="_settings.StorageAutoMove" />
+                    <label class="form-check-label" for="storage-auto-move">
+                        Move titles off full drives by itself after each automatic scan
+                    </label>
+                    <div class="cell-note">
+                        Queues the same moves Storage suggests, as if you had pressed Move all. Each file is
+                        still copied and checked before the old folder goes to the Recycle Bin. Try Move all
+                        by hand a few times before turning this on.
                     </div>
                 </div>
 
@@ -835,6 +939,31 @@ else
 
 @code
 {
+    // A tenth of the drive the entry is on, in GB, for the "leave free"
+    // placeholder; null when the drive can't be read.
+    private static int? TenthOfDriveGb(DriveProfile profile)
+    {
+        var anyPath =
+            new[] { profile.DriveRoot, profile.MovieLibraryPath, profile.TvLibraryPath }
+                .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path));
+
+        if (anyPath is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var info = new DriveInfo(StoragePlanner.RootOf(anyPath));
+
+            return info.IsReady ? (int)(info.TotalSize / 10 / (1024L * 1024 * 1024)) : null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
     private const string DrivesTab = "drives";
     private const string ConnectionsTab = "connections";
     private const string StorageTab = "storage";

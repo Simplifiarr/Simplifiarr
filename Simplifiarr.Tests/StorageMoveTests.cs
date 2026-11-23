@@ -212,6 +212,57 @@ public class StorageMoveTests : TempFolderTest
     }
 
     [TestMethod]
+    public async Task A_title_someone_is_watching_in_Jellyfin_is_left_alone()
+    {
+        var title = Title("Watching Now", ("film.mkv", "film"));
+
+        _mover.PlayingPaths = () => Task.FromResult<IReadOnlyList<string>?>([Path.Combine(title.FolderPath, "film.mkv")]);
+
+        var result = await _mover.MoveAsync(new StorageMoveRequest(title, _to));
+
+        Assert.IsFalse(result.Succeeded);
+        StringAssert.Contains(result.Message, "watching it");
+        Assert.IsTrue(File.Exists(Path.Combine(title.FolderPath, "film.mkv")));
+        Assert.IsFalse(Directory.Exists(Path.Combine(_to, "Watching Now")));
+    }
+
+    [TestMethod]
+    public async Task A_title_with_a_file_open_in_another_program_is_left_alone()
+    {
+        var title = Title("Open Elsewhere", ("film.mkv", "film"));
+
+        // Like a player reading it.
+        using (new FileStream(Path.Combine(title.FolderPath, "film.mkv"), FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            var result = await _mover.MoveAsync(new StorageMoveRequest(title, _to));
+
+            Assert.IsFalse(result.Succeeded);
+            StringAssert.Contains(result.Message, "open in another program");
+        }
+
+        Assert.IsTrue(File.Exists(Path.Combine(title.FolderPath, "film.mkv")));
+        Assert.IsFalse(Directory.Exists(Path.Combine(_to, "Open Elsewhere")));
+    }
+
+    [TestMethod]
+    public async Task Playback_that_starts_during_the_copy_stops_the_move_and_removes_the_copy()
+    {
+        var title = Title("Started Later", ("film.mkv", "film"));
+        var asked = 0;
+
+        // Nobody watching at first; someone is by the time the copy is done.
+        _mover.PlayingPaths = () =>
+            Task.FromResult<IReadOnlyList<string>?>(++asked == 1 ? [] : [Path.Combine(title.FolderPath, "film.mkv")]);
+
+        var result = await _mover.MoveAsync(new StorageMoveRequest(title, _to));
+
+        Assert.IsFalse(result.Succeeded);
+        StringAssert.Contains(result.Message, "while it was copying");
+        Assert.IsTrue(File.Exists(Path.Combine(title.FolderPath, "film.mkv")));
+        Assert.IsFalse(Directory.Exists(Path.Combine(_to, "Started Later")));
+    }
+
+    [TestMethod]
     public async Task A_title_that_started_seeding_is_left_alone()
     {
         if (!NativeHardlinks.IsSupported)

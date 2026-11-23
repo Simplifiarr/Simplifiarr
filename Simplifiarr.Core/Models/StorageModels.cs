@@ -30,6 +30,17 @@ public sealed class StorageTitle
     /// <summary>When the newest file in it was written.</summary>
     public DateTime LastWriteUtc { get; set; }
 
+    /// <summary>
+    /// When the newest video in it was written. New artwork, .nfo files
+    /// and subtitles don't make an old movie new. Unset in measurements
+    /// made before this was kept, or when there is no video.
+    /// </summary>
+    public DateTime LastVideoWriteUtc { get; set; }
+
+    /// <summary>When its content last changed: the newest video, or any file when there's none.</summary>
+    public DateTime ContentChangedUtc =>
+        LastVideoWriteUtc > DateTime.MinValue ? LastVideoWriteUtc : LastWriteUtc;
+
     public bool IsSeeding => SeedingBytes > 0;
 
     /// <summary>Only movies and TV: Radarr and Sonarr are told the new place.</summary>
@@ -67,15 +78,47 @@ public sealed class StorageDrive
     public double UsedPercent =>
         TotalBytes <= 0 ? 0 : UsedBytes * 100.0 / TotalBytes;
 
-    /// <summary>Above this used share the drive counts as getting full.</summary>
+    /// <summary>
+    /// Protected drives are kept clear and never take moves; the others
+    /// are overflow drives.
+    /// </summary>
+    public bool IsProtected { get; set; }
+
+    /// <summary>A protected drive starts moving titles off above this used share.</summary>
     public int LimitPercent { get; set; }
 
-    public long LimitBytes => (long)(TotalBytes * (LimitPercent / 100.0));
+    /// <summary>A protected drive is brought back down to this used share.</summary>
+    public int BringBackToPercent { get; set; }
 
-    /// <summary>How much has to go to get back under the limit; 0 when under.</summary>
+    /// <summary>What an overflow drive was set to keep free; null for a tenth of it.</summary>
+    public long? KeepFreeSetBytes { get; set; }
+
+    /// <summary>What an overflow drive always keeps free.</summary>
+    public long KeepFreeBytes => KeepFreeSetBytes ?? TotalBytes / 10;
+
+    /// <summary>Used space above which titles start moving off.</summary>
+    public long LimitBytes =>
+        IsProtected
+            ? (long)(TotalBytes * (LimitPercent / 100.0))
+            : Math.Max(0, TotalBytes - KeepFreeBytes);
+
+    /// <summary>Used space a drive is brought back to once it is over its limit.</summary>
+    public long TargetBytes =>
+        IsProtected
+            ? Math.Min(LimitBytes, (long)(TotalBytes * (BringBackToPercent / 100.0)))
+            : LimitBytes;
+
+    /// <summary>Where the limit sits, as a used share, for the bar.</summary>
+    public double LimitLinePercent =>
+        TotalBytes <= 0 ? 0 : LimitBytes * 100.0 / TotalBytes;
+
+    /// <summary>How far over its limit it is; 0 when under.</summary>
     public long OverLimitBytes => Math.Max(0, UsedBytes - LimitBytes);
 
     public bool IsOverLimit => OverLimitBytes > 0;
+
+    /// <summary>How much has to move to bring it back to its target; 0 when under its limit.</summary>
+    public long ToFreeBytes => IsOverLimit ? Math.Max(0, UsedBytes - TargetBytes) : 0;
 
     public bool IsAvailable => TotalBytes > 0;
 

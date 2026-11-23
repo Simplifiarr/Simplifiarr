@@ -19,13 +19,25 @@ public class StoragePlannerTests
             SeedingBytes = seedingGb * Gb
         };
 
-    private static StorageDrive Drive(string root, long totalGb, long usedGb, int limit, params StorageTitle[] titles) =>
+    private static StorageDrive Protected(string root, long totalGb, long usedGb, int start, int back, params StorageTitle[] titles) =>
+        new()
+        {
+            Root = root,
+            IsProtected = true,
+            TotalBytes = totalGb * Gb,
+            FreeBytes = (totalGb - usedGb) * Gb,
+            LimitPercent = start,
+            BringBackToPercent = back,
+            Titles = titles.ToList()
+        };
+
+    private static StorageDrive Overflow(string root, long totalGb, long usedGb, long? keepFreeGb = null, params StorageTitle[] titles) =>
         new()
         {
             Root = root,
             TotalBytes = totalGb * Gb,
             FreeBytes = (totalGb - usedGb) * Gb,
-            LimitPercent = limit,
+            KeepFreeSetBytes = keepFreeGb * Gb,
             Titles = titles.ToList()
         };
 
@@ -35,37 +47,189 @@ public class StoragePlannerTests
         new(@"C:\", "C", StorageKinds.Tv, @"C:\TV"),
         new(@"O:\", "O", StorageKinds.Movies, @"O:\Movies"),
         new(@"O:\", "O", StorageKinds.Tv, @"O:\TV"),
+        new(@"F:\", "F", StorageKinds.Movies, @"F:\Movies"),
         new(@"H:\", "H", StorageKinds.Movies, @"H:\Movies")
     ];
 
     [TestMethod]
-    public void A_drive_under_its_limit_gets_no_suggestions()
+    public void A_protected_drive_under_its_start_gets_no_suggestions()
     {
         var drives = new List<StorageDrive>
         {
-            Drive(@"C:\", 1000, 700, 75, Title("Night Shift", 50)),
-            Drive(@"O:\", 1000, 100, 90)
+            Protected(@"C:\", 1000, 790, 80, 60, Title("Night Shift", 50)),
+            Overflow(@"O:\", 1000, 100)
         };
 
         Assert.IsEmpty(StoragePlanner.Suggest(drives, Everywhere));
     }
 
     [TestMethod]
-    public void The_fewest_largest_titles_go_to_the_drive_with_most_room()
+    public void Over_its_start_a_protected_drive_is_brought_back_to_its_target()
     {
-        // 800 used of a 75% limit (750): 50 GB has to go.
+        // 850 used: over 80%, so down to 60% (600): 250 GB has to go.
         var drives = new List<StorageDrive>
         {
-            Drive(@"C:\", 1000, 800, 75, Title("Small", 10), Title("Big", 60), Title("Medium", 30)),
-            Drive(@"O:\", 1000, 300, 90),
-            Drive(@"H:\", 1000, 800, 90)
+            Protected(@"C:\", 1000, 850, 80, 60,
+                Title("A", 100), Title("B", 100), Title("C", 60), Title("D", 30), Title("E", 10)),
+            Overflow(@"O:\", 4000, 1000)
         };
 
-        var suggestion = StoragePlanner.Suggest(drives, Everywhere).Single();
+        var suggestions = StoragePlanner.Suggest(drives, Everywhere);
 
-        Assert.AreEqual("Big", suggestion.Title.Name);
-        Assert.AreEqual(@"O:\", suggestion.ToRoot);
-        Assert.AreEqual(@"O:\Movies", suggestion.ToLibraryPath);
+        // Smallest first while nobody's watch history says otherwise.
+        CollectionAssert.AreEqual(
+            new[] { "E", "D", "C", "A", "B" },
+            suggestions.Select(suggestion => suggestion.Title.Name).ToArray());
+        Assert.IsGreaterThanOrEqualTo(250 * Gb, suggestions.Sum(suggestion => suggestion.Title.SizeBytes));
+    }
+
+    [TestMethod]
+    public void Titles_go_to_the_overflow_drive_with_the_most_free_space_not_the_lowest_percentage()
+    {
+        // O is 80% full but has 2 TB free; F is 60% full with 400 GB free.
+        var drives = new List<StorageDrive>
+        {
+            Protected(@"C:\", 1000, 850, 80, 60, Title("Night Shift", 40)),
+            Overflow(@"O:\", 10000, 8000, keepFreeGb: 100),
+            Overflow(@"F:\", 1000, 600, keepFreeGb: 100)
+        };
+
+        Assert.AreEqual(@"O:\", StoragePlanner.Suggest(drives, Everywhere).First().ToRoot);
+    }
+
+    [TestMethod]
+    public void Nothing_is_ever_moved_onto_a_protected_drive()
+    {
+        var drives = new List<StorageDrive>
+        {
+            Protected(@"C:\", 1000, 900, 80, 60, Title("Night Shift", 40)),
+            Protected(@"H:\", 10000, 100, 80, 60),
+            Overflow(@"O:\", 1000, 500)
+        };
+
+        Assert.AreEqual(@"O:\", StoragePlanner.Suggest(drives, Everywhere).Single().ToRoot);
+    }
+
+    [TestMethod]
+    public void An_overflow_drive_always_keeps_its_free_space()
+    {
+        // O keeps 100 GB free and has 150 GB free: 50 GB of room.
+        var drives = new List<StorageDrive>
+        {
+            Protected(@"C:\", 1000, 900, 80, 60, Title("Huge", 70), Title("Fits", 40), Title("AlsoFits", 30)),
+            Overflow(@"O:\", 1000, 850, keepFreeGb: 100)
+        };
+
+        var suggestions = StoragePlanner.Suggest(drives, Everywhere);
+
+        // AlsoFits (30) goes first, then Fits (40) no longer fits, nor Huge.
+        Assert.AreEqual("AlsoFits", suggestions.Single().Title.Name);
+    }
+
+    [TestMethod]
+    public void An_overflow_drive_keeps_a_tenth_free_when_not_set()
+    {
+        var drive = Overflow(@"O:\", 1000, 950);
+
+        Assert.AreEqual(100 * Gb, drive.KeepFreeBytes);
+        Assert.IsTrue(drive.IsOverLimit);
+        Assert.AreEqual(50 * Gb, drive.ToFreeBytes);
+    }
+
+    [TestMethod]
+    public void The_least_watched_titles_leave_first_and_favorites_last()
+    {
+        var popular = Title("Popular", 10);
+        var forgotten = Title("Forgotten", 30);
+        var favorite = Title("Favorite", 5);
+        var unwatched = Title("Unwatched", 20);
+
+        var watch = new Dictionary<StorageTitle, WatchRecord>
+        {
+            [popular] = new() { StartedBy = ["a", "b", "c"], LastWatchedUtc = new DateTime(2026, 11, 1) },
+            [forgotten] = new() { StartedBy = ["a"], LastWatchedUtc = new DateTime(2025, 1, 1) },
+            [favorite] = new() { FavoriteOf = ["a"] }
+        };
+
+        var order =
+            StoragePlanner.MoveOrder([popular, forgotten, favorite, unwatched], title => watch.GetValueOrDefault(title));
+
+        CollectionAssert.AreEqual(
+            new[] { "Unwatched", "Forgotten", "Popular", "Favorite" },
+            order.Select(title => title.Name).ToArray());
+    }
+
+    [TestMethod]
+    public void Titles_over_the_largest_size_are_left_for_you()
+    {
+        var drives = new List<StorageDrive>
+        {
+            Protected(@"C:\", 1000, 900, 80, 60, Title("Giant", 150), Title("Small", 20)),
+            Overflow(@"O:\", 4000, 100)
+        };
+
+        var suggestions = StoragePlanner.Suggest(drives, Everywhere, largestBytes: 100 * Gb);
+
+        Assert.AreEqual("Small", suggestions.Single().Title.Name);
+        var held = StoragePlanner.HeldBack(drives, null, 100 * Gb, DateTime.MaxValue).Single();
+
+        Assert.AreEqual("Giant", held.Title.Name);
+        Assert.AreEqual("Too big to move by itself", held.Reason);
+    }
+
+    [TestMethod]
+    public void Titles_added_or_changed_recently_stay_put()
+    {
+        var now = new DateTime(2026, 11, 23, 12, 0, 0, DateTimeKind.Utc);
+        var cutoff = now.AddDays(-14);
+
+        var newEpisode = Title("Still Airing", 10, StorageKinds.Tv);
+        newEpisode.LastWriteUtc = now.AddDays(-2);
+
+        var justAdded = Title("Just Added", 10);
+        justAdded.LastWriteUtc = now.AddYears(-3);
+
+        var old = Title("Old", 10);
+        old.LastWriteUtc = now.AddYears(-1);
+
+        var drives = new List<StorageDrive>
+        {
+            Protected(@"C:\", 1000, 900, 80, 60, newEpisode, justAdded, old),
+            Overflow(@"O:\", 4000, 100)
+        };
+
+        // Jellyfin added it last week, from a file written long ago.
+        WatchRecord? Watch(StorageTitle title) =>
+            title == justAdded ? new WatchRecord { AddedUtc = now.AddDays(-7) } : null;
+
+        var suggestions = StoragePlanner.Suggest(drives, Everywhere, Watch, recentAfterUtc: cutoff);
+
+        Assert.AreEqual("Old", suggestions.Single().Title.Name);
+        CollectionAssert.AreEquivalent(
+            new[] { "Still Airing", "Just Added" },
+            StoragePlanner.HeldBack(drives, Watch, long.MaxValue, cutoff).Select(entry => entry.Title.Name).ToArray());
+    }
+
+    [TestMethod]
+    public void New_artwork_or_an_nfo_doesnt_make_an_old_movie_recent()
+    {
+        var library = Path.Combine(Path.GetTempPath(), "storage-recent");
+        var old = new DateTime(2026, 8, 22, 0, 0, 0, DateTimeKind.Utc);
+        var today = new DateTime(2026, 11, 23, 0, 0, 0, DateTimeKind.Utc);
+
+        var files = new List<FileRecord>
+        {
+            new() { FullPath = Path.Combine(library, "Replicants (1982)", "film.mkv"), SizeBytes = 100, LastModifiedUtc = old },
+            new() { FullPath = Path.Combine(library, "Replicants (1982)", "poster.jpg"), SizeBytes = 5, LastModifiedUtc = today },
+            new() { FullPath = Path.Combine(library, "Replicants (1982)", "movie.nfo"), SizeBytes = 5, LastModifiedUtc = today },
+            new() { FullPath = Path.Combine(library, "New Film (2026)", "film.mkv"), SizeBytes = 100, LastModifiedUtc = today }
+        };
+
+        var titles = StorageService.Measure("D", StorageKinds.Movies, library, files, []);
+        var cutoff = today.AddDays(-14);
+
+        Assert.IsFalse(StoragePlanner.IsRecent(titles.Single(title => title.Name == "Replicants (1982)"), null, cutoff));
+        Assert.IsTrue(StoragePlanner.IsRecent(titles.Single(title => title.Name == "New Film (2026)"), null, cutoff));
     }
 
     [TestMethod]
@@ -73,11 +237,11 @@ public class StoragePlannerTests
     {
         var drives = new List<StorageDrive>
         {
-            Drive(@"C:\", 1000, 900, 75,
+            Protected(@"C:\", 1000, 900, 75, 65,
                 Title("Seeding", 200, seedingGb: 150),
                 Title("A Book", 200, StorageKinds.Books),
                 Title("Movable", 20)),
-            Drive(@"O:\", 1000, 100, 90)
+            Overflow(@"O:\", 1000, 100)
         };
 
         var suggestions = StoragePlanner.Suggest(drives, Everywhere);
@@ -86,30 +250,13 @@ public class StoragePlannerTests
     }
 
     [TestMethod]
-    public void A_move_never_pushes_the_other_drive_over_its_own_limit()
-    {
-        var drives = new List<StorageDrive>
-        {
-            Drive(@"C:\", 1000, 800, 75, Title("Huge", 100), Title("Fits", 40), Title("AlsoFits", 30)),
-            Drive(@"O:\", 1000, 850, 90),
-            Drive(@"H:\", 1000, 900, 90)
-        };
-
-        var suggestions = StoragePlanner.Suggest(drives, Everywhere);
-
-        // O has 50 GB of room under its limit: Huge doesn't fit, Fits does,
-        // and then AlsoFits no longer does.
-        Assert.AreEqual("Fits", suggestions.Single().Title.Name);
-    }
-
-    [TestMethod]
     public void TV_only_goes_to_a_drive_with_a_TV_library()
     {
         var drives = new List<StorageDrive>
         {
-            Drive(@"C:\", 1000, 800, 75, Title("Harbour", 80, StorageKinds.Tv)),
-            Drive(@"H:\", 1000, 100, 90),
-            Drive(@"O:\", 1000, 600, 90)
+            Protected(@"C:\", 1000, 800, 75, 65, Title("Harbour", 80, StorageKinds.Tv)),
+            Overflow(@"H:\", 1000, 100),
+            Overflow(@"O:\", 1000, 600)
         };
 
         Assert.AreEqual(@"O:\", StoragePlanner.Suggest(drives, Everywhere).Single().ToRoot);

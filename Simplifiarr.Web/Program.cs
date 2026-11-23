@@ -83,6 +83,7 @@ builder.Services.AddSingleton<IDownloadCleanupService, DownloadCleanupService>()
 builder.Services.AddSingleton<ISeedMoveService, SeedMoveService>();
 builder.Services.AddSingleton<IStorageService, StorageService>();
 builder.Services.AddHttpClient<IArrPathService, ArrPathService>();
+builder.Services.AddTransient<ISeasonCleanupService, SeasonCleanupService>();
 builder.Services.AddHttpClient<ISeerrClient, SeerrClient>();
 builder.Services.AddSingleton<IWatchHistoryService, WatchHistoryService>();
 builder.Services.AddSingleton<ISizeReductionDownloadService, SizeReductionDownloadService>();
@@ -95,7 +96,8 @@ builder.Services.AddSingleton<IStorageMoveService>(services => new StorageMoveSe
     services.GetRequiredService<IStorageService>(),
     services.GetRequiredService<IHistoryService>(),
     services.GetRequiredService<IScanCoordinator>(),
-    services.GetRequiredService<ISeerrClient>()));
+    services.GetRequiredService<ISeerrClient>(),
+    services.GetRequiredService<IJellyfinClient>()));
 builder.Services.AddSingleton<IArrNamingService, ArrNamingService>();
 builder.Services.AddSingleton<ITorrentPieceVerificationService, TorrentPieceVerificationService>();
 builder.Services.AddSingleton<ITorrentReconstructionService, TorrentReconstructionService>();

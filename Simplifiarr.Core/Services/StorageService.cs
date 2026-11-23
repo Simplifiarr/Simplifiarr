@@ -19,8 +19,11 @@ public interface IStorageService
     /// </summary>
     Task<List<StorageDrive>> GetDrivesAsync();
 
-    /// <summary>What to move where to bring full drives under their limit.</summary>
-    Task<List<StorageMoveSuggestion>> GetSuggestionsAsync();
+    /// <summary>
+    /// What to move where to bring full drives back down, least watched
+    /// and smallest first. <paramref name="watch"/> says who watched a title.
+    /// </summary>
+    Task<List<StorageMoveSuggestion>> GetSuggestionsAsync(Func<StorageTitle, WatchRecord?>? watch = null);
 
     /// <summary>Drops a title that has been moved or deleted until the next Scan.</summary>
     void Forget(StorageTitle title);
@@ -31,6 +34,11 @@ public class StorageService : IStorageService
     // Small files (subtitles, artwork) can't be seeding anything worth
     // freeing, and asking Windows about each one would slow Scan down.
     private const long SmallestCheckedForSeedingBytes = 50L * 1024 * 1024;
+
+    private const long Gb = 1024L * 1024 * 1024;
+
+    private static readonly HashSet<string> VideoExtensions =
+        new([".mkv", ".mp4", ".m4v", ".avi", ".ts", ".m2ts", ".mov", ".wmv", ".webm", ".mpg", ".mpeg"], StringComparer.OrdinalIgnoreCase);
 
     private readonly ISettingsService _settings;
     private readonly IFileInventoryService _inventory;
@@ -121,6 +129,12 @@ public class StorageService : IStorageService
                 SizeBytes = group.Sum(file => file.SizeBytes),
                 FileCount = group.Count(),
                 LastWriteUtc = group.Max(file => file.LastModifiedUtc),
+                LastVideoWriteUtc =
+                    group
+                        .Where(file => VideoExtensions.Contains(Path.GetExtension(file.FullPath)))
+                        .Select(file => file.LastModifiedUtc)
+                        .DefaultIfEmpty(DateTime.MinValue)
+                        .Max(),
                 SeedingBytes =
                     group
                         .Where(file => file.SizeBytes >= SmallestCheckedForSeedingBytes)
@@ -169,16 +183,29 @@ public class StorageService : IStorageService
                 continue;
             }
 
+            var limit =
+                Math.Clamp(
+                    group.Select(profile => profile.FullAtPercent).FirstOrDefault(value => value.HasValue)
+                        ?? settings.StorageFullAtPercent,
+                    10,
+                    100);
+
             var drive = new StorageDrive
             {
                 Root = group.Key,
                 ProfileNames = group.Select(profile => profile.Name).ToList(),
-                LimitPercent =
+                IsProtected = group.Any(profile => profile.IsProtected),
+                LimitPercent = limit,
+                BringBackToPercent =
                     Math.Clamp(
-                        group.Select(profile => profile.FullAtPercent).FirstOrDefault(value => value.HasValue)
-                            ?? settings.StorageFullAtPercent,
-                        10,
-                        100),
+                        group.Select(profile => profile.BringBackToPercent).FirstOrDefault(value => value.HasValue)
+                            ?? limit - 10,
+                        5,
+                        limit),
+                KeepFreeSetBytes =
+                    group.Select(profile => profile.KeepFreeGb).FirstOrDefault(value => value.HasValue) is { } keepFree
+                        ? Math.Max(0, keepFree) * Gb
+                        : null,
                 Titles =
                     group
                         .SelectMany(profile => _cache.GetCandidates(profile.Name))
@@ -209,13 +236,16 @@ public class StorageService : IStorageService
         return drives.OrderBy(drive => drive.Root, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    public async Task<List<StorageMoveSuggestion>> GetSuggestionsAsync()
+    public async Task<List<StorageMoveSuggestion>> GetSuggestionsAsync(Func<StorageTitle, WatchRecord?>? watch = null)
     {
         var settings = await _settings.GetSettingsAsync();
 
         return StoragePlanner.Suggest(
             await GetDrivesAsync(),
-            StoragePlanner.Destinations(settings.DriveProfiles));
+            StoragePlanner.Destinations(settings.DriveProfiles),
+            watch,
+            StoragePlanner.LargestToMoveBytes(settings),
+            StoragePlanner.RecentAfterUtc(settings, DateTime.UtcNow));
     }
 
     private static string RootOfProfile(DriveProfile profile)

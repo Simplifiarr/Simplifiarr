@@ -896,6 +896,11 @@ a.stat-card:focus-visible {
     overflow: hidden;
 }
 
+/* Storage: boxes of text (the plan, moves, what was left alone). */
+.storage-box {
+    padding: .75rem 1rem;
+}
+
 /* Home: what each tool has freed, one row each with a bar. */
 
 .saving-row {
@@ -1480,6 +1485,66 @@ a.action-row-title .bi {
     color: var(--app-muted);
 }
 
+/* Folder Fixer: the folders a split season is in. */
+.season-folders {
+    list-style: none;
+    padding: 0;
+    margin: .5rem 0;
+    display: grid;
+    gap: .3rem;
+}
+
+.season-folders li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem;
+}
+
+/* A show's seasons, in one row above the picture tabs. */
+.season-strip-section {
+    margin-bottom: 1rem;
+}
+
+.season-strip {
+    display: flex;
+    gap: .6rem;
+    overflow-x: auto;
+    padding-bottom: .35rem;
+    margin-top: .4rem;
+}
+
+.season-card {
+    flex: 0 0 6.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: .3rem;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    text-align: left;
+}
+
+.season-card img,
+.season-card .poster-missing {
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    object-fit: cover;
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius);
+}
+
+.season-card:hover img,
+.season-card:focus-visible img {
+    border-color: var(--app-accent);
+}
+
+.season-card-title {
+    font-size: .8rem;
+    line-height: 1.2;
+}
+
 /* "No logo · No backdrop" under a card in the list. */
 .picture-gaps {
     font-size: .75rem;
@@ -1552,6 +1617,21 @@ a.action-row-title .bi {
     font-size: .75rem;
     font-weight: 600;
     white-space: nowrap;
+}
+
+.pill-ok {
+    background: var(--app-ok-soft);
+    color: var(--app-ok);
+}
+
+.pill-warn {
+    background: var(--app-warn-soft);
+    color: var(--app-warn);
+}
+
+.pill-muted {
+    background: var(--app-surface-2, rgba(127, 127, 127, .12));
+    color: var(--app-muted);
 }
 
 .empty-state {

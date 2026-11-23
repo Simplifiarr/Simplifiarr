@@ -132,25 +132,52 @@ public class LibraryTargetResolver
         };
     }
 
-    // The season folder the show already has, whichever way it's written;
-    // otherwise the name from Sonarr's format (or "Season 01").
+    // With Sonarr's own format, always Sonarr's name: Sonarr puts the next
+    // episode there whatever else is on disk, so anything else splits the
+    // season in two ("Season 06" and "Season 6"). Otherwise the season
+    // folder the show already has, whichever way it's written; then the
+    // way the show's other seasons are written; then "Season 01".
     private static string SeasonFolder(
         string titleFolder,
         ParsedRelease release)
     {
         var season = release.Season ?? 1;
 
+        if (release.SeasonFolderFromSonarr && !string.IsNullOrWhiteSpace(release.SeasonFolderName))
+        {
+            return release.SeasonFolderName;
+        }
+
         var preferred =
             release.SeasonFolderName ?? $"Season {season:00}";
 
-        if (Directory.Exists(titleFolder))
+        if (!Directory.Exists(titleFolder))
         {
-            foreach (var name in new[] { preferred, $"Season {season}", $"Season {season:00}" })
+            return preferred;
+        }
+
+        foreach (var name in new[] { preferred, $"Season {season}", $"Season {season:00}" })
+        {
+            if (Directory.Exists(Path.Combine(titleFolder, name)))
             {
-                if (Directory.Exists(Path.Combine(titleFolder, name)))
-                {
-                    return name;
-                }
+                return name;
+            }
+        }
+
+        if (release.SeasonFolderName is null && season > 0)
+        {
+            var others =
+                Directory.GetDirectories(titleFolder)
+                    .Select(Path.GetFileName)
+                    .Select(name => SeasonFolders.NumberOf(name ?? string.Empty))
+                    .Where(found => found is not null && found.Value.Season > 0)
+                    .ToList();
+
+            // "Season 1", "Season 2": unpadded like them. Anything padded
+            // or nothing to go by: "Season 01".
+            if (others.Count > 0 && others.All(found => !found!.Value.Padded))
+            {
+                return $"Season {season}";
             }
         }
 

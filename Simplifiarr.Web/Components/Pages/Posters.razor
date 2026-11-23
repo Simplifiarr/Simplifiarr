@@ -172,6 +172,54 @@ else
         </button>
     </PageHeader>
 
+    @if (_open.Type == "Series")
+    {
+        <section class="season-strip-section" aria-label="Seasons">
+            <div class="detail-label mt-0">Seasons</div>
+
+            @if (_seasons.Count == 0)
+            {
+                <p class="cell-note mb-0">@(_isLoadingSeasons ? "Loading..." : "Jellyfin lists no seasons for this show.")</p>
+            }
+            else
+            {
+                <div class="season-strip">
+                    @foreach (var season in _seasons)
+                    {
+                        var gaps = Gaps(season);
+
+                        <button type="button"
+                                class="season-card"
+                                disabled="@_isSetting"
+                                title="@(gaps.Count > 0 ? $"No {string.Join(", ", gaps.Select(gap => gap.Label.ToLowerInvariant()))}" : null)"
+                                @key="season.Id"
+                                @onclick="() => OpenSeasonAsync(season)">
+                            @if (season.HasPoster)
+                            {
+                                <img loading="lazy" alt="" src="@PictureUrl(season.Id, PictureTypes.Poster)" />
+                            }
+                            else
+                            {
+                                <span class="poster-missing">
+                                    <i class="bi bi-image" aria-hidden="true"></i>
+                                    No poster
+                                </span>
+                            }
+
+                            <span class="season-card-title">
+                                @season.Name
+                                @if (!season.HasPoster || gaps.Count > 0)
+                                {
+                                    <span class="picture-tab-gap" aria-label="Missing pictures"></span>
+                                }
+                            </span>
+                        </button>
+                    }
+                </div>
+            }
+        </section>
+    }
+
     @if (OpenTypes.Count > 1)
     {
         <div class="app-tabs" role="tablist" aria-label="Kind of picture">
@@ -398,44 +446,6 @@ else
         }
     </section>
 
-    @if (_open.Type == "Series")
-    {
-        <section class="section">
-            <h2 class="section-title">Seasons</h2>
-
-            @if (_seasons.Count == 0)
-            {
-                <p class="cell-note">@(_isLoadingSeasons ? "Loading..." : "Jellyfin lists no seasons for this show.")</p>
-            }
-            else
-            {
-                <div class="poster-grid">
-                    @foreach (var season in _seasons)
-                    {
-                        <button type="button"
-                                class="poster-card"
-                                disabled="@_isSetting"
-                                @key="season.Id"
-                                @onclick="() => OpenSeasonAsync(season)">
-                            @if (season.HasPoster)
-                            {
-                                <img loading="lazy" alt="" src="@PictureUrl(season.Id, PictureTypes.Poster)" />
-                            }
-                            else
-                            {
-                                <span class="poster-missing">
-                                    <i class="bi bi-image" aria-hidden="true"></i>
-                                    No poster
-                                </span>
-                            }
-
-                            <span class="poster-card-title">@season.Name</span>
-                        </button>
-                    }
-                </div>
-            }
-        </section>
-    }
 }
 
 @code

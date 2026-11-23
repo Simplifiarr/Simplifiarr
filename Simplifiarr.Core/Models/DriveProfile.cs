@@ -118,8 +118,29 @@ public class DriveProfile
     public bool PreserveOriginalFileName { get; set; }
 
     /// <summary>
-    /// Storage warns when the drive is fuller than this percentage. Null:
-    /// the default in Settings.
+    /// A protected drive is kept clear: once it is fuller than
+    /// <see cref="FullAtPercent"/>, Storage moves titles off it until it is
+    /// back to <see cref="BringBackToPercent"/>. Nothing is moved onto it.
+    /// Any other drive is an overflow drive: it takes what full drives send
+    /// it, always leaving <see cref="KeepFreeGb"/> free.
+    /// </summary>
+    public bool IsProtected { get; set; }
+
+    /// <summary>
+    /// A protected drive starts moving titles off above this used
+    /// percentage. Null: the default in Settings.
     /// </summary>
     public int? FullAtPercent { get; set; }
+
+    /// <summary>
+    /// A protected drive is brought back down to this used percentage.
+    /// Null: 10 points under <see cref="FullAtPercent"/>.
+    /// </summary>
+    public int? BringBackToPercent { get; set; }
+
+    /// <summary>
+    /// An overflow drive always keeps this much free, in GB. Null: a tenth
+    /// of the drive.
+    /// </summary>
+    public int? KeepFreeGb { get; set; }
 }

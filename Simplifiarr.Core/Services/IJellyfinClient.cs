@@ -206,6 +206,16 @@ public interface IJellyfinClient
         string imageType,
         int index = 0);
 
+    /// <summary>The files someone is playing right now, from Jellyfin's sessions.</summary>
+    Task<IReadOnlyList<string>> GetPlayingPathsAsync();
+
+    /// <summary>
+    /// Tells Jellyfin these folders changed, so it looks at them again now
+    /// rather than at its next library scan.
+    /// </summary>
+    Task FoldersChangedAsync(
+        IEnumerable<string> folders);
+
     /// <summary>Swaps two of an item's pictures of one type (backdrops).</summary>
     Task SwapImagesAsync(
         string itemId,

@@ -77,6 +77,8 @@ public class ArrNamingService : IArrNamingService
             return release;
         }
 
+        var formatsFromArr = formats is not null;
+
         formats ??= new ArrFolderFormats();
 
         var result = release.Clone();
@@ -103,6 +105,8 @@ public class ArrNamingService : IArrNamingService
 
             result.SeasonFolderName =
                 ArrFolderNamer.Season(season == 0 ? formats.SpecialsFolderFormat : formats.SeasonFolderFormat, season);
+
+            result.SeasonFolderFromSonarr = formatsFromArr;
         }
 
         return result;

@@ -510,6 +510,38 @@ public class JellyfinClient : IJellyfinClient
                 notFoundIsFine: true);
     }
 
+    public async Task<IReadOnlyList<string>> GetPlayingPathsAsync()
+    {
+        using var document = await SendAsync(HttpMethod.Get, "/Sessions?ActiveWithinSeconds=960");
+
+        if (document is null || document.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return document.RootElement.EnumerateArray()
+            .Where(session => session.TryGetProperty("NowPlayingItem", out var item) && item.ValueKind == JsonValueKind.Object)
+            .Select(session => Text(session.GetProperty("NowPlayingItem"), "Path"))
+            .Where(path => path.Length > 0)
+            .ToList();
+    }
+
+    public async Task FoldersChangedAsync(
+        IEnumerable<string> folders)
+    {
+        var body =
+            System.Text.Json.JsonSerializer.Serialize(new
+            {
+                Updates = folders.Select(folder => new { Path = folder, UpdateType = "Modified" }).ToArray()
+            });
+
+        using var content =
+            new StringContent(body, System.Text.Encoding.UTF8, "application/json");
+
+        using var _ =
+            await SendRawAsync(HttpMethod.Post, "/Library/Media/Updated", content);
+    }
+
     public async Task SwapImagesAsync(
         string itemId,
         string imageType,

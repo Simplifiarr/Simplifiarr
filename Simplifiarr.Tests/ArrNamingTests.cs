@@ -241,6 +241,47 @@ public class LibraryTargetTests : TempFolderTest
     }
 
     [TestMethod]
+    public async Task With_Sonarrs_format_its_season_folder_wins_so_a_season_is_never_split()
+    {
+        var showFolder = Path.Combine(_tv, "Night Shift (2024)");
+
+        Directory.CreateDirectory(Path.Combine(showFolder, "Season 01"));
+
+        var release = Episode();
+
+        release.KnownFolder = showFolder;
+        release.SeasonFolderName = "Season 1";
+        release.SeasonFolderFromSonarr = true;
+
+        var target = await _resolver.ResolveAsync(release, Source);
+
+        Assert.AreEqual(Path.Combine(showFolder, "Season 1"), target.TargetDirectory, "Sonarr puts the next episode in Season 1, so this one goes there too.");
+    }
+
+    [TestMethod]
+    public async Task Without_Sonarr_a_new_season_is_written_like_the_shows_other_seasons()
+    {
+        var showFolder = Path.Combine(_tv, "Night Shift");
+
+        Directory.CreateDirectory(Path.Combine(showFolder, "Season 2"));
+        Directory.CreateDirectory(Path.Combine(showFolder, "Specials"));
+
+        var target = await _resolver.ResolveAsync(Episode(), Source);
+
+        Assert.AreEqual(Path.Combine(showFolder, "Season 1"), target.TargetDirectory);
+    }
+
+    [TestMethod]
+    public void Season_folder_names_are_read_whichever_way_they_are_written()
+    {
+        Assert.AreEqual((6, false), Simplifiarr.Core.Utilities.SeasonFolders.NumberOf("Season 6"));
+        Assert.AreEqual((6, true), Simplifiarr.Core.Utilities.SeasonFolders.NumberOf("Season 06"));
+        Assert.AreEqual((6, true), Simplifiarr.Core.Utilities.SeasonFolders.NumberOf("S06"));
+        Assert.AreEqual((0, false), Simplifiarr.Core.Utilities.SeasonFolders.NumberOf("Specials"));
+        Assert.IsNull(Simplifiarr.Core.Utilities.SeasonFolders.NumberOf("Extras"));
+    }
+
+    [TestMethod]
     public async Task A_new_show_is_named_by_the_format()
     {
         var release = Episode();

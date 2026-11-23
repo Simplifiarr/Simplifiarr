@@ -36,7 +36,8 @@ public sealed record ArrFolderFormats
 {
     public string SeriesFolderFormat { get; init; } = "{Series Title}";
 
-    public string SeasonFolderFormat { get; init; } = "Season {season:00}";
+    /// <summary>Sonarr's own default.</summary>
+    public string SeasonFolderFormat { get; init; } = "Season {season}";
 
     public string SpecialsFolderFormat { get; init; } = "Specials";
 

@@ -139,10 +139,29 @@ public class SimplifiarrSettings
     public bool AutoScanCrossSeed { get; set; }
 
     /// <summary>
-    /// Storage counts a drive as getting full above this used percentage,
-    /// unless the drive has its own.
+    /// A protected drive starts moving titles off above this used
+    /// percentage, unless the drive has its own.
     /// </summary>
     public int StorageFullAtPercent { get; set; } = 90;
+
+    /// <summary>
+    /// Titles bigger than this (GB) are never suggested to move: they are
+    /// left to move by hand, or to shrink with Size Reduction. 0: no limit.
+    /// </summary>
+    public int StorageLargestToMoveGb { get; set; } = 100;
+
+    /// <summary>
+    /// Titles added or changed within this many days are never suggested
+    /// to move: a new episode may still be arriving, and new things are
+    /// what people watch. 0: no wait.
+    /// </summary>
+    public int StorageRecentDays { get; set; } = 14;
+
+    /// <summary>
+    /// After an automatic scan, queue the suggested moves by itself. Off
+    /// by default.
+    /// </summary>
+    public bool StorageAutoMove { get; set; }
 
     /// <summary>When Size Reduction searches the indexers by itself. Off by default.</summary>
     [JsonConverter(typeof(JsonStringEnumConverter<AutoScanMode>))]

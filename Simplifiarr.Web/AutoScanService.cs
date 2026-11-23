@@ -5,8 +5,8 @@ namespace Simplifiarr.Web;
 
 /// <summary>
 /// Starts Scan by itself on the schedule set in Settings, and afterwards a
-/// cross-seed search if that is ticked too. It only finds things: nothing
-/// is moved, linked or deleted without you.
+/// cross-seed search if that is ticked too. It only finds things, except
+/// that Storage's suggested moves are queued when you have ticked that.
 /// </summary>
 public sealed class AutoScanService : BackgroundService
 {
@@ -19,6 +19,9 @@ public sealed class AutoScanService : BackgroundService
     private readonly IScanCoordinator _scans;
     private readonly ICrossSeedScanService _crossSeed;
     private readonly ISizeReductionCandidateService _sizeReduction;
+    private readonly IStorageService _storage;
+    private readonly IStorageMoveService _mover;
+    private readonly IWatchHistoryService _watch;
 
     private DateTime? _lastAutoStartLocal;
 
@@ -30,12 +33,18 @@ public sealed class AutoScanService : BackgroundService
         ISettingsService settings,
         IScanCoordinator scans,
         ICrossSeedScanService crossSeed,
-        ISizeReductionCandidateService sizeReduction)
+        ISizeReductionCandidateService sizeReduction,
+        IStorageService storage,
+        IStorageMoveService mover,
+        IWatchHistoryService watch)
     {
         _settings = settings;
         _scans = scans;
         _crossSeed = crossSeed;
         _sizeReduction = sizeReduction;
+        _storage = storage;
+        _mover = mover;
+        _watch = watch;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -103,6 +112,35 @@ public sealed class AutoScanService : BackgroundService
 
             await _crossSeed.ScanAsync().WaitAsync(stoppingToken);
         }
+
+        await MoveOffFullDrivesAsync();
+    }
+
+    /// <summary>
+    /// With "Move titles off full drives by itself" ticked, queues Storage's
+    /// suggested moves once the scan has measured the drives. Each move is
+    /// still copied, checked and recorded in History as if you had pressed
+    /// Move all.
+    /// </summary>
+    private async Task MoveOffFullDrivesAsync()
+    {
+        var settings = await _settings.GetSettingsAsync();
+
+        if (!settings.StorageAutoMove || _mover.Current is not null || _mover.Queue.Count > 0)
+        {
+            return;
+        }
+
+        var suggestions = await _storage.GetSuggestionsAsync(_watch.Find);
+
+        if (suggestions.Count == 0)
+        {
+            return;
+        }
+
+        AppLog.Info($"Storage: queued {suggestions.Count} automatic move(s) off full drives.");
+
+        _mover.Enqueue(suggestions.Select(suggestion => new StorageMoveRequest(suggestion.Title, suggestion.ToLibraryPath)));
     }
 
     /// <summary>

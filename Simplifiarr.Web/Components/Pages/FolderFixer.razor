@@ -6,11 +6,18 @@
 
 @inject IStorageService StorageService
 @inject IArrPathService ArrPaths
+@inject ISeasonCleanupService SeasonCleanup
 
 <PageTitle>Folder Fixer - Simplifiarr</PageTitle>
 
 <PageHeader Title="Folder Fixer"
-            Subtitle="Movies and shows Radarr or Sonarr point at a folder that no longer exists, usually because the folder was moved by hand. Where the folder is found, Simplifiarr points them at it; entries with nothing on disk can be removed." />
+            Subtitle="Folders that are out of step with Radarr and Sonarr: entries pointing at a folder that's gone, and shows with one season split across two folders." />
+
+<h2 class="section-title">Radarr and Sonarr folders</h2>
+<p class="cell-note">
+    Movies and shows Radarr or Sonarr point at a folder that no longer exists, usually because the folder was moved by hand.
+    Where the folder is found, Simplifiarr points them at it; entries with nothing on disk can be removed.
+</p>
 <div class="toolbar">
     <div class="toolbar-summary">Nothing is moved; only the folder Radarr or Sonarr uses changes.</div>
     <div class="toolbar-actions">
@@ -105,8 +112,160 @@
     </div>
 }
 
+<section class="section">
+    <h2 class="section-title">Split seasons</h2>
+    <p class="cell-note">
+        Shows with one season in two folders, such as <code>Season 06</code> and <code>Season 6</code>, which Jellyfin lists as two seasons.
+        Merging moves everything into the folder Sonarr uses, so its next episode lands in the same place.
+    </p>
+
+    <div class="toolbar">
+        <div class="toolbar-summary">Moves stay on the same drive, so they're instant and take no extra space.</div>
+        <div class="toolbar-actions">
+            <button type="button" class="btn btn-secondary btn-sm" disabled="@_checkingSeasons" @onclick="FindSplitSeasonsAsync">
+                @(_checkingSeasons ? "Looking..." : "Look for split seasons")
+            </button>
+        </div>
+    </div>
+
+    @if (_seasonMessage is not null)
+    {
+        <div class="alert @(_seasonOk ? "alert-info" : "alert-warning")">@_seasonMessage</div>
+    }
+
+    @foreach (var split in _splits)
+    {
+        <div class="group-card" @key="split.Key">
+            <div class="group-card-header">
+                <div class="min-w-0">
+                    <div class="group-card-title">@split.Show · @split.SeasonLabel</div>
+                    <div class="cell-note"><code>@split.ShowFolder</code></div>
+                </div>
+
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    @if (_confirmMerge == split)
+                    {
+                        <button type="button" class="btn btn-primary btn-sm" disabled="@_merging" @onclick="() => MergeAsync(split)">
+                            @(_merging ? "Merging..." : "Yes, merge")
+                        </button>
+                        <button type="button" class="btn btn-secondary btn-sm" disabled="@_merging" @onclick="() => _confirmMerge = null">Cancel</button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-secondary btn-sm" disabled="@_merging" @onclick="() => _confirmMerge = split">
+                            Merge into @split.KeepName...
+                        </button>
+                    }
+                </div>
+            </div>
+
+            <ul class="season-folders">
+                @foreach (var folder in split.Folders)
+                {
+                    <li>
+                        <strong>@folder.Name</strong>
+                        <span class="cell-note">
+                            @(folder.Episodes + folder.OtherFiles == 0 ? "Empty" : $"{folder.Episodes} episode(s)" + (folder.OtherFiles > 0 ? $", {folder.OtherFiles} other file(s)" : "")) · made @folder.CreatedUtc.ToLocalTime().ToString("MMM d, yyyy")
+                        </span>
+                        @if (folder.Keep)
+                        {
+                            <span class="pill">Kept</span>
+                        }
+                        else
+                        {
+                            <span class="cell-note">→ moves into @split.KeepName</span>
+                        }
+                    </li>
+                }
+                @if (split.Folders.All(folder => !folder.Keep))
+                {
+                    <li><strong>@split.KeepName</strong> <span class="cell-note">doesn't exist yet; it's made for the merge</span> <span class="pill">Kept</span></li>
+                }
+            </ul>
+
+            <div class="cell-note">@split.Why</div>
+
+            @foreach (var warning in split.Warnings)
+            {
+                <div class="cell-note status-warn">@warning</div>
+            }
+
+            @if (_confirmMerge == split)
+            {
+                <div class="cell-note mt-1">
+                    Moves @split.Strays.Sum(folder => folder.Episodes + folder.OtherFiles) file(s) into <code>@split.KeepName</code>.
+                    Anything a torrent is seeding from is left where it is; a picture or .nfo the kept folder already has goes to Quarantine.
+                    @(split.SonarrShow is null ? "Jellyfin" : "Sonarr and Jellyfin") are then asked to look again.
+                </div>
+            }
+        </div>
+    }
+</section>
+
 @code
-{    private List<ArrFolderProblem> _arrProblems = [];
+{
+    private List<SplitSeason> _splits = [];
+    private bool _checkingSeasons;
+    private bool _merging;
+    private string? _seasonMessage;
+    private bool _seasonOk;
+    private SplitSeason? _confirmMerge;
+
+    private async Task FindSplitSeasonsAsync()
+    {
+        _checkingSeasons = true;
+        _seasonMessage = null;
+        _confirmMerge = null;
+
+        try
+        {
+            _splits = await SeasonCleanup.FindAsync();
+            _seasonOk = true;
+            _seasonMessage =
+                _splits.Count == 0
+                    ? "No split seasons: every season is in one folder."
+                    : $"{_splits.Count} season(s) are split across folders.";
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or IOException or UnauthorizedAccessException)
+        {
+            _seasonOk = false;
+            _seasonMessage = $"Couldn't look: {exception.Message}";
+        }
+        finally
+        {
+            _checkingSeasons = false;
+        }
+    }
+
+    private async Task MergeAsync(SplitSeason split)
+    {
+        _merging = true;
+
+        try
+        {
+            var result = await SeasonCleanup.MergeAsync(split);
+
+            _seasonOk = result.Merged;
+            _seasonMessage = $"{split.Show} {split.SeasonLabel}: {result.Message}";
+
+            if (result.Merged)
+            {
+                _splits.Remove(split);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _seasonOk = false;
+            _seasonMessage = $"Couldn't merge {split.Show} {split.SeasonLabel}: {exception.Message}";
+        }
+        finally
+        {
+            _merging = false;
+            _confirmMerge = null;
+        }
+    }
+
+    private List<ArrFolderProblem> _arrProblems = [];
     private bool _checkingArr;
     private string? _arrMessage;
     private bool _arrOk;

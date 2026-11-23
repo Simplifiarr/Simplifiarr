@@ -42,6 +42,12 @@ public class ParsedRelease
     /// <summary>The season folder name, from Sonarr's format. Null means Simplifiarr's own default.</summary>
     public string? SeasonFolderName { get; set; }
 
+    /// <summary>
+    /// True when <see cref="SeasonFolderName"/> came from Sonarr's own
+    /// settings, so it is the folder Sonarr will use for the next episode too.
+    /// </summary>
+    public bool SeasonFolderFromSonarr { get; set; }
+
     /// <summary>False when Sonarr keeps this show without season folders.</summary>
     public bool UsesSeasonFolders { get; set; } = true;
 

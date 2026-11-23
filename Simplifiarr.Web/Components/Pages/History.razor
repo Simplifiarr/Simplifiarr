@@ -207,7 +207,7 @@ else
         new("seeds", "Seeds moved", record =>
             record.ActionType == HistoryActionType.SeedMoved),
         new("titles", "Titles moved or deleted", record =>
-            record.ActionType is HistoryActionType.TitleMoved or HistoryActionType.TitleDeleted),
+            record.ActionType is HistoryActionType.TitleMoved or HistoryActionType.TitleDeleted or HistoryActionType.SeasonMerged),
         new("failed", "Didn't work", record => !record.Success)
     ];
 
@@ -335,6 +335,8 @@ else
                 record.Success ? "Swapped in a smaller release" : "Couldn't swap in a smaller release",
             HistoryActionType.TitleDeleted =>
                 record.Success ? "Title deleted (Recycle Bin)" : "Couldn't delete title",
+            HistoryActionType.SeasonMerged =>
+                record.Success ? "Split season merged into one folder" : "Season merged, some files left",
             _ => record.ActionType.ToString()
         };
 }

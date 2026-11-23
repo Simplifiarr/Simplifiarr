@@ -75,6 +75,7 @@ public class StorageMoveService : IStorageMoveService
     private readonly IHistoryService _history;
     private readonly IScanCoordinator _scans;
     private readonly ISeerrClient? _seerr;
+    private readonly IJellyfinClient? _jellyfin;
 
     private readonly object _sync = new();
     private readonly List<StorageMoveRequest> _queue = [];
@@ -88,13 +89,68 @@ public class StorageMoveService : IStorageMoveService
         IStorageService storage,
         IHistoryService history,
         IScanCoordinator scans,
-        ISeerrClient? seerr = null)
+        ISeerrClient? seerr = null,
+        IJellyfinClient? jellyfin = null)
     {
         _seerr = seerr;
+        _jellyfin = jellyfin;
         _arr = arr;
         _storage = storage;
         _history = history;
         _scans = scans;
+
+        PlayingPaths = AskJellyfinAsync;
+    }
+
+    private async Task<IReadOnlyList<string>?> AskJellyfinAsync()
+    {
+        if (_jellyfin is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await _jellyfin.GetPlayingPathsAsync();
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or InvalidOperationException or System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Why a title mustn't be touched right now: someone is playing it in
+    /// Jellyfin, or any program (another player, a torrent client) has one
+    /// of its files open. Null when it is free.
+    /// </summary>
+    private async Task<string?> InUseAsync(string folder, IEnumerable<string> files)
+    {
+        var playing = await PlayingPaths();
+
+        if (playing?.Any(path => PathContainment.IsPathUnderRoot(path, folder)) == true)
+        {
+            return "Someone is watching it in Jellyfin right now";
+        }
+
+        foreach (var file in files)
+        {
+            try
+            {
+                // Fails while anything else has the file open.
+                using var _ = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.None);
+            }
+            catch (IOException)
+            {
+                return $"{Path.GetFileName(file)} is open in another program (most likely being played)";
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Read-only or locked down: not a sign it's in use; copying will say.
+            }
+        }
+
+        return null;
     }
 
     /// <summary>Rest between titles, so the drives get a breather.</summary>
@@ -102,6 +158,12 @@ public class StorageMoveService : IStorageMoveService
 
     /// <summary>For tests: how a folder is removed from its old drive.</summary>
     public Func<string, bool> RemoveOldFolder { get; set; } = RecycleBinHelper.Send;
+
+    /// <summary>
+    /// What Jellyfin is playing right now; null when it can't be asked.
+    /// Tests replace it.
+    /// </summary>
+    public Func<Task<IReadOnlyList<string>?>> PlayingPaths { get; set; }
 
     /// <summary>For tests, which only have one drive to work on.</summary>
     public bool RequireOtherDrive { get; set; } = true;
@@ -395,6 +457,11 @@ public class StorageMoveService : IStorageMoveService
             return Fail(request, "A file in it is hardlinked elsewhere (most likely still seeding), so moving it would free nothing.");
         }
 
+        if (await InUseAsync(source, files.Select(file => file.FullName)) is { } busy)
+        {
+            return Fail(request, $"{busy}, so it was left where it is. Try again later.");
+        }
+
         var free = new DriveInfo(StoragePlanner.RootOf(target)).AvailableFreeSpace;
 
         if (free < total + SpareBytes)
@@ -440,6 +507,14 @@ public class StorageMoveService : IStorageMoveService
             TryDelete(target);
 
             return Fail(request, $"Copying stopped: {exception.Message}. The copy was removed; the title is still where it was.");
+        }
+
+        // Copying can take hours; playback can have started meanwhile.
+        if (await InUseAsync(source, files.Select(file => file.FullName)) is { } busyNow)
+        {
+            TryDelete(target);
+
+            return Fail(request, $"{busyNow}, which started while it was copying. The copy was removed; the title is still where it was. Try again later.");
         }
 
         if (item is not null)
