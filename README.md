@@ -24,7 +24,7 @@ through the cracks:
   and files your media server can't play.
 - **Seeding.** Cross-seed to more trackers, rebuild torrents from your
   library, and keep each seed on the drive its library is on.
-- **Presentation.** Build Jellyfin collections and choose posters.
+- **Presentation.** Build Jellyfin collections and choose posters, backdrops, logos and other artwork.
 
 Nothing changes on disk until you press a button, and anything removed can be
 brought back.
@@ -57,7 +57,7 @@ The pages are grouped the same way they are in the app's menu.
 | **Cross-Seed** | Finds other torrents of files you already seed, so you can seed them on more trackers without downloading anything. Every piece is checked against your files before a match is offered. |
 | **Torrent Rebuilder** | Rebuilds one torrent from files already in your library, even renamed ones, so it can seed straight away. |
 | **Collections** | Group anything in your libraries, across drives, and send it to Jellyfin as a collection. Sending again only changes what changed. |
-| **Posters** | Choose the poster for any film, show or collection in Jellyfin from every poster found online, or drop in your own. |
+| **Posters** | Choose the poster, backdrop, logo and other artwork for any film, show, season or collection in Jellyfin from everything found online, or drop in your own. You pick which kinds of picture to work with. |
 
 ### Clean up
 
@@ -105,7 +105,7 @@ until you press a button.
 - Radarr and Sonarr are only changed when you move or delete a title on
   Storage, fix a folder, or turn on a Rolling Shows or Rolling Movies rule: the title's folder is updated, or the title is removed without
   touching its files. Jellyfin and Seerr are only read, apart from the
-  collections Simplifiarr made, the posters you choose, and forgetting a
+  collections Simplifiarr made, the pictures you choose, and forgetting a
   request you deleted so it can be asked for again.
 - The only change it makes to a torrent already in your torrent client is
   **Move Seeds**, one torrent at a time when you ask. If the client's check doesn't
@@ -135,7 +135,7 @@ Simplifiarr works on its own. Each of these adds more:
 | Prowlarr | Searching your indexers for Cross-Seed, Torrent Rebuilder and Size Reduction |
 | Jellyfin | Collections, Posters, and who has watched what on Storage |
 | Seerr (Jellyseerr or Overseerr) | Who asked for each title, and whether they have watched it |
-| fanart.tv | More poster choices (needs your own free API key) |
+| fanart.tv | More poster, backdrop and logo choices (needs your own free API key) |
 
 ## Getting started
 

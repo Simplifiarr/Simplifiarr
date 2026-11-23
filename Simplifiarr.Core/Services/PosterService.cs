@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
+using Simplifiarr.Core.Models;
 using Simplifiarr.Core.Utilities;
 
 namespace Simplifiarr.Core.Services;
@@ -9,6 +11,43 @@ public class PosterService : IPosterService
     public const long MaxImageBytes = 25L * 1024 * 1024;
 
     private const string FanartSource = "fanart.tv";
+
+    /// <summary>
+    /// fanart.tv's names for each kind of picture, best first. A title's
+    /// whole set comes in one answer, so it is kept for a while and
+    /// switching between kinds doesn't ask again.
+    /// </summary>
+    private static readonly Dictionary<string, string[]> FanartMovie = new()
+    {
+        ["Primary"] = ["movieposter"],
+        ["Backdrop"] = ["moviebackground"],
+        ["Logo"] = ["hdmovielogo", "movielogo"],
+        ["Thumb"] = ["moviethumb"],
+        ["Banner"] = ["moviebanner"],
+        ["Art"] = ["hdmovieclearart", "movieart"],
+        ["Disc"] = ["moviedisc"]
+    };
+
+    private static readonly Dictionary<string, string[]> FanartShow = new()
+    {
+        ["Primary"] = ["tvposter"],
+        ["Backdrop"] = ["showbackground"],
+        ["Logo"] = ["hdtvlogo", "clearlogo"],
+        ["Thumb"] = ["tvthumb"],
+        ["Banner"] = ["tvbanner"],
+        ["Art"] = ["hdclearart", "clearart"]
+    };
+
+    private static readonly Dictionary<string, string[]> FanartSeason = new()
+    {
+        ["Primary"] = ["seasonposter"],
+        ["Thumb"] = ["seasonthumb"],
+        ["Banner"] = ["seasonbanner"]
+    };
+
+    private static readonly TimeSpan FanartKeptFor = TimeSpan.FromMinutes(15);
+
+    private readonly ConcurrentDictionary<string, (DateTime Fetched, string Json)> _fanart = new();
 
     private readonly HttpClient _httpClient;
     private readonly IJellyfinClient _jellyfin;
@@ -25,20 +64,22 @@ public class PosterService : IPosterService
     }
 
     public async Task<PosterOptions> GetOptionsAsync(
-        JellyfinPosterItem item)
+        JellyfinPosterItem item,
+        string pictureType = PictureTypes.Poster)
     {
         var options = new List<PosterOption>();
         var notes = new List<string>();
+        var shape = PictureTypes.Find(pictureType).Shape;
 
         try
         {
             options.AddRange(
-                (await _jellyfin.GetRemotePostersAsync(item.Id))
+                (await _jellyfin.GetRemotePostersAsync(item.Id, pictureType))
                     .Select(image =>
                         new PosterOption(
                             string.IsNullOrWhiteSpace(image.Provider) ? "Jellyfin" : image.Provider,
                             image.Url,
-                            Thumbnail(image.Url, image.ThumbnailUrl),
+                            Thumbnail(image.Url, image.ThumbnailUrl, shape),
                             image.Language,
                             image.Width,
                             image.Height,
@@ -46,23 +87,22 @@ public class PosterService : IPosterService
         }
         catch (InvalidOperationException exception)
         {
-            notes.Add($"Jellyfin's own poster search didn't answer: {exception.Message}");
+            notes.Add($"Jellyfin's own picture search didn't answer: {exception.Message}");
         }
 
         var settings =
             await _settings.GetSettingsAsync();
 
-        if (!string.IsNullOrWhiteSpace(settings.FanartApiKey) &&
-            item.Type is "Movie" or "Series")
+        if (!string.IsNullOrWhiteSpace(settings.FanartApiKey))
         {
             try
             {
                 options.AddRange(
-                    await GetFanartAsync(item, settings.FanartApiKey.Trim()));
+                    await GetFanartAsync(item, pictureType, settings.FanartApiKey.Trim()));
             }
             catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException)
             {
-                AppLog.Warn("fanart.tv poster search failed.", exception);
+                AppLog.Warn("fanart.tv picture search failed.", exception);
 
                 notes.Add("fanart.tv couldn't be reached, or didn't accept the API key in Settings.");
             }
@@ -78,9 +118,11 @@ public class PosterService : IPosterService
         return new PosterOptions(distinct, notes);
     }
 
-    public async Task<JellyfinImage?> SetFromUrlAsync(
+    public async Task<PictureChange> SetFromUrlAsync(
         string itemId,
-        string url)
+        string url,
+        string pictureType = PictureTypes.Poster,
+        BackdropChoice backdrop = BackdropChoice.ReplaceMain)
     {
         if (!Uri.TryCreate(url?.Trim(), UriKind.Absolute, out var uri) ||
             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
@@ -116,12 +158,14 @@ public class PosterService : IPosterService
                 exception);
         }
 
-        return await SetFromImageAsync(itemId, bytes);
+        return await SetFromImageAsync(itemId, bytes, pictureType, backdrop);
     }
 
-    public async Task<JellyfinImage?> SetFromImageAsync(
+    public async Task<PictureChange> SetFromImageAsync(
         string itemId,
-        byte[] image)
+        byte[] image,
+        string pictureType = PictureTypes.Poster,
+        BackdropChoice backdrop = BackdropChoice.ReplaceMain)
     {
         if (image.LongLength > MaxImageBytes)
         {
@@ -134,23 +178,67 @@ public class PosterService : IPosterService
             ?? throw new InvalidOperationException(
                 "That isn't a picture Jellyfin can use. It needs to be a JPEG, PNG or WebP image - a link to a web page won't work, it has to be the picture itself.");
 
-        var previous =
-            await _jellyfin.GetPosterAsync(itemId);
+        if (pictureType != PictureTypes.Backdrop)
+        {
+            var previous =
+                await _jellyfin.GetPosterAsync(itemId, imageType: pictureType);
 
-        await _jellyfin.SetPosterAsync(itemId, image, contentType);
+            await _jellyfin.SetPosterAsync(itemId, image, contentType, pictureType);
 
-        return previous;
+            return new PictureChange(itemId, pictureType, previous, false, 0);
+        }
+
+        // Jellyfin always adds a backdrop to the end of the list.
+        var count =
+            (await _jellyfin.GetPosterItemAsync(itemId))?.Backdrops ?? 0;
+
+        if (backdrop == BackdropChoice.Add || count == 0)
+        {
+            await _jellyfin.SetPosterAsync(itemId, image, contentType, pictureType);
+
+            return new PictureChange(itemId, pictureType, null, true, count + 1);
+        }
+
+        // To change the first one: add the new one, swap it to the front,
+        // then remove the old first one, which is now at the end.
+        var first =
+            await _jellyfin.GetPosterAsync(itemId, imageType: pictureType);
+
+        await _jellyfin.SetPosterAsync(itemId, image, contentType, pictureType);
+        await _jellyfin.SwapImagesAsync(itemId, pictureType, count, 0);
+        await _jellyfin.DeleteImageAsync(itemId, pictureType, count);
+
+        return new PictureChange(itemId, pictureType, first, false, count);
     }
 
-    public async Task<JellyfinImage?> SetFromItemAsync(
+    public async Task<PictureChange> SetFromItemAsync(
         string itemId,
-        string sourceItemId)
+        string sourceItemId,
+        string pictureType = PictureTypes.Poster)
     {
         var source =
-            await _jellyfin.GetPosterAsync(sourceItemId)
-            ?? throw new InvalidOperationException("That item has no poster to use.");
+            await _jellyfin.GetPosterAsync(sourceItemId, imageType: pictureType)
+            ?? throw new InvalidOperationException(
+                $"That item has no {PictureTypes.Find(pictureType).Label.ToLowerInvariant()} to use.");
 
-        return await SetFromImageAsync(itemId, source.Bytes);
+        return await SetFromImageAsync(itemId, source.Bytes, pictureType);
+    }
+
+    public async Task UndoAsync(
+        PictureChange change)
+    {
+        if (change.Added)
+        {
+            await _jellyfin.DeleteImageAsync(change.ItemId, change.PictureType, change.Backdrops - 1);
+        }
+        else if (change.Previous is { } previous)
+        {
+            await SetFromImageAsync(change.ItemId, previous.Bytes, change.PictureType);
+        }
+        else
+        {
+            await _jellyfin.DeleteImageAsync(change.ItemId, change.PictureType);
+        }
     }
 
     /// <summary>
@@ -184,83 +272,144 @@ public class PosterService : IPosterService
 
     private async Task<List<PosterOption>> GetFanartAsync(
         JellyfinPosterItem item,
+        string pictureType,
         string apiKey)
     {
-        // fanart.tv knows films by their TMDB or IMDb id, shows by TVDB id.
-        var (kind, id, property) =
-            item.Type == "Movie"
-                ? ("movies", item.TmdbId.Length > 0 ? item.TmdbId : item.ImdbId, "movieposter")
-                : ("tv", item.TvdbId, "tvposter");
+        // fanart.tv knows films (and TMDB collections) by their TMDB or
+        // IMDb id, shows by TVDB id, and a season by its show and number.
+        var (kind, id, names) =
+            item.Type switch
+            {
+                "Movie" => ("movies", item.TmdbId.Length > 0 ? item.TmdbId : item.ImdbId, FanartMovie.GetValueOrDefault(pictureType)),
+                "BoxSet" => ("movies", item.TmdbId, FanartMovie.GetValueOrDefault(pictureType)),
+                "Series" => ("tv", item.TvdbId, FanartShow.GetValueOrDefault(pictureType)),
+                "Season" => ("tv", item.SeriesTvdbId, FanartSeason.GetValueOrDefault(pictureType)),
+                _ => ("", "", null)
+            };
 
-        if (id.Length == 0)
+        if (id.Length == 0 || names is null)
         {
             return [];
         }
 
-        using var response =
-            await _httpClient.GetAsync(
-                $"https://webservice.fanart.tv/v3/{kind}/{Uri.EscapeDataString(id)}?api_key={Uri.EscapeDataString(apiKey)}");
+        var json =
+            await GetFanartJsonAsync(kind, id, apiKey);
 
-        // fanart.tv answers "not found" for a title it has no art for.
-        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        if (json is null)
         {
             return [];
         }
-
-        response.EnsureSuccessStatusCode();
 
         using var document =
-            JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            JsonDocument.Parse(json);
 
         var options = new List<PosterOption>();
 
-        if (document.RootElement.ValueKind != JsonValueKind.Object ||
-            !document.RootElement.TryGetProperty(property, out var posters) ||
-            posters.ValueKind != JsonValueKind.Array)
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
         {
             return options;
         }
 
-        foreach (var poster in posters.EnumerateArray())
+        foreach (var name in names)
         {
-            var url =
-                poster.TryGetProperty("url", out var urlValue) &&
-                urlValue.ValueKind == JsonValueKind.String
-                    ? urlValue.GetString() ?? string.Empty
-                    : string.Empty;
-
-            if (url.Length == 0)
+            if (!document.RootElement.TryGetProperty(name, out var pictures) ||
+                pictures.ValueKind != JsonValueKind.Array)
             {
                 continue;
             }
 
-            var language =
-                poster.TryGetProperty("lang", out var lang) &&
-                lang.ValueKind == JsonValueKind.String
-                    ? lang.GetString() ?? string.Empty
-                    : string.Empty;
+            foreach (var picture in pictures.EnumerateArray())
+            {
+                var url = Text(picture, "url");
 
-            options.Add(
-                new PosterOption(
-                    FanartSource,
-                    url,
-                    Thumbnail(url, string.Empty),
-                    language == "00" ? string.Empty : language,
-                    null,
-                    null,
-                    null));
+                if (url.Length == 0)
+                {
+                    continue;
+                }
+
+                // Season art is for one season, or for "all" of them.
+                if (item.Type == "Season" &&
+                    Text(picture, "season") is { Length: > 0 } season &&
+                    season != "all" &&
+                    season != item.SeasonNumber?.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                {
+                    continue;
+                }
+
+                var language = Text(picture, "lang");
+
+                options.Add(
+                    new PosterOption(
+                        FanartSource,
+                        url,
+                        Thumbnail(url, string.Empty, "poster"),
+                        language == "00" ? string.Empty : language,
+                        null,
+                        null,
+                        null));
+            }
         }
 
         return options;
     }
 
     /// <summary>
-    /// A small version of a poster for showing in a grid, where the site
+    /// fanart.tv's answer for one title, or null when it has no art for it.
+    /// </summary>
+    private async Task<string?> GetFanartJsonAsync(
+        string kind,
+        string id,
+        string apiKey)
+    {
+        var url =
+            $"https://webservice.fanart.tv/v3/{kind}/{Uri.EscapeDataString(id)}?api_key={Uri.EscapeDataString(apiKey)}";
+
+        if (_fanart.TryGetValue(url, out var kept) &&
+            DateTime.UtcNow - kept.Fetched < FanartKeptFor)
+        {
+            return kept.Json.Length == 0 ? null : kept.Json;
+        }
+
+        using var response =
+            await _httpClient.GetAsync(url);
+
+        // fanart.tv answers "not found" for a title it has no art for.
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            _fanart[url] = (DateTime.UtcNow, string.Empty);
+
+            return null;
+        }
+
+        response.EnsureSuccessStatusCode();
+
+        var json =
+            await response.Content.ReadAsStringAsync();
+
+        // Make sure it is JSON before keeping it.
+        using (JsonDocument.Parse(json))
+        {
+        }
+
+        _fanart[url] = (DateTime.UtcNow, json);
+
+        return json;
+    }
+
+    private static string Text(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value) &&
+        value.ValueKind == JsonValueKind.String
+            ? value.GetString() ?? string.Empty
+            : string.Empty;
+
+    /// <summary>
+    /// A small version of a picture for showing in a grid, where the site
     /// offers one; the full picture otherwise.
     /// </summary>
     private static string Thumbnail(
         string url,
-        string given)
+        string given,
+        string shape)
     {
         if (!string.IsNullOrWhiteSpace(given))
         {
@@ -269,7 +418,10 @@ public class PosterService : IPosterService
 
         if (url.Contains("image.tmdb.org/t/p/original/", StringComparison.OrdinalIgnoreCase))
         {
-            return url.Replace("/t/p/original/", "/t/p/w342/", StringComparison.OrdinalIgnoreCase);
+            // Wide pictures need more width to look sharp in the grid.
+            var size = shape == "poster" ? "w342" : "w780";
+
+            return url.Replace("/t/p/original/", $"/t/p/{size}/", StringComparison.OrdinalIgnoreCase);
         }
 
         if (url.Contains("assets.fanart.tv/fanart/", StringComparison.OrdinalIgnoreCase))

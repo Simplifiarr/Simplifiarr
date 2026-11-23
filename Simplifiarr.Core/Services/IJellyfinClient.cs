@@ -24,7 +24,45 @@ public sealed record JellyfinPosterItem(
     bool HasPoster,
     string TmdbId = "",
     string TvdbId = "",
-    string ImdbId = "");
+    string ImdbId = "")
+{
+    /// <summary>The kinds of picture it has ("Primary", "Backdrop", "Logo"...).</summary>
+    public IReadOnlyList<string> Pictures { get; init; } = HasPoster ? ["Primary"] : [];
+
+    /// <summary>How many backdrops it has.</summary>
+    public int Backdrops { get; init; }
+
+    /// <summary>For a season: its number, and the show it belongs to.</summary>
+    public int? SeasonNumber { get; init; }
+
+    public string SeriesId { get; init; } = string.Empty;
+
+    public string SeriesTvdbId { get; init; } = string.Empty;
+
+    public string SeriesTmdbId { get; init; } = string.Empty;
+
+    public bool Has(string pictureType) =>
+        Pictures.Contains(pictureType, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>A copy that now has (or no longer has) this kind of picture.</summary>
+    public JellyfinPosterItem With(string pictureType, bool has, int? backdrops = null)
+    {
+        var pictures =
+            Pictures.Where(picture => !string.Equals(picture, pictureType, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        if (has)
+        {
+            pictures.Add(pictureType);
+        }
+
+        return this with
+        {
+            HasPoster = pictureType == "Primary" ? has : HasPoster,
+            Pictures = pictures,
+            Backdrops = backdrops ?? Backdrops
+        };
+    }
+}
 
 public sealed record JellyfinPosterPage(
     IReadOnlyList<JellyfinPosterItem> Items,
@@ -49,7 +87,8 @@ public sealed record JellyfinImage(
 /// <summary>
 /// The few Jellyfin calls Simplifiarr makes. Reads list what Jellyfin has;
 /// the only things ever written are collections, what is in them, and an
-/// item's poster - never a library, a file or a user.
+/// item's pictures (poster, backdrop, logo...) - never a library, a file
+/// or a user.
 /// </summary>
 public interface IJellyfinClient
 {
@@ -134,22 +173,45 @@ public interface IJellyfinClient
     /// for an item.
     /// </summary>
     Task<IReadOnlyList<JellyfinRemoteImage>> GetRemotePostersAsync(
-        string itemId);
+        string itemId,
+        string imageType = "Primary");
+
+    /// <summary>A show's seasons, each knowing its show's ids.</summary>
+    Task<IReadOnlyList<JellyfinPosterItem>> GetSeasonsAsync(
+        JellyfinPosterItem series);
 
     /// <summary>
-    /// An item's current poster, or null when it has none.
+    /// One of an item's pictures (its poster unless another type is
+    /// given), or null when it has none.
     /// </summary>
     Task<JellyfinImage?> GetPosterAsync(
         string itemId,
-        int? maxWidth = null);
+        int? maxWidth = null,
+        string imageType = "Primary",
+        int index = 0);
 
     /// <summary>
-    /// Replaces an item's poster with this image.
+    /// Replaces an item's picture of this type with this image. For a type
+    /// it can have several of (backdrops), Jellyfin adds it to the end.
     /// </summary>
     Task SetPosterAsync(
         string itemId,
         byte[] image,
-        string contentType);
+        string contentType,
+        string imageType = "Primary");
+
+    /// <summary>Removes one of an item's pictures.</summary>
+    Task DeleteImageAsync(
+        string itemId,
+        string imageType,
+        int index = 0);
+
+    /// <summary>Swaps two of an item's pictures of one type (backdrops).</summary>
+    Task SwapImagesAsync(
+        string itemId,
+        string imageType,
+        int index,
+        int otherIndex);
 }
 
 /// <summary>A movie or show as one Jellyfin user sees it.</summary>

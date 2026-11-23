@@ -1380,6 +1380,143 @@ a.action-row-title .bi {
     opacity: .5;
 }
 
+/* Other picture shapes: backdrops and landscapes are wide, logos and clear
+   art are see-through (shown whole on a checkerboard), banners are long
+   strips, discs are round. */
+
+.poster-grid.shape-wide,
+.poster-grid.shape-logo {
+    grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+}
+
+.poster-grid.shape-banner {
+    grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+}
+
+.shape-wide .poster-card img,
+.shape-wide .poster-missing,
+.poster-current.shape-wide img,
+.poster-current.shape-wide .poster-missing {
+    aspect-ratio: 16 / 9;
+}
+
+.shape-logo .poster-card img,
+.shape-logo .poster-missing,
+.poster-current.shape-logo img,
+.poster-current.shape-logo .poster-missing {
+    aspect-ratio: 16 / 9;
+    object-fit: contain;
+    padding: .5rem;
+    background-color: #2a2d33;
+    background-image:
+        linear-gradient(45deg, #34383f 25%, transparent 25%, transparent 75%, #34383f 75%),
+        linear-gradient(45deg, #34383f 25%, transparent 25%, transparent 75%, #34383f 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 8px 8px;
+}
+
+.shape-banner .poster-card img,
+.shape-banner .poster-missing,
+.poster-current.shape-banner img,
+.poster-current.shape-banner .poster-missing {
+    aspect-ratio: 1000 / 185;
+}
+
+.shape-disc .poster-card img,
+.shape-disc .poster-missing,
+.poster-current.shape-disc img,
+.poster-current.shape-disc .poster-missing {
+    aspect-ratio: 1;
+    object-fit: contain;
+}
+
+.poster-current.shape-wide,
+.poster-current.shape-logo {
+    flex-basis: 22rem;
+}
+
+.poster-current.shape-banner {
+    flex-basis: 100%;
+}
+
+.poster-current.shape-wide img,
+.poster-current.shape-wide .poster-missing,
+.poster-current.shape-logo img,
+.poster-current.shape-logo .poster-missing,
+.poster-current.shape-banner img,
+.poster-current.shape-banner .poster-missing {
+    width: 100%;
+    max-width: 22rem;
+}
+
+.poster-current.shape-banner img,
+.poster-current.shape-banner .poster-missing {
+    max-width: 40rem;
+}
+
+/* Every backdrop an item has, the first one marked. */
+.backdrop-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    margin-top: .6rem;
+}
+
+.backdrop-strip figure {
+    margin: 0;
+    width: 7rem;
+}
+
+.backdrop-strip img {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius);
+}
+
+.backdrop-strip figcaption {
+    font-size: .75rem;
+    color: var(--app-muted);
+}
+
+/* "No logo · No backdrop" under a card in the list. */
+.picture-gaps {
+    font-size: .75rem;
+    color: var(--app-warn);
+}
+
+.picture-tab-gap {
+    display: inline-block;
+    width: .45rem;
+    height: .45rem;
+    margin-left: .35rem;
+    border-radius: 50%;
+    background: var(--app-warn);
+    vertical-align: middle;
+}
+
+.picture-choices {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+    gap: .6rem;
+}
+
+.picture-choice {
+    display: flex;
+    gap: .6rem;
+    align-items: flex-start;
+    padding: .6rem .75rem;
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius);
+    background: var(--app-surface);
+    cursor: pointer;
+}
+
+.picture-choice input {
+    margin-top: .2rem;
+}
+
 /* A box that takes the rest of a row beside a button, and shrinks rather
    than pushing the page wide on a phone. */
 .fill-row {

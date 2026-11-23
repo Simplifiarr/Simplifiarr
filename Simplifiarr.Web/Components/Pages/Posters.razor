@@ -1,19 +1,32 @@
 @page "/posters"
 @rendermode InteractiveServer
 
+@using Simplifiarr.Core.Models
 @using Simplifiarr.Core.Services
 
 @inject IJellyfinClient Jellyfin
 @inject IPosterService PosterService
 @inject ISettingsService SettingsService
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>Posters - Simplifiarr</PageTitle>
 
 @if (_open is null)
 {
     <PageHeader Title="Posters"
-                Subtitle="Pick anything in Jellyfin and choose its poster. Click a poster and it is set in Jellyfin straight away." />
+                Subtitle="Pick anything in Jellyfin and choose its poster, backdrop, logo and more. Click a picture and it is set in Jellyfin straight away.">
+        @if (_isSetUp)
+        {
+            <button type="button"
+                    class="btn btn-secondary"
+                    aria-expanded="@_showChoices"
+                    @onclick="() => _showChoices = !_showChoices">
+                <i class="bi bi-sliders" aria-hidden="true"></i>
+                Pictures to show
+            </button>
+        }
+    </PageHeader>
 
     @if (!_isSetUp)
     {
@@ -23,6 +36,36 @@
     }
     else
     {
+        @if (_showChoices)
+        {
+            <section class="section">
+                <h2 class="section-title">Pictures to show</h2>
+                <p class="cell-note">
+                    Tick the kinds of picture you care about. They get a tab when you open something, and the list
+                    points out what's missing. The poster is always there. Saved as you tick.
+                </p>
+
+                <div class="picture-choices">
+                    @foreach (var picture in PictureTypes.All)
+                    {
+                        var isPoster = picture.Type == PictureTypes.Poster;
+
+                        <label class="picture-choice">
+                            <input type="checkbox"
+                                   class="form-check-input"
+                                   checked="@(isPoster || _chosen.Contains(picture.Type))"
+                                   disabled="@isPoster"
+                                   @onchange="e => ChooseAsync(picture.Type, e.Value is true)" />
+                            <span>
+                                <strong>@picture.Label</strong> <span class="cell-note">@picture.FileName</span><br />
+                                <span class="cell-note">@picture.About</span>
+                            </span>
+                        </label>
+                    }
+                </div>
+            </section>
+        }
+
         <div class="app-tabs" role="tablist" aria-label="Kind of item">
             @foreach (var kind in Kinds)
             {
@@ -74,10 +117,12 @@
             <div class="poster-grid">
                 @foreach (var item in _items)
                 {
+                    var gaps = Gaps(item);
+
                     <button type="button" class="poster-card" @key="item.Id" @onclick="() => OpenAsync(item)">
                         @if (item.HasPoster)
                         {
-                            <img loading="lazy" alt="" src="@CurrentPosterUrl(item.Id)" />
+                            <img loading="lazy" alt="" src="@PictureUrl(item.Id, PictureTypes.Poster)" />
                         }
                         else
                         {
@@ -92,6 +137,11 @@
                         @if (item.Year is not null)
                         {
                             <span class="cell-note">@item.Year</span>
+                        }
+
+                        @if (gaps.Count > 0)
+                        {
+                            <span class="picture-gaps">No @string.Join(", ", gaps.Select(gap => gap.Label.ToLowerInvariant()))</span>
                         }
                     </button>
                 }
@@ -111,20 +161,63 @@
 }
 else
 {
-    <PageHeader Title="@_open.Name"
-                Subtitle="@(_open.Year is null ? "Choose a poster. Clicking one sets it in Jellyfin straight away." : $"{_open.Year} · Choose a poster. Clicking one sets it in Jellyfin straight away.")">
-        <button type="button" class="btn btn-secondary" disabled="@_isSetting" @onclick="Close">
+    var picture = PictureTypes.Find(_type);
+    var label = picture.Label.ToLowerInvariant();
+
+    <PageHeader Title="@OpenTitle"
+                Subtitle="@($"{(_open.Year is null ? "" : $"{_open.Year} · ")}Choose a {label}. Clicking one sets it in Jellyfin straight away.")">
+        <button type="button" class="btn btn-secondary" disabled="@_isSetting" @onclick="BackAsync">
             <i class="bi bi-arrow-left" aria-hidden="true"></i>
-            Back
+            @(_series is null ? "Back" : $"Back to {_series.Name}")
         </button>
     </PageHeader>
+
+    @if (OpenTypes.Count > 1)
+    {
+        <div class="app-tabs" role="tablist" aria-label="Kind of picture">
+            @foreach (var type in OpenTypes)
+            {
+                <button type="button"
+                        role="tab"
+                        aria-selected="@(_type == type.Type)"
+                        class="app-tab @(_type == type.Type ? "active" : null)"
+                        disabled="@_isSetting"
+                        @onclick="() => ShowTypeAsync(type.Type)">
+                    @type.Label
+                    @if (!_open.Has(type.Type))
+                    {
+                        <span class="picture-tab-gap" title="@($"No {type.Label.ToLowerInvariant()} yet")"></span>
+                    }
+                </button>
+            }
+        </div>
+    }
+
+    @if (_pending is not null)
+    {
+        <div class="alert alert-info" role="alert">
+            <strong>@_open.Name already has @_open.Backdrops backdrop@(_open.Backdrops == 1 ? "" : "s").</strong>
+            Some apps rotate through all of them; most show the first.
+            <div class="d-flex flex-wrap gap-2 mt-2">
+                <button type="button" class="btn btn-primary btn-sm" @onclick="() => FinishPendingAsync(BackdropChoice.ReplaceMain)">
+                    Change the main one
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" @onclick="() => FinishPendingAsync(BackdropChoice.Add)">
+                    Add to them
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" @onclick="() => _pending = null">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    }
 
     @if (!string.IsNullOrWhiteSpace(_message))
     {
         <div class="alert @(_messageIsProblem ? "alert-warning" : "alert-info")" role="status">
             @_message
 
-            @if (_previous is not null && !_messageIsProblem)
+            @if (_lastChange is not null && !_messageIsProblem)
             {
                 <button type="button"
                         class="btn btn-secondary btn-sm ms-2"
@@ -137,19 +230,32 @@ else
     }
 
     <div class="poster-detail">
-        <div class="poster-current">
-            <div class="detail-label mt-0">Current poster</div>
+        <div class="poster-current shape-@picture.Shape">
+            <div class="detail-label mt-0">Current @label</div>
 
-            @if (_open.HasPoster)
+            @if (_open.Has(_type))
             {
-                <img alt="Current poster" src="@CurrentPosterUrl(_open.Id)" />
+                <img alt="@($"Current {label}")" src="@PictureUrl(_open.Id, _type)" />
             }
             else
             {
                 <span class="poster-missing">
                     <i class="bi bi-image" aria-hidden="true"></i>
-                    No poster
+                    No @label
                 </span>
+            }
+
+            @if (_type == PictureTypes.Backdrop && _open.Backdrops > 1)
+            {
+                <div class="backdrop-strip" aria-label="All backdrops">
+                    @for (var index = 0; index < _open.Backdrops; index++)
+                    {
+                        <figure>
+                            <img alt="" src="@PictureUrl(_open.Id, _type, index)" />
+                            <figcaption>@(index == 0 ? "Main" : $"#{index + 1}")</figcaption>
+                        </figure>
+                    }
+                </div>
             }
         </div>
 
@@ -159,7 +265,7 @@ else
             <label class="poster-drop @(_isSetting ? "disabled" : null)">
                 <i class="bi bi-upload" aria-hidden="true"></i>
                 <span>Drop a picture here, or click to choose one</span>
-                <span class="cell-note">JPEG, PNG or WebP, up to 25 MB</span>
+                <span class="cell-note">JPEG, PNG or WebP, up to 25 MB@(picture.Shape == "logo" ? ". Use a PNG with a see-through background." : "")</span>
                 <InputFile accept="image/jpeg,image/png,image/webp"
                            disabled="@_isSetting"
                            OnChange="UseFileAsync" />
@@ -179,25 +285,25 @@ else
             </form>
 
             <div class="cell-note mt-1">
-                For sites such as ThePosterDB: copy the poster's own image address there and paste it here.
+                For sites such as ThePosterDB: copy the picture's own image address there and paste it here.
             </div>
         </div>
     </div>
 
-    @if (_inside.Count > 0)
+    @if (InsideWithType.Count > 0)
     {
         <section class="section">
-            <h2 class="section-title">Posters of what's inside this collection</h2>
+            <h2 class="section-title">@($"{picture.Label}s of what's inside this collection")</h2>
 
-            <div class="poster-grid">
-                @foreach (var member in _inside)
+            <div class="poster-grid shape-@picture.Shape">
+                @foreach (var member in InsideWithType)
                 {
                     <button type="button"
                             class="poster-card"
                             disabled="@_isSetting"
                             @key="member.Id"
                             @onclick="() => UseItemAsync(member)">
-                        <img loading="lazy" alt="" src="@CurrentPosterUrl(member.Id)" />
+                        <img loading="lazy" alt="" src="@PictureUrl(member.Id, _type)" />
                         <span class="poster-card-title">@member.Name</span>
                     </button>
                 }
@@ -206,7 +312,7 @@ else
     }
 
     <section class="section">
-        <h2 class="section-title">Posters found online</h2>
+        <h2 class="section-title">@($"{picture.Label}s found online")</h2>
 
         @foreach (var note in _notes)
         {
@@ -215,20 +321,17 @@ else
 
         @if (_isLoadingOptions)
         {
-            <p class="cell-note" role="status">Looking for posters...</p>
+            <p class="cell-note" role="status">Looking for @(label)s...</p>
         }
         else if (_options.Count == 0)
         {
-            <EmptyState Icon="image"
-                        Text="@(_open.Type == "BoxSet"
-                                  ? "No posters were found online for this collection. That is normal for a collection you made up yourself - use one from above, or your own picture."
-                                  : "No posters were found online for this. You can still use your own picture.")" />
+            <EmptyState Icon="image" Text="@NothingFoundText" />
         }
         else
         {
             <div class="toolbar">
                 <div class="toolbar-summary">
-                    <strong>@VisibleOptions.Count</strong> poster(s)
+                    <strong>@VisibleOptions.Count</strong> @(label)(s)
                 </div>
 
                 <div class="toolbar-actions">
@@ -262,7 +365,7 @@ else
                 </div>
             </div>
 
-            <div class="poster-grid">
+            <div class="poster-grid shape-@picture.Shape">
                 @foreach (var option in VisibleOptions.Take(_shown))
                 {
                     <button type="button"
@@ -294,6 +397,45 @@ else
             }
         }
     </section>
+
+    @if (_open.Type == "Series")
+    {
+        <section class="section">
+            <h2 class="section-title">Seasons</h2>
+
+            @if (_seasons.Count == 0)
+            {
+                <p class="cell-note">@(_isLoadingSeasons ? "Loading..." : "Jellyfin lists no seasons for this show.")</p>
+            }
+            else
+            {
+                <div class="poster-grid">
+                    @foreach (var season in _seasons)
+                    {
+                        <button type="button"
+                                class="poster-card"
+                                disabled="@_isSetting"
+                                @key="season.Id"
+                                @onclick="() => OpenSeasonAsync(season)">
+                            @if (season.HasPoster)
+                            {
+                                <img loading="lazy" alt="" src="@PictureUrl(season.Id, PictureTypes.Poster)" />
+                            }
+                            else
+                            {
+                                <span class="poster-missing">
+                                    <i class="bi bi-image" aria-hidden="true"></i>
+                                    No poster
+                                </span>
+                            }
+
+                            <span class="poster-card-title">@season.Name</span>
+                        </button>
+                    }
+                </div>
+            }
+        </section>
+    }
 }
 
 @code
@@ -315,6 +457,11 @@ else
 
     private bool _isSetUp;
 
+    /// <summary>The picture types chosen under "Pictures to show".</summary>
+    private HashSet<string> _chosen = new(PictureTypes.Defaults, StringComparer.OrdinalIgnoreCase);
+
+    private bool _showChoices;
+
     // The list.
     private string _kind = "Movie";
     private string _search = string.Empty;
@@ -323,12 +470,16 @@ else
     private bool _isLoadingItems;
     private string? _error;
 
-    // The open item.
+    // The open item, and the show it belongs to when it is a season.
     private JellyfinPosterItem? _open;
+    private JellyfinPosterItem? _series;
+    private string _type = PictureTypes.Poster;
     private List<PosterOption> _options = [];
     private List<string> _notes = [];
     private List<JellyfinPosterItem> _inside = [];
+    private List<JellyfinPosterItem> _seasons = [];
     private bool _isLoadingOptions;
+    private bool _isLoadingSeasons;
     private string _source = string.Empty;
     private string _language = string.Empty;
     private int _shown = PageSize;
@@ -338,12 +489,36 @@ else
     private string? _message;
     private bool _messageIsProblem;
 
-    /// <summary>The poster the last change replaced, kept so it can be undone.</summary>
-    private JellyfinImage? _previous;
+    /// <summary>A backdrop waiting on "change the main one" or "add".</summary>
+    private Func<BackdropChoice, Task<PictureChange>>? _pending;
 
-    // Changes whenever a poster is set, so the browser fetches the new one
+    /// <summary>The last change, kept so it can be undone.</summary>
+    private PictureChange? _lastChange;
+
+    // Changes whenever a picture is set, so the browser fetches the new one
     // rather than showing the one it remembers.
     private long _version = DateTime.UtcNow.Ticks;
+
+    private string OpenTitle =>
+        _series is null ? _open!.Name : $"{_series.Name}: {_open!.Name}";
+
+    private IReadOnlyList<PictureType> OpenTypes =>
+        _open is null ? [] : PictureTypes.For(_open.Type, _chosen);
+
+    private List<JellyfinPosterItem> InsideWithType =>
+        _inside.Where(member => member.Has(_type)).ToList();
+
+    private string NothingFoundText
+    {
+        get
+        {
+            var label = PictureTypes.Find(_type).Label.ToLowerInvariant();
+
+            return _open?.Type == "BoxSet"
+                ? $"No {label}s were found online for this collection. That is normal for a collection you made up yourself - use one from above, or your own picture."
+                : $"No {label}s were found online for this. You can still use your own picture.";
+        }
+    }
 
     private List<string> Sources =>
         _options
@@ -378,6 +553,8 @@ else
             !string.IsNullOrWhiteSpace(settings.JellyfinUrl) &&
             !string.IsNullOrWhiteSpace(settings.JellyfinApiKey);
 
+        _chosen = new HashSet<string>(settings.PictureTypes ?? [.. PictureTypes.Defaults], StringComparer.OrdinalIgnoreCase);
+
         if (!_isSetUp)
         {
             return;
@@ -402,6 +579,38 @@ else
 
         await LoadItemsAsync(reset: true);
     }
+
+    // ------------------------------------------------------------- Choices
+
+    private async Task ChooseAsync(string type, bool wanted)
+    {
+        if (wanted)
+        {
+            _chosen.Add(type);
+        }
+        else
+        {
+            _chosen.Remove(type);
+        }
+
+        // Saved straight away, in the usual order.
+        var settings =
+            await SettingsService.GetSettingsAsync();
+
+        settings.PictureTypes =
+            PictureTypes.All
+                .Where(picture => picture.Type == PictureTypes.Poster || _chosen.Contains(picture.Type))
+                .Select(picture => picture.Type)
+                .ToList();
+
+        await SettingsService.SaveSettingsAsync(settings);
+    }
+
+    /// <summary>The chosen pictures this item doesn't have (the poster is shown already).</summary>
+    private List<PictureType> Gaps(JellyfinPosterItem item) =>
+        PictureTypes.For(item.Type, _chosen)
+            .Where(picture => picture.Type != PictureTypes.Poster && !item.Has(picture.Type))
+            .ToList();
 
     // ---------------------------------------------------------------- List
 
@@ -454,34 +663,114 @@ else
 
     // ---------------------------------------------------------------- Open
 
-    private async Task OpenAsync(JellyfinPosterItem item)
+    private async Task OpenAsync(JellyfinPosterItem item, JellyfinPosterItem? series = null)
     {
         _open = item;
+        _series = series;
+        _inside = [];
+        _seasons = [];
+        _message = null;
+        _lastChange = null;
+        _pending = null;
+        _link = string.Empty;
+
+        if (!OpenTypes.Any(type => type.Type == _type))
+        {
+            _type = PictureTypes.Poster;
+        }
+
+        var loadSeasons = item.Type == "Series" ? LoadSeasonsAsync(item) : Task.CompletedTask;
+
+        if (item.Type == "BoxSet")
+        {
+            try
+            {
+                _inside = (await Jellyfin.GetCollectionPosterItemsAsync(item.Id)).ToList();
+            }
+            catch (InvalidOperationException exception)
+            {
+                _notes = [exception.Message];
+            }
+        }
+
+        await Task.WhenAll(LoadOptionsAsync(), loadSeasons);
+    }
+
+    private async Task OpenSeasonAsync(JellyfinPosterItem season)
+    {
+        await ScrollToTopAsync();
+        await OpenAsync(season, _open);
+    }
+
+    private async Task ScrollToTopAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("scrollTo", 0, 0);
+        }
+        catch (JSException)
+        {
+            // Only where the page is; nothing to undo if it can't.
+        }
+    }
+
+    private async Task LoadSeasonsAsync(JellyfinPosterItem series)
+    {
+        _isLoadingSeasons = true;
+
+        try
+        {
+            _seasons = (await Jellyfin.GetSeasonsAsync(series)).ToList();
+        }
+        catch (InvalidOperationException)
+        {
+            _seasons = [];
+        }
+        finally
+        {
+            _isLoadingSeasons = false;
+        }
+    }
+
+    private async Task ShowTypeAsync(string type)
+    {
+        if (type == _type)
+        {
+            return;
+        }
+
+        _type = type;
+        _message = null;
+        _lastChange = null;
+        _pending = null;
+
+        await LoadOptionsAsync();
+    }
+
+    private async Task LoadOptionsAsync()
+    {
+        var item = _open!;
+        var type = _type;
+
         _options = [];
         _notes = [];
-        _inside = [];
         _source = string.Empty;
         _language = string.Empty;
         _shown = PageSize;
-        _link = string.Empty;
-        _message = null;
-        _previous = null;
         _isLoadingOptions = true;
 
         StateHasChanged();
 
         try
         {
-            if (item.Type == "BoxSet")
-            {
-                _inside =
-                    (await Jellyfin.GetCollectionPosterItemsAsync(item.Id))
-                        .Where(member => member.HasPoster)
-                        .ToList();
-            }
-
             var found =
-                await PosterService.GetOptionsAsync(item);
+                await PosterService.GetOptionsAsync(item, type);
+
+            // Another tab or item may have been opened meanwhile.
+            if (_open?.Id != item.Id || type != _type)
+            {
+                return;
+            }
 
             _options = found.Options.ToList();
             _notes = found.Notes.ToList();
@@ -499,12 +788,38 @@ else
         }
         finally
         {
-            _isLoadingOptions = false;
+            if (_open?.Id == item.Id && type == _type)
+            {
+                _isLoadingOptions = false;
+            }
         }
     }
 
-    private void Close()
+    private async Task BackAsync()
     {
+        _pending = null;
+
+        if (_series is { } series)
+        {
+            // Back to the show, with its seasons as they are now.
+            var season = _open;
+
+            await ScrollToTopAsync();
+            await OpenAsync(series);
+
+            if (season is not null)
+            {
+                var index = _seasons.FindIndex(item => item.Id == season.Id);
+
+                if (index >= 0)
+                {
+                    _seasons[index] = season;
+                }
+            }
+
+            return;
+        }
+
         _open = null;
 
         // Drop "?item=..." so a refresh shows the list.
@@ -528,24 +843,48 @@ else
 
     // ----------------------------------------------------------------- Set
 
-    private Task UseOptionAsync(PosterOption option) =>
-        SetAsync(() => PosterService.SetFromUrlAsync(_open!.Id, option.Url));
+    private Task UseOptionAsync(PosterOption option)
+    {
+        var id = _open!.Id;
+        var type = _type;
 
-    private Task UseItemAsync(JellyfinPosterItem member) =>
-        SetAsync(() => PosterService.SetFromItemAsync(_open!.Id, member.Id));
+        return SetOrAskAsync(choice => PosterService.SetFromUrlAsync(id, option.Url, type, choice));
+    }
+
+    private Task UseItemAsync(JellyfinPosterItem member)
+    {
+        var id = _open!.Id;
+        var type = _type;
+
+        return SetOrAskAsync(async choice =>
+        {
+            var image =
+                await Jellyfin.GetPosterAsync(member.Id, imageType: type)
+                ?? throw new InvalidOperationException("That item has no picture of this kind to use.");
+
+            return await PosterService.SetFromImageAsync(id, image.Bytes, type, choice);
+        });
+    }
 
     private async Task UseLinkAsync()
     {
         var link = _link;
+        var id = _open!.Id;
+        var type = _type;
 
-        if (await SetAsync(() => PosterService.SetFromUrlAsync(_open!.Id, link)))
-        {
-            _link = string.Empty;
-        }
+        _link = string.Empty;
+
+        await SetOrAskAsync(choice => PosterService.SetFromUrlAsync(id, link, type, choice));
     }
 
-    private Task UseFileAsync(InputFileChangeEventArgs args) =>
-        SetAsync(async () =>
+    private async Task UseFileAsync(InputFileChangeEventArgs args)
+    {
+        var id = _open!.Id;
+        var type = _type;
+
+        byte[] bytes;
+
+        try
         {
             if (args.File.Size > Simplifiarr.Core.Services.PosterService.MaxImageBytes)
             {
@@ -559,54 +898,117 @@ else
 
             await stream.CopyToAsync(buffer);
 
-            return await PosterService.SetFromImageAsync(_open!.Id, buffer.ToArray());
-        });
+            bytes = buffer.ToArray();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException)
+        {
+            _message = exception.Message;
+            _messageIsProblem = true;
 
-    private async Task UndoAsync()
+            return;
+        }
+
+        await SetOrAskAsync(choice => PosterService.SetFromImageAsync(id, bytes, type, choice));
+    }
+
+    /// <summary>
+    /// Sets the picture, or - for a backdrop when there are some already -
+    /// first asks whether to change the main one or add to them.
+    /// </summary>
+    private async Task SetOrAskAsync(Func<BackdropChoice, Task<PictureChange>> change)
     {
-        if (_previous is not { } previous)
+        if (_type == PictureTypes.Backdrop && _open!.Backdrops > 0)
+        {
+            _pending = change;
+            _message = null;
+
+            return;
+        }
+
+        await SetAsync(() => change(BackdropChoice.ReplaceMain));
+    }
+
+    private async Task FinishPendingAsync(BackdropChoice choice)
+    {
+        if (_pending is not { } pending)
         {
             return;
         }
 
-        if (await SetAsync(() => PosterService.SetFromImageAsync(_open!.Id, previous.Bytes)))
+        _pending = null;
+
+        await SetAsync(() => pending(choice));
+    }
+
+    private async Task UndoAsync()
+    {
+        if (_lastChange is not { } change || _isSetting || _open is null)
         {
-            _message = "Put the earlier poster back.";
-            _previous = null;
+            return;
+        }
+
+        _isSetting = true;
+
+        try
+        {
+            await PosterService.UndoAsync(change);
+
+            var backdrops =
+                change.Added ? change.Backdrops - 1 : change.Backdrops;
+
+            Changed(
+                change.PictureType,
+                has: change.PictureType == PictureTypes.Backdrop ? backdrops > 0 : change.Previous is not null,
+                backdrops: change.PictureType == PictureTypes.Backdrop ? backdrops : null);
+
+            _message = "Put it back the way it was.";
+            _messageIsProblem = false;
+            _lastChange = null;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException)
+        {
+            _message = exception.Message;
+            _messageIsProblem = true;
+        }
+        finally
+        {
+            _isSetting = false;
         }
     }
 
     /// <summary>
-    /// Runs one poster change. True when Jellyfin took it.
+    /// Runs one picture change. True when Jellyfin took it.
     /// </summary>
-    private async Task<bool> SetAsync(Func<Task<JellyfinImage?>> change)
+    private async Task<bool> SetAsync(Func<Task<PictureChange>> change)
     {
         if (_isSetting || _open is null)
         {
             return false;
         }
 
+        var label = PictureTypes.Find(_type).Label;
+
         _isSetting = true;
-        _message = "Setting the poster...";
+        _message = $"Setting the {label.ToLowerInvariant()}...";
         _messageIsProblem = false;
 
         StateHasChanged();
 
         try
         {
-            _previous = await change();
+            var done = await change();
 
-            _open = _open with { HasPoster = true };
+            _lastChange = done;
 
-            var index = _items.FindIndex(item => item.Id == _open.Id);
+            Changed(
+                done.PictureType,
+                has: true,
+                backdrops: done.PictureType == PictureTypes.Backdrop ? done.Backdrops : null);
 
-            if (index >= 0)
-            {
-                _items[index] = _open;
-            }
-
-            _version = DateTime.UtcNow.Ticks;
-            _message = "Poster changed in Jellyfin.";
+            _message =
+                done.Added && done.Backdrops > 1
+                    ? $"Backdrop added in Jellyfin. It now has {done.Backdrops}."
+                    : $"{label} changed in Jellyfin.";
 
             return true;
         }
@@ -623,10 +1025,31 @@ else
         }
     }
 
+    /// <summary>Notes a change on the open item, and wherever else it is listed.</summary>
+    private void Changed(string type, bool has, int? backdrops)
+    {
+        _open = _open!.With(type, has, backdrops);
+
+        Replace(_items, _open);
+        Replace(_seasons, _open);
+
+        _version = DateTime.UtcNow.Ticks;
+    }
+
+    private static void Replace(List<JellyfinPosterItem> items, JellyfinPosterItem item)
+    {
+        var index = items.FindIndex(entry => entry.Id == item.Id);
+
+        if (index >= 0)
+        {
+            items[index] = item;
+        }
+    }
+
     // -------------------------------------------------------------- Labels
 
-    private string CurrentPosterUrl(string itemId) =>
-        $"poster-image/{itemId}?v={_version}";
+    private string PictureUrl(string itemId, string type, int index = 0) =>
+        $"poster-image/{itemId}?type={type}{(index > 0 ? $"&index={index}" : "")}&v={_version}";
 
     private static string KindLabel(string kind) =>
         Kinds.First(entry => entry.Type == kind).Label;

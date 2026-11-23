@@ -164,7 +164,7 @@
                 Your torrent client, qBittorrent for now (what is still seeding), Radarr and Sonarr (exact titles, genres and episode
                 numbers; Hardlinks uses their folders and folder formats; Storage updates them when titles move or are deleted), Prowlarr (searching your
                 indexers), Jellyfin (Collections, Posters and watch history), Seerr (who asked for each title) and an optional fanart.tv key (more
-                posters). Each has a Test button.
+                artwork). Each has a Test button.
             </dd>
 
             <dt>Storage</dt>
@@ -215,7 +215,7 @@
         new("collections", "collection", "Collections",
             "Group anything in your libraries and send the group to Jellyfin as a collection. Sending again only changes what changed."),
         new("posters", "image", "Posters",
-            "Choose the poster for any film, show or collection in Jellyfin from every poster found online, or drop in your own.")
+            "Choose the poster, backdrop, logo and other artwork for any film, show, season or collection in Jellyfin from everything found online, or drop in your own. You pick which kinds of picture to work with.")
     ];
 
     private static readonly HelpPage[] CleanPages =
@@ -261,7 +261,7 @@
         ("Why does a film show 'resolution not known'?",
          "Simplifiarr reads it with ffprobe. If ffprobe isn't installed or can't be found, set its location under Settings, Storage."),
         ("Does Simplifiarr change Radarr, Sonarr or Jellyfin?",
-         "It only reads Radarr and Sonarr. In Jellyfin it only changes collections it made and posters you choose. In your torrent client it adds torrents stopped, and moves a seed only when you press Move."),
+         "It only reads Radarr and Sonarr. In Jellyfin it only changes collections it made and pictures you choose. In your torrent client it adds torrents stopped, and moves a seed only when you press Move."),
         ("Where are the logs?",
          $"In {AppPaths.LogsDirectory}. They are the first place to look if something goes wrong.")
     ];

@@ -162,17 +162,25 @@ app.MapStaticAssets();
 // often "localhost", which means something else on a phone.
 app.MapGet(
     "/poster-image/{itemId}",
-    async (string itemId, IJellyfinClient jellyfin) =>
+    async (string itemId, string? type, int? index, IJellyfinClient jellyfin) =>
     {
         if (!Guid.TryParse(itemId, out _))
         {
             return Results.NotFound();
         }
 
+        // Only the picture types Simplifiarr knows; anything else is the poster.
+        var picture =
+            Simplifiarr.Core.Models.PictureTypes.Find(type ?? Simplifiarr.Core.Models.PictureTypes.Poster);
+
         try
         {
             var image =
-                await jellyfin.GetPosterAsync(itemId, maxWidth: 400);
+                await jellyfin.GetPosterAsync(
+                    itemId,
+                    maxWidth: picture.Shape == "poster" ? 400 : 800,
+                    imageType: picture.Type,
+                    index: Math.Clamp(index ?? 0, 0, 99));
 
             return image is null
                 ? Results.NotFound()

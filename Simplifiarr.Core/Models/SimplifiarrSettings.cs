@@ -81,6 +81,13 @@ public class SimplifiarrSettings
         string.Empty;
 
     /// <summary>
+    /// The kinds of picture the Posters page offers (Jellyfin's names:
+    /// "Primary", "Backdrop", "Logo"...). Set on the Posters page.
+    /// </summary>
+    public List<string> PictureTypes { get; set; } =
+        [.. Models.PictureTypes.Defaults];
+
+    /// <summary>
     /// The Windows account the media server runs as, for checking it can
     /// read library files. Blank: found from the Jellyfin, Emby or Plex
     /// Windows service.

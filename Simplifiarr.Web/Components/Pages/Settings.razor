@@ -478,7 +478,7 @@ else
         <div class="group-card">
             <div class="group-card-header">
                 <div class="group-card-title">fanart.tv</div>
-                <div class="group-card-meta" style="white-space: normal">Optional. Adds fanart.tv's posters to the Posters page</div>
+                <div class="group-card-meta" style="white-space: normal">Optional. Adds fanart.tv's posters, backdrops, logos and more to the Posters page</div>
             </div>
 
             <div style="padding: 0 1.1rem 1.1rem">
@@ -1094,9 +1094,13 @@ else
                 profile.Name = profile.Name.Trim();
             }
 
-            // The junk rules are set on the Junk page, which saves them as
-            // they change; keep those rather than the copy loaded here.
-            _settings.Junk = (await SettingsService.GetSettingsAsync()).Junk;
+            // The junk rules and picture types are set on their own pages,
+            // which save them as they change; keep those rather than the
+            // copy loaded here.
+            var onDisk = await SettingsService.GetSettingsAsync();
+
+            _settings.Junk = onDisk.Junk;
+            _settings.PictureTypes = onDisk.PictureTypes;
 
             await SettingsService.SaveSettingsAsync(_settings);
 

@@ -388,13 +388,33 @@ public class JellyfinClient : IJellyfinClient
         return page.Items;
     }
 
+    public async Task<IReadOnlyList<JellyfinPosterItem>> GetSeasonsAsync(
+        JellyfinPosterItem series)
+    {
+        var page =
+            await GetPosterItemsAsync(
+                $"/Shows/{Uri.EscapeDataString(series.Id)}/Seasons?Fields=ProviderIds,ProductionYear");
+
+        // fanart.tv knows a season by its show's id and the season number.
+        return page.Items
+            .Select(season =>
+                season with
+                {
+                    SeriesId = series.Id,
+                    SeriesTvdbId = series.TvdbId,
+                    SeriesTmdbId = series.TmdbId
+                })
+            .ToList();
+    }
+
     public async Task<IReadOnlyList<JellyfinRemoteImage>> GetRemotePostersAsync(
-        string itemId)
+        string itemId,
+        string imageType = "Primary")
     {
         using var document =
             await SendAsync(
                 HttpMethod.Get,
-                $"/Items/{Uri.EscapeDataString(itemId)}/RemoteImages?type=Primary&includeAllLanguages=true");
+                $"/Items/{Uri.EscapeDataString(itemId)}/RemoteImages?type={Uri.EscapeDataString(imageType)}&includeAllLanguages=true");
 
         var images = new List<JellyfinRemoteImage>();
 
@@ -430,10 +450,13 @@ public class JellyfinClient : IJellyfinClient
 
     public async Task<JellyfinImage?> GetPosterAsync(
         string itemId,
-        int? maxWidth = null)
+        int? maxWidth = null,
+        string imageType = "Primary",
+        int index = 0)
     {
         var path =
-            $"/Items/{Uri.EscapeDataString(itemId)}/Images/Primary";
+            $"/Items/{Uri.EscapeDataString(itemId)}/Images/{Uri.EscapeDataString(imageType)}" +
+            (index > 0 ? $"/{index}" : string.Empty);
 
         if (maxWidth is { } width)
         {
@@ -456,7 +479,8 @@ public class JellyfinClient : IJellyfinClient
     public async Task SetPosterAsync(
         string itemId,
         byte[] image,
-        string contentType)
+        string contentType,
+        string imageType = "Primary")
     {
         // Jellyfin takes the picture as base64 text, labelled with the
         // picture's own type.
@@ -469,8 +493,34 @@ public class JellyfinClient : IJellyfinClient
         using var _ =
             await SendRawAsync(
                 HttpMethod.Post,
-                $"/Items/{Uri.EscapeDataString(itemId)}/Images/Primary",
+                $"/Items/{Uri.EscapeDataString(itemId)}/Images/{Uri.EscapeDataString(imageType)}",
                 content);
+    }
+
+    public async Task DeleteImageAsync(
+        string itemId,
+        string imageType,
+        int index = 0)
+    {
+        using var _ =
+            await SendRawAsync(
+                HttpMethod.Delete,
+                $"/Items/{Uri.EscapeDataString(itemId)}/Images/{Uri.EscapeDataString(imageType)}/{index}",
+                null,
+                notFoundIsFine: true);
+    }
+
+    public async Task SwapImagesAsync(
+        string itemId,
+        string imageType,
+        int index,
+        int otherIndex)
+    {
+        using var _ =
+            await SendRawAsync(
+                HttpMethod.Post,
+                $"/Items/{Uri.EscapeDataString(itemId)}/Images/{Uri.EscapeDataString(imageType)}/{index}/Index?newIndex={otherIndex}",
+                null);
     }
 
     private async Task<JellyfinPosterPage> GetPosterItemsAsync(
@@ -497,10 +547,26 @@ public class JellyfinClient : IJellyfinClient
                 continue;
             }
 
-            var hasPoster =
-                element.TryGetProperty("ImageTags", out var tags) &&
-                tags.ValueKind == JsonValueKind.Object &&
-                tags.TryGetProperty("Primary", out _);
+            var pictures = new List<string>();
+
+            if (element.TryGetProperty("ImageTags", out var tags) &&
+                tags.ValueKind == JsonValueKind.Object)
+            {
+                pictures.AddRange(tags.EnumerateObject().Select(tag => tag.Name));
+            }
+
+            var backdrops =
+                element.TryGetProperty("BackdropImageTags", out var backdropTags) &&
+                backdropTags.ValueKind == JsonValueKind.Array
+                    ? backdropTags.GetArrayLength()
+                    : 0;
+
+            if (backdrops > 0)
+            {
+                pictures.Add("Backdrop");
+            }
+
+            var hasPoster = pictures.Contains("Primary");
 
             var providerIds =
                 element.TryGetProperty("ProviderIds", out var ids) &&
@@ -517,7 +583,12 @@ public class JellyfinClient : IJellyfinClient
                     hasPoster,
                     ProviderId(providerIds, "Tmdb"),
                     ProviderId(providerIds, "Tvdb"),
-                    ProviderId(providerIds, "Imdb")));
+                    ProviderId(providerIds, "Imdb"))
+                {
+                    Pictures = pictures,
+                    Backdrops = backdrops,
+                    SeasonNumber = Number(element, "IndexNumber") is { } number ? (int)number : null
+                });
         }
 
         var total =
