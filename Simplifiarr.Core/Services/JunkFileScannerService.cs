@@ -18,12 +18,6 @@ public class JunkFileScannerService
         ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".ico", ".tbn"
     ];
 
-    private static readonly string[] ArtworkNames =
-    [
-        "folder", "poster", "backdrop", "landscape", "banner", "logo",
-        "clearlogo", "disc", "thumb", "background", "fanart", "cover"
-    ];
-
     private readonly DriveCandidateCache<JunkFileCandidate> _cache =
         new(
             "junk-file-cache.json",
@@ -273,22 +267,17 @@ public class JunkFileScannerService
 
         if (rules.UnrecognizedImages && ImageExtensions.Contains(extension))
         {
-            var nameWithoutExtension =
-                Path.GetFileNameWithoutExtension(file.FileName);
+            var picture =
+                JunkRules.PictureKindOf(Path.GetFileNameWithoutExtension(file.FileName));
 
-            var isKnownArtwork =
-                ArtworkNames.Any(name =>
-                    string.Equals(
-                        name,
-                        nameWithoutExtension,
-                        StringComparison.OrdinalIgnoreCase) ||
-                    nameWithoutExtension.EndsWith(
-                        $"-{name}",
-                        StringComparison.OrdinalIgnoreCase));
+            if (picture is null)
+            {
+                return "Unrecognized image (not standard artwork naming)";
+            }
 
-            return isKnownArtwork
-                ? null
-                : "Unrecognized image (not standard artwork naming)";
+            return rules.UnwantedPictures.Contains(picture.Value.Kind, StringComparer.OrdinalIgnoreCase)
+                ? $"{picture.Value.Label}, which you don't keep"
+                : null;
         }
 
         return null;

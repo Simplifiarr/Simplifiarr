@@ -78,8 +78,10 @@ internal sealed class FakeProwlarr : IProwlarrClient
 
 internal sealed class OneDriveSettings(DriveProfile profile) : ISettingsService
 {
+    public SimplifiarrSettings Settings { get; } = new();
+
     public Task<SimplifiarrSettings> GetSettingsAsync() =>
-        Task.FromResult(new SimplifiarrSettings());
+        Task.FromResult(Settings);
 
     public Task<List<DriveProfile>> GetEnabledDriveProfilesAsync() =>
         Task.FromResult(new List<DriveProfile> { profile });
@@ -96,6 +98,7 @@ public class SizeReductionTests : TempFolderTest
     private FakeProwlarr _prowlarr = default!;
     private MediaCatalogService _catalog = default!;
     private SizeReductionCandidateService _search = default!;
+    private OneDriveSettings _settings = default!;
 
     [TestInitialize]
     public void Build()
@@ -111,9 +114,11 @@ public class SizeReductionTests : TempFolderTest
                 TvLibraryPath = Path.Combine(Folder, "tv")
             };
 
+        _settings = new OneDriveSettings(profile);
+
         _search =
             new SizeReductionCandidateService(
-                new OneDriveSettings(profile),
+                _settings,
                 _catalog,
                 _prowlarr,
                 new ReleaseParser(),
@@ -275,5 +280,42 @@ public class SizeReductionTests : TempFolderTest
 
         Assert.IsTrue(_search.LastSucceeded, _search.LastMessage);
         Assert.HasCount(2, await _search.GetFoundAsync());
+    }
+
+    [TestMethod]
+    public async Task Releases_that_miss_the_encode_rules_or_are_ignored_are_left_out_but_can_still_be_listed()
+    {
+        var alien = Film("Alien", 1979, 20 * Gb);
+        Film("Scream", 1996, 20 * Gb);
+
+        _prowlarr.Add("Alien 1979", "Alien.1979.1080p.BluRay.x265-GOOD", 8 * Gb);
+        _prowlarr.Add("Alien 1979", "Alien.1979.1080p.BluRay.x264-GOOD", 9 * Gb);
+        _prowlarr.Add("Alien 1979", "Alien.1979.1080p.HDCAM.x265-BAD", 2 * Gb);
+        _prowlarr.Add("Alien 1979", "Alien.1979.1080p.BluRay.H.265-OTHER", 7 * Gb);
+        _prowlarr.Add("Scream 1996", "Scream.1996.1080p.BluRay.x265-GOOD", 6 * Gb);
+
+        await _search.SearchAsync();
+
+        var rules = _settings.Settings.SizeReductionRules;
+
+        rules.Codecs.Add("HEVC");
+        rules.RequireWords.Add("GOOD");
+        rules.RequireWords.Add("OTHER");
+        rules.IgnoredReleases.Add("alien.1979.1080p.bluray.h.265-other");
+        rules.IgnoredFiles.Add(Path.Combine(Folder, @"movies\Scream (1996)\Scream.mkv"));
+
+        var offered = await _search.GetFoundAsync();
+
+        Assert.AreEqual("Alien.1979.1080p.BluRay.x265-GOOD", offered.Single().Candidate.Title);
+
+        var all = (await _search.GetFoundAsync(includeLeftOut: true)).ToDictionary(found => found.Candidate.Title, found => found.LeftOutBecause);
+
+        Assert.HasCount(5, all);
+        Assert.IsNull(all["Alien.1979.1080p.BluRay.x265-GOOD"]);
+        Assert.AreEqual("H.264 / x264 isn't a codec you want", all["Alien.1979.1080p.BluRay.x264-GOOD"]);
+        Assert.AreEqual("Has \"HDCAM\"", all["Alien.1979.1080p.HDCAM.x265-BAD"]);
+        Assert.AreEqual("Ignored", all["Alien.1979.1080p.BluRay.H.265-OTHER"]);
+        Assert.AreEqual("File ignored", all["Scream.1996.1080p.BluRay.x265-GOOD"]);
+        Assert.AreEqual(alien.Id, offered.Single().MediaAssetId);
     }
 }

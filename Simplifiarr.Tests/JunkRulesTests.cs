@@ -35,6 +35,25 @@ public class JunkRulesTests
 
         Assert.IsNull(Why(@"D:\Movies\A (2020)\movie.nfo", rules));
         Assert.IsNull(Why(@"D:\Movies\A (2020)\poster.jpg", rules));
+
+        // Every picture the Posters page can set, plus box art and
+        // numbered extra backdrops, is artwork.
+        foreach (var picture in new[] { "clearart.png", "logo.png", "landscape.jpg", "banner.jpg", "disc.png", "box.jpg", "backdrop1.jpg", "backdrop12.jpg" })
+        {
+            Assert.IsNull(Why($@"D:\Movies\A (2020)\{picture}", rules), picture);
+        }
+
+        Assert.IsNull(Why(@"D:\TV\A\season01-landscape.jpg", rules));
+
+        // Unticking a kind of picture makes its files junk, numbered and
+        // season ones included; other kinds are still kept.
+        rules.UnwantedPictures.Add("Box");
+        rules.UnwantedPictures.Add("Backdrop");
+        Assert.AreEqual("Box art, which you don't keep", Why(@"D:\Movies\A (2020)\box.jpg", rules));
+        Assert.AreEqual("Backdrops, which you don't keep", Why(@"D:\Movies\A (2020)\backdrop2.jpg", rules));
+        Assert.IsNotNull(Why(@"D:\Movies\A (2020)\boxrear.jpg", rules));
+        Assert.IsNull(Why(@"D:\Movies\A (2020)\folder.jpg", rules));
+        rules.UnwantedPictures.Clear();
         Assert.IsNull(Why(@"D:\Movies\A (2020)\A (2020).mkv", rules, book: false));
         Assert.IsNull(Why(@"D:\Books\A\metadata.json", rules, book: true));
     }
@@ -89,6 +108,9 @@ public class JunkRulesTests
     {
         Assert.AreEqual(".exe", JunkRules.NormalizeExtension("EXE"));
         Assert.AreEqual(".par2", JunkRules.NormalizeExtension(" *.PAR2 "));
+        Assert.AreEqual(".!qb", JunkRules.NormalizeExtension(".!qB"));
+        Assert.AreEqual("Junk file type (.!qb)", Why(@"D:\Movies\A (2020)\A (2020).mkv.!qB", new JunkRules { Extensions = [".!qb"] }));
+        Assert.IsNull(JunkRules.NormalizeExtension(".a/b"));
         Assert.IsNull(JunkRules.NormalizeExtension("."));
         Assert.IsNull(JunkRules.NormalizeExtension("a b"));
         Assert.IsNull(JunkRules.NormalizeExtension(""));

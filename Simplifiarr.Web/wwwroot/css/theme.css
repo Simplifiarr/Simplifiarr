@@ -1736,40 +1736,40 @@ a.action-row-title .bi {
 
 /* Junk Cleanup: the rules panel. */
 
-.junk-rules > summary {
+.rules-panel > summary {
     padding: .8rem 1.25rem;
     font-weight: 600;
     cursor: pointer;
 }
 
-.junk-rules-body {
+.rules-body {
     padding: 0 1.25rem 1rem;
 }
 
-.junk-rule-row {
+.rule-row {
     margin-top: .9rem;
 }
 
-.junk-rule-label {
+.rule-label {
     margin-bottom: .3rem;
     font-size: .875rem;
     font-weight: 600;
 }
 
-.junk-chip {
+.rule-chip {
     font-size: .85rem;
     font-weight: 500;
 }
 
-.junk-chip .btn-close {
+.rule-chip .btn-close {
     font-size: .5rem;
 }
 
-.junk-input {
+.rule-input {
     width: 9rem;
 }
 
-.junk-suggestion {
+.rule-suggestion {
     padding: .1rem .5rem;
     font-size: .8rem;
 }
@@ -1795,4 +1795,33 @@ a.action-row-title .bi {
 
 .app-footer a:hover {
     color: var(--app-text);
+}
+
+/* Lets a long name in a flex row wrap instead of pushing the row wide. */
+.min-w-0 {
+    min-width: 0;
+}
+
+/* Something the rules leave out, shown only when asked for. */
+.group-card.is-left-out,
+tr.is-left-out > td {
+    opacity: .6;
+}
+
+/* Drives as small tiles: name and when it was last done, with its button. */
+.drive-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+    gap: .6rem;
+}
+
+.drive-tile {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    padding: .7rem .9rem;
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius);
+    background: var(--app-surface);
 }

@@ -60,4 +60,11 @@ public class SizeReductionCandidate
     public double SavingsPercent { get; set; }
 
     public DateTime DiscoveredUtc { get; set; }
+
+    /// <summary>
+    /// Why the encode rules leave this out ("Has \"CAM\"", "Ignored"...);
+    /// null when it is offered. Worked out when it's read, never saved.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? LeftOutBecause { get; set; }
 }

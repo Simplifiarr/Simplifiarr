@@ -145,17 +145,34 @@ public class SizeReductionCandidateService
         }
     }
 
-    public async Task<List<SizeReductionCandidate>> GetFoundAsync()
+    public async Task<List<SizeReductionCandidate>> GetFoundAsync(
+        bool includeLeftOut = false)
     {
         var profiles =
             await ResolveProfilesAsync(null);
 
-        return profiles
-            .SelectMany(profile =>
-                TierNames.SelectMany(tier =>
-                    _candidateCache.GetCandidates(profile.Name, tier)))
-            .Where(candidate => candidate.SavingsBytes >= MinSavingsBytes)
-            .ToList();
+        var rules =
+            (await _settingsService.GetSettingsAsync()).SizeReductionRules ?? new EncodeRules();
+
+        var found =
+            profiles
+                .SelectMany(profile =>
+                    TierNames.SelectMany(tier =>
+                        _candidateCache.GetCandidates(profile.Name, tier)))
+                .Where(candidate => candidate.SavingsBytes >= MinSavingsBytes)
+                .ToList();
+
+        foreach (var candidate in found)
+        {
+            candidate.LeftOutBecause =
+                rules.IsFileIgnored(candidate.CanonicalPath)
+                    ? "File ignored"
+                    : rules.WhyLeftOut(candidate.Candidate.Title, candidate.CandidateCodec);
+        }
+
+        return includeLeftOut
+            ? found
+            : found.Where(candidate => candidate.LeftOutBecause is null).ToList();
     }
 
     public DateTime? GetLastSearchUtc(

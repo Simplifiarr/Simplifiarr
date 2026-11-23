@@ -63,9 +63,13 @@ public interface ISizeReductionCandidateService
     void Stop();
 
     /// <summary>
-    /// Everything found so far on the enabled drives.
+    /// Everything found so far on the enabled drives that fits the encode
+    /// rules and isn't ignored - or, asked for, everything found, with
+    /// <see cref="SizeReductionCandidate.LeftOutBecause"/> saying why any
+    /// is left out.
     /// </summary>
-    Task<List<SizeReductionCandidate>> GetFoundAsync();
+    Task<List<SizeReductionCandidate>> GetFoundAsync(
+        bool includeLeftOut = false);
 
     /// <summary>
     /// When this drive was last searched to the end, if ever.

@@ -14,7 +14,7 @@
 <PageTitle>Size Reduction - Simplifiarr</PageTitle>
 
 <PageHeader Title="Size Reduction"
-            Subtitle="Looks on your indexers, through Prowlarr, for smaller releases of films and episodes you already have. Nothing is downloaded or replaced unless you press Download.">
+            Subtitle="Finds smaller releases of films and episodes you already have, on your indexers through Prowlarr. Nothing is downloaded or replaced unless you press Download.">
     @if (Search.IsSearching)
     {
         <button type="button" class="btn btn-secondary" @onclick="Search.Stop">
@@ -48,8 +48,7 @@ else if (!_prowlarrIsSetUp)
 @if (Search.Progress is { } progress)
 {
     <div class="alert alert-info" role="status">
-        <strong>Searching @progress.DriveName</strong> -
-        @progress.Done of @progress.Total file(s) done.
+        <strong>Searching @progress.DriveName:</strong> @progress.Done of @progress.Total file(s) done.
         <div class="cell-note">Now: @progress.CurrentTitle. You can leave this page; the search carries on.</div>
     </div>
 }
@@ -60,20 +59,32 @@ else if (!string.IsNullOrWhiteSpace(Search.LastMessage))
     </div>
 }
 
+@if (_note is { } note)
+{
+    <div class="alert @(note.Ok ? "alert-info" : "alert-warning") d-flex flex-wrap align-items-center gap-2" role="status">
+        <span>@note.Text</span>
+        @if (note.Undo is not null)
+        {
+            <button type="button" class="btn btn-secondary btn-sm" @onclick="UndoAsync">Undo</button>
+        }
+    </div>
+}
+
 @if (_profiles.Count > 0)
 {
-    <div class="panel section">
+    <div class="drive-grid section">
         @foreach (var profile in _profiles)
         {
-            var found = _groups.Count(group => group.DriveName == profile.Name);
+            var found = _groups.Count(group => group.DriveName == profile.Name && group.Releases.Count > 0);
+            var searchedUtc = Search.GetLastSearchUtc(profile.Name);
 
-            <div class="action-row">
-                <div>
+            <div class="drive-tile">
+                <div class="min-w-0">
                     <div class="action-row-title">@profile.Name</div>
                     <div class="action-row-detail">
-                        @if (Search.GetLastSearchUtc(profile.Name) is { } searchedUtc)
+                        @if (searchedUtc is { } searched)
                         {
-                            <text>Last searched @FormatTime(searchedUtc) · @found file(s) with a smaller release</text>
+                            <text>@found file(s) · searched @FormatTime(searched)</text>
                         }
                         else
                         {
@@ -91,122 +102,210 @@ else if (!string.IsNullOrWhiteSpace(Search.LastMessage))
             </div>
         }
     </div>
-}
 
-@if (_downloadMessage is not null)
-{
-    <div class="alert @(_downloadOk ? "alert-info" : "alert-warning")">@_downloadMessage</div>
+    <details class="panel rules-panel mb-3">
+        <summary>Releases you'll accept <span class="cell-note fw-normal">· @RulesSummary</span></summary>
+
+        <div class="rules-body">
+            <div class="rule-row">
+                <div class="rule-label">Video codec</div>
+                <div class="d-flex flex-wrap gap-3">
+                    @foreach (var (codec, label) in EncodeRules.CodecChoices)
+                    {
+                        <div class="form-check mb-0">
+                            <input id="codec-@codec"
+                                   class="form-check-input"
+                                   type="checkbox"
+                                   checked="@_rules.Codecs.Contains(codec)"
+                                   @onchange="e => ChangeRulesAsync(() => SetCodec(codec, e.Value is true))" />
+                            <label class="form-check-label" for="codec-@codec">@label</label>
+                        </div>
+                    }
+                </div>
+                <div class="cell-note">
+                    @if (_rules.Codecs.Count == 0)
+                    {
+                        <text>None ticked: any codec is fine.</text>
+                    }
+                    else
+                    {
+                        <div class="form-check mb-0">
+                            <input id="codec-unstated"
+                                   class="form-check-input"
+                                   type="checkbox"
+                                   checked="@_rules.AllowUnstatedCodec"
+                                   @onchange="e => ChangeRulesAsync(() => _rules.AllowUnstatedCodec = e.Value is true)" />
+                            <label class="form-check-label" for="codec-unstated">Also allow releases that don't name a codec (e.g. <code>Film.2020.1080p.BluRay</code>)</label>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="rule-row">
+                <div class="rule-label">Leave out releases with</div>
+                <div class="d-flex flex-wrap gap-1 align-items-center">
+                    @foreach (var word in _rules.AvoidWords)
+                    {
+                        <span class="badge text-bg-primary d-inline-flex align-items-center gap-1 rule-chip">
+                            @word
+                            <button type="button" class="btn-close btn-close-white" aria-label="@($"Stop leaving out {word}")" @onclick="() => ChangeRulesAsync(() => _rules.AvoidWords.Remove(word))"></button>
+                        </span>
+                    }
+                    <input class="form-control form-control-sm rule-input" placeholder="HDTV" aria-label="Add a word to leave out" value="@_newAvoid" @onchange="e => AddWordAsync(_rules.AvoidWords, e.Value?.ToString(), avoid: true)" />
+                </div>
+                @if (AvoidSuggestions.Count > 0)
+                {
+                    <div class="d-flex flex-wrap gap-1 mt-1">
+                        @foreach (var (word, why) in AvoidSuggestions)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-secondary rule-suggestion" title="@why" @onclick="() => AddWordAsync(_rules.AvoidWords, word, avoid: true)">+ @word</button>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="rule-row">
+                <div class="rule-label">Only releases with one of</div>
+                <div class="d-flex flex-wrap gap-1 align-items-center">
+                    @foreach (var word in _rules.RequireWords)
+                    {
+                        <span class="badge text-bg-secondary d-inline-flex align-items-center gap-1 rule-chip">
+                            @word
+                            <button type="button" class="btn-close btn-close-white" aria-label="@($"Stop requiring {word}")" @onclick="() => ChangeRulesAsync(() => _rules.RequireWords.Remove(word))"></button>
+                        </span>
+                    }
+                    <input class="form-control form-control-sm rule-input" placeholder="A group you trust" aria-label="Add a word a release must have" value="@_newRequire" @onchange="e => AddWordAsync(_rules.RequireWords, e.Value?.ToString(), avoid: false)" />
+                </div>
+                <div class="cell-note">Empty: no word is needed.</div>
+            </div>
+
+            <div class="cell-note mt-3">
+                Words are matched whole, ignoring dots and dashes: <code>CAM</code> leaves out <code>Film.2020.CAM.x264</code> but not
+                <code>Camera.2020</code>. Changes apply straight away; no need to search again.
+            </div>
+
+            @if (_rules.IgnoredReleases.Count > 0 || _rules.IgnoredFiles.Count > 0)
+            {
+                <div class="rule-row">
+                    <div class="rule-label">Ignored by you</div>
+
+                    @foreach (var file in _rules.IgnoredFiles)
+                    {
+                        <div class="d-flex align-items-center gap-2 flex-wrap">
+                            <span class="pill">File</span>
+                            <span class="file-name">@System.IO.Path.GetFileName(file)</span>
+                            <button type="button" class="btn btn-link btn-sm p-0" @onclick="() => ChangeRulesAsync(() => _rules.IgnoredFiles.Remove(file))">Stop ignoring</button>
+                        </div>
+                    }
+
+                    @foreach (var release in _rules.IgnoredReleases)
+                    {
+                        <div class="d-flex align-items-center gap-2 flex-wrap">
+                            <span class="pill">Release</span>
+                            <span class="file-name">@release</span>
+                            <button type="button" class="btn btn-link btn-sm p-0" @onclick="() => ChangeRulesAsync(() => _rules.IgnoredReleases.Remove(release))">Stop ignoring</button>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </details>
 }
 
 @if (Downloads.Downloads.Count > 0)
 {
-    <div class="panel mb-3">
-        <div class="toolbar mb-2">
+    <section class="section">
+        <div class="toolbar">
             <div class="toolbar-summary">
                 <strong>Downloads</strong> ·
                 @Downloads.Downloads.Count(download => download.Status == SizeReductionDownloadStatus.Downloading) downloading ·
                 @Downloads.Downloads.Count(download => download.Status == SizeReductionDownloadStatus.ReadyToSwap) ready to swap
             </div>
             <div class="toolbar-actions">
-                <button type="button" class="btn btn-secondary btn-sm" disabled="@_checking" @onclick="CheckDownloadsAsync">
-                    @(_checking ? "Checking..." : "Check progress")
+                <button type="button" class="btn btn-secondary btn-sm" disabled="@_busy" @onclick="CheckDownloadsAsync">
+                    Check progress
                 </button>
             </div>
         </div>
 
-        <div class="table-scroll">
-            <table class="table mb-0">
-                <thead>
-                    <tr>
-                        <th>Release</th>
-                        <th>Replaces</th>
-                        <th>Status</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var download in Downloads.Downloads.Take(20))
-                    {
-                        <tr @key="download.Id">
-                            <td>
-                                <div class="file-name">@download.ReleaseTitle</div>
-                                <div class="cell-note">@SizeFormatter.FormatBytes(download.ReleaseBytes) · @download.DriveName</div>
-                            </td>
-                            <td>
-                                <code>@System.IO.Path.GetFileName(download.LibraryFilePath)</code>
-                                <div class="cell-note">@SizeFormatter.FormatBytes(download.LibraryFileBytes)</div>
-                            </td>
-                            <td>
-                                @switch (download.Status)
-                                {
-                                    case SizeReductionDownloadStatus.Downloading:
-                                        <span>Downloading @download.Progress.ToString("P0")</span>
-                                        @if (download.Live is { } live)
-                                        {
-                                            <div class="cell-note">
-                                                @(live.DownloadSpeed > 0 ? $"{SizeFormatter.FormatBytes(live.DownloadSpeed)}/s" : "Not downloading right now")
-                                                @if (live.TimeLeft is { } left)
-                                                {
-                                                    <text> · @(left.TotalDays >= 2 ? $"about {(int)Math.Round(left.TotalDays)} days" : left.TotalHours >= 1 ? $"{(int)left.TotalHours} h {left.Minutes} min" : $"{Math.Max(1, left.Minutes)} min") left</text>
-                                                }
-                                            </div>
-                                            <div class="cell-note">
-                                                Seeds @live.SeedsConnected (@live.SeedsInSwarm in swarm) ·
-                                                leechers @live.LeechersConnected (@live.LeechersInSwarm in swarm)
-                                            </div>
-                                        }
-                                        break;
-                                    case SizeReductionDownloadStatus.ReadyToSwap:
-                                        <span class="status-ok">Ready to swap</span>
-                                        break;
-                                    case SizeReductionDownloadStatus.Swapped:
-                                        <span class="status-ok">Swapped</span>
-                                        break;
-                                    case SizeReductionDownloadStatus.Cancelled:
-                                        <span class="status-muted">Cancelled</span>
-                                        break;
-                                    default:
-                                        <span class="status-warn">Stopped</span>
-                                        break;
-                                }
-                                <div class="cell-note">@download.Message</div>
-                            </td>
-                            <td>
-                                <div class="d-flex gap-2 flex-wrap">
-                                    @if (download.Status == SizeReductionDownloadStatus.ReadyToSwap)
+        @foreach (var download in Downloads.Downloads.Take(20))
+        {
+            <div class="group-card" @key="download.Id">
+                <div class="group-card-header">
+                    <div class="min-w-0">
+                        <div class="group-card-title file-name">@download.ReleaseTitle</div>
+                        <div class="cell-note">
+                            @SizeFormatter.FormatBytes(download.ReleaseBytes), replacing
+                            <span class="file-name">@System.IO.Path.GetFileName(download.LibraryFilePath)</span>
+                            (@SizeFormatter.FormatBytes(download.LibraryFileBytes)) · @download.DriveName
+                        </div>
+                        <div class="cell-note">
+                            @switch (download.Status)
+                            {
+                                case SizeReductionDownloadStatus.Downloading:
+                                    <span>Downloading @download.Progress.ToString("P0")</span>
+                                    @if (download.Live is { } live)
                                     {
-                                        <button type="button" class="btn btn-primary btn-sm" disabled="@_checking" @onclick="() => SwapAsync(download)">Swap now</button>
-                                    }
-                                    @if (download.Status is SizeReductionDownloadStatus.Downloading or SizeReductionDownloadStatus.ReadyToSwap)
-                                    {
-                                        @if (_confirmCancel == download.Id)
+                                        <text> · @(live.DownloadSpeed > 0 ? $"{SizeFormatter.FormatBytes(live.DownloadSpeed)}/s" : "not downloading right now")</text>
+                                        @if (live.TimeLeft is { } left)
                                         {
-                                            <button type="button" class="btn btn-danger btn-sm" disabled="@_checking" @onclick="() => CancelAsync(download)">Cancel it</button>
-                                            <button type="button" class="btn btn-secondary btn-sm" @onclick="() => _confirmCancel = null">Keep</button>
+                                            <text> · @TimeLeft(left) left</text>
                                         }
-                                        else
-                                        {
-                                            <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => _confirmCancel = download.Id">Cancel...</button>
-                                        }
+                                        <text> · @live.SeedsConnected seed(s) of @live.SeedsInSwarm</text>
                                     }
-                                    @if (download.Status is SizeReductionDownloadStatus.Swapped or SizeReductionDownloadStatus.Failed or SizeReductionDownloadStatus.Cancelled)
-                                    {
-                                        <button type="button" class="btn btn-link btn-sm py-0" @onclick="() => Downloads.Forget(download.Id)">Clear</button>
-                                    }
-                                </div>
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
+                                    break;
+                                case SizeReductionDownloadStatus.ReadyToSwap:
+                                    <span class="status-ok">Ready to swap</span>
+                                    break;
+                                case SizeReductionDownloadStatus.Swapped:
+                                    <span class="status-ok">Swapped</span>
+                                    break;
+                                case SizeReductionDownloadStatus.Cancelled:
+                                    <span class="status-muted">Cancelled</span>
+                                    break;
+                                default:
+                                    <span class="status-warn">Stopped</span>
+                                    break;
+                            }
+                            @if (!string.IsNullOrWhiteSpace(download.Message))
+                            {
+                                <div>@download.Message</div>
+                            }
+                        </div>
+                    </div>
 
-        <div class="cell-note mt-2">
+                    <div class="d-flex gap-2 flex-wrap align-items-center">
+                        @if (download.Status == SizeReductionDownloadStatus.ReadyToSwap)
+                        {
+                            <button type="button" class="btn btn-primary btn-sm" disabled="@_busy" @onclick="() => SwapAsync(download)">Swap now</button>
+                        }
+                        @if (download.Status is SizeReductionDownloadStatus.Downloading or SizeReductionDownloadStatus.ReadyToSwap)
+                        {
+                            @if (_confirmCancel == download.Id)
+                            {
+                                <button type="button" class="btn btn-danger btn-sm" disabled="@_busy" @onclick="() => CancelAsync(download)">Cancel it</button>
+                                <button type="button" class="btn btn-secondary btn-sm" @onclick="() => _confirmCancel = null">Keep</button>
+                            }
+                            else
+                            {
+                                <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => _confirmCancel = download.Id">Cancel...</button>
+                            }
+                        }
+                        @if (download.Status is SizeReductionDownloadStatus.Swapped or SizeReductionDownloadStatus.Failed or SizeReductionDownloadStatus.Cancelled)
+                        {
+                            <button type="button" class="btn btn-secondary btn-sm" @onclick="() => Downloads.Forget(download.Id)">Clear</button>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+
+        <div class="cell-note">
             Downloads are tagged <code>@SizeReductionDownloadService.Tag</code> in @Client.Name. Swapping links the new file into
             your library (it keeps seeding), sends the old one to the Recycle Bin and asks Radarr or Sonarr to rescan.
-            The old file's torrent, if any, is left alone. Progress is checked on every Scan.
+            The old file's torrent, if any, is left alone.
         </div>
-    </div>
+    </section>
 }
 
 @if (_unscannedCount > 0)
@@ -217,212 +316,260 @@ else if (!string.IsNullOrWhiteSpace(Search.LastMessage))
     </p>
 }
 
-@if (_groups.Count > 0)
+@if (_profiles.Count > 0)
 {
-    <div class="app-tabs" role="tablist" aria-label="Media type">
-        @foreach (var isTv in new[] { false, true })
-        {
-            <button type="button"
-                    role="tab"
-                    aria-selected="@(_showTv == isTv)"
-                    class="app-tab @(_showTv == isTv ? "active" : null)"
-                    @onclick="() => ShowTab(isTv)">
-                @(isTv ? "TV" : "Movies") <span class="app-tab-count">@_groups.Count(group => group.IsTv == isTv)</span>
-            </button>
-        }
-    </div>
-
-    <div class="toolbar">
-        <div class="toolbar-summary">
-            <strong>@Visible.Count</strong> file(s) ·
-            up to <strong>@SizeFormatter.FormatBytes(Visible.Sum(group => group.BestSavingsBytes))</strong> smaller
-        </div>
-
-        <div class="toolbar-actions">
-            <label class="form-check mb-0 align-self-center">
-                <input type="checkbox"
-                       class="form-check-input"
-                       checked="@_sameQualityOnly"
-                       @onchange="e => SetSameQualityOnly((bool?)e.Value == true)" />
-                <span class="form-check-label">Same quality or better only</span>
-            </label>
-
-            <select class="form-select form-select-sm w-auto"
-                    aria-label="Resolution"
-                    value="@_tier"
-                    @onchange="e => SetTier(e.Value?.ToString())">
-                <option value="">Any resolution</option>
-                @foreach (var tier in Search.Tiers)
-                {
-                    <option value="@tier">@tier.ToLowerInvariant()</option>
-                }
-            </select>
-
-            <select class="form-select form-select-sm w-auto"
-                    aria-label="Sort by"
-                    value="@_sort"
-                    @onchange="e => SetSort(e.Value?.ToString())">
-                <option value="saving">Biggest saving first</option>
-                <option value="size">Largest file first</option>
-                <option value="title">Title</option>
-            </select>
-        </div>
-    </div>
-}
-
-@if (_profiles.Count == 0)
-{
-}
-else if (!_hasSearched)
-{
-    <EmptyState Icon="search" Text="No search has been run yet. Press Search next to a drive." />
-}
-else if (_groups.Count == 0)
-{
-    <EmptyState Icon="check-circle" Text="No smaller releases were found." />
-}
-else if (Visible.Count == 0)
-{
-    <EmptyState Icon="funnel" Text="Nothing matches these filters." />
-}
-else
-{
-    @foreach (var group in Visible.Take(_shown))
+    @if (!_hasSearched)
     {
-        <div class="group-card" @key="group.MediaAssetId">
-            <div class="group-card-header">
-                <div>
-                    <div class="group-card-title">
-                        @group.Title
-                        @if (group.HasUpgrade)
-                        {
-                            <span class="pill">Better quality available</span>
-                        }
-                    </div>
-                    <div class="cell-note">
-                        Yours: @SizeFormatter.FormatBytes(group.SizeBytes) · @group.Resolution.ToLowerInvariant()
-                        @if (!string.IsNullOrWhiteSpace(group.VideoCodec))
-                        {
-                            <text> · @group.VideoCodec</text>
-                        }
-                        · @group.DriveName
-                    </div>
-                </div>
+        <EmptyState Icon="search" Text="No search has been run yet. Press Search next to a drive." />
+    }
+    else if (_groups.Count == 0)
+    {
+        <EmptyState Icon="check-circle" Text="No smaller releases were found." />
+    }
+    else
+    {
+        <div class="app-tabs" role="tablist" aria-label="Media type">
+            @foreach (var isTv in new[] { false, true })
+            {
+                <button type="button"
+                        role="tab"
+                        aria-selected="@(_showTv == isTv)"
+                        class="app-tab @(_showTv == isTv ? "active" : null)"
+                        @onclick="() => ShowTab(isTv)">
+                    @(isTv ? "TV" : "Movies") <span class="app-tab-count">@_groups.Count(group => group.IsTv == isTv && OfferedReleases(group).Any())</span>
+                </button>
+            }
+        </div>
 
-                <div class="group-card-meta">
-                    Up to <strong>@SizeFormatter.FormatBytes(group.BestSavingsBytes)</strong> smaller
-                    (@group.BestSavingsPercent.ToString("P0"))
-                </div>
+        <div class="toolbar">
+            <div class="toolbar-summary">
+                <strong>@Offered.Count</strong> file(s) · up to
+                <strong>@SizeFormatter.FormatBytes(Offered.Sum(BestSavingsBytes))</strong> smaller
             </div>
 
-            <details class="group-card-details">
-                <summary>@group.Releases.Count smaller release(s)</summary>
+            <div class="toolbar-actions">
+                <label class="form-check mb-0 align-self-center">
+                    <input type="checkbox"
+                           class="form-check-input"
+                           checked="@_sameQualityOnly"
+                           @onchange="e => SetSameQuality(e.Value is true)" />
+                    <span class="form-check-label">Same resolution or better</span>
+                </label>
 
-                <div class="table-scroll">
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>Release</th>
-                                <th>Quality</th>
-                                <th class="col-num">Size</th>
-                                <th class="col-num">Saves</th>
-                                <th class="col-num">Seed / leech</th>
-                                <th></th>
-                            </tr>
-                        </thead>
+                <select class="form-select form-select-sm w-auto"
+                        aria-label="Resolution"
+                        value="@_tier"
+                        @onchange="e => SetTier(e.Value?.ToString())">
+                    <option value="">Any resolution</option>
+                    @foreach (var tier in Search.Tiers)
+                    {
+                        <option value="@tier">@tier.ToLowerInvariant()</option>
+                    }
+                </select>
 
-                        <tbody>
-                            @foreach (var release in group.Releases)
-                            {
-                                <tr>
-                                    <td>
-                                        <div class="file-name">@release.Candidate.Title</div>
-                                        <div class="cell-note">@release.Candidate.Indexer</div>
-                                    </td>
-
-                                    <td class="text-nowrap">
-                                        @(string.IsNullOrWhiteSpace(release.CandidateResolution) ? "Not stated" : release.CandidateResolution.ToLowerInvariant())
-                                        @if (!string.IsNullOrWhiteSpace(release.CandidateCodec))
-                                        {
-                                            <text> · @release.CandidateCodec</text>
-                                        }
-
-                                        @if (release.IsUpgrade)
-                                        {
-                                            <div class="status-ok">Higher resolution</div>
-                                        }
-                                        else if (!release.IsSameResolution &&
-                                                 !string.IsNullOrWhiteSpace(release.CandidateResolution))
-                                        {
-                                            <div class="status-warn">Lower resolution</div>
-                                        }
-                                    </td>
-
-                                    <td class="col-num">@SizeFormatter.FormatBytes(release.Candidate.SizeBytes)</td>
-
-                                    <td class="col-num">
-                                        <strong>@SizeFormatter.FormatBytes(release.SavingsBytes)</strong>
-                                        <div class="cell-note">@release.SavingsPercent.ToString("P0")</div>
-                                    </td>
-
-                                    <td class="col-num">@release.Candidate.Seeders / @release.Candidate.Leechers</td>
-
-                                    <td>
-                                        <div class="d-flex gap-2 flex-wrap align-items-center">
-                                            @if (_confirmDownload == release)
-                                            {
-                                                <button type="button" class="btn btn-primary btn-sm" disabled="@_starting" @onclick="() => StartDownloadAsync(release)">
-                                                    @(_starting ? "Adding..." : "Download it")
-                                                </button>
-                                                <button type="button" class="btn btn-secondary btn-sm" disabled="@_starting" @onclick="() => _confirmDownload = null">Cancel</button>
-                                            }
-                                            else if (IsDownloading(group.Path))
-                                            {
-                                                <span class="cell-note">Downloading</span>
-                                            }
-                                            else
-                                            {
-                                                <button type="button" class="btn btn-secondary btn-sm" @onclick="() => _confirmDownload = release">Download</button>
-                                            }
-
-                                            @if (IsWebLink(release.Candidate.InfoUrl))
-                                            {
-                                                <a class="text-nowrap" href="@release.Candidate.InfoUrl" target="_blank" rel="noopener noreferrer">
-                                                    Open
-                                                </a>
-                                            }
-                                        </div>
-
-                                        @if (_rowMessage is { } note && note.Release == release)
-                                        {
-                                            <div class="@(note.Ok ? "status-ok" : "status-warn") mt-1" style="max-width: 32ch; white-space: normal">@note.Text</div>
-                                        }
-
-                                        @if (_confirmDownload == release)
-                                        {
-                                            <div class="cell-note mt-1" style="max-width: 32ch">
-                                                Starts it in @Client.Name. When it's done, the new file is linked into the library
-                                                and yours goes to the Recycle Bin@(_autoSwap ? "" : " when you press Swap now").
-                                            </div>
-                                        }
-                                    </td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-
-                <div class="detail-label">Your file</div>
-                <code>@group.Path</code>
-            </details>
+                <select class="form-select form-select-sm w-auto"
+                        aria-label="Sort by"
+                        value="@_sort"
+                        @onchange="e => SetSort(e.Value?.ToString())">
+                    <option value="saving">Biggest saving first</option>
+                    <option value="size">Largest file first</option>
+                    <option value="title">Title</option>
+                </select>
+            </div>
         </div>
-    }
 
-    @if (Visible.Count > _shown)
-    {
-        <button type="button" class="btn btn-secondary" @onclick="() => _shown += PageSize">
-            Show @Math.Min(PageSize, Visible.Count - _shown) more (@(Visible.Count - _shown) left)
-        </button>
+        @if (LeftOutCount > 0)
+        {
+            <p class="cell-note">
+                @LeftOutCount release(s) left out by your rules or ignored.
+                <button type="button" class="btn btn-link btn-sm p-0 align-baseline" @onclick="() => _showLeftOut = !_showLeftOut">
+                    @(_showLeftOut ? "Hide them" : "Show them")
+                </button>
+            </p>
+        }
+
+        @if (Visible.Count == 0)
+        {
+            <EmptyState Icon="funnel" Text="@(LeftOutCount > 0 ? "Nothing here fits your rules and filters." : "Nothing matches these filters.")" />
+        }
+        else
+        {
+            @foreach (var group in Visible.Take(_shown))
+            {
+                var releases = ShownReleases(group);
+                var fileIgnored = _rules.IsFileIgnored(group.Path);
+
+                var offered = OfferedReleases(group).Any();
+
+                <div class="group-card @(fileIgnored || !offered ? "is-left-out" : null)" @key="group.MediaAssetId">
+                    <div class="group-card-header">
+                        <div class="min-w-0">
+                            <div class="group-card-title">
+                                @group.Title
+                                @if (fileIgnored)
+                                {
+                                    <span class="pill">Ignored</span>
+                                }
+                                else if (HasUpgrade(group))
+                                {
+                                    <span class="pill">Better quality available</span>
+                                }
+                            </div>
+                            <div class="cell-note">
+                                Yours: @SizeFormatter.FormatBytes(group.SizeBytes) · @group.Resolution.ToLowerInvariant()
+                                @if (!string.IsNullOrWhiteSpace(group.VideoCodec))
+                                {
+                                    <text> · @group.VideoCodec</text>
+                                }
+                                · @group.DriveName
+                            </div>
+                        </div>
+
+                        <div class="d-flex flex-wrap align-items-center gap-2">
+                            @if (offered)
+                            {
+                                <span class="group-card-meta">
+                                    Up to <strong>@SizeFormatter.FormatBytes(BestSavingsBytes(group))</strong> smaller
+                                    (@BestSavingsPercent(group).ToString("P0"))
+                                </span>
+                            }
+
+                            @if (fileIgnored)
+                            {
+                                <button type="button" class="btn btn-secondary btn-sm" @onclick="() => ChangeRulesAsync(() => _rules.IgnoredFiles.Remove(group.Path))">Stop ignoring</button>
+                            }
+                            else
+                            {
+                                <button type="button"
+                                        class="btn btn-outline-secondary btn-sm"
+                                        title="Never offer a smaller copy of this file"
+                                        @onclick="() => IgnoreFileAsync(group)">
+                                    Ignore file
+                                </button>
+                            }
+                        </div>
+                    </div>
+
+                    @if (releases.Count > 0)
+                    {
+                        <details class="group-card-details">
+                            <summary>@ReleaseCountText(group)</summary>
+
+                            <div class="table-scroll">
+                                <table class="table">
+                                    <thead>
+                                        <tr>
+                                            <th>Release</th>
+                                            <th>Quality</th>
+                                            <th class="col-num">Size</th>
+                                            <th class="col-num">Saves</th>
+                                            <th class="col-num">Seeds</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+
+                                    <tbody>
+                                        @foreach (var release in releases)
+                                        {
+                                            var leftOut = release.LeftOutBecause;
+
+                                            <tr class="@(leftOut is null ? null : "is-left-out")">
+                                                <td>
+                                                    <div class="file-name">@release.Candidate.Title</div>
+                                                    <div class="cell-note">
+                                                        @release.Candidate.Indexer
+                                                        @if (IsWebLink(release.Candidate.InfoUrl))
+                                                        {
+                                                            <text> · </text>
+                                                            <a href="@release.Candidate.InfoUrl" target="_blank" rel="noopener noreferrer">Open</a>
+                                                        }
+                                                    </div>
+                                                    @if (leftOut is not null)
+                                                    {
+                                                        <div class="status-warn">Left out: @leftOut</div>
+                                                    }
+                                                </td>
+
+                                                <td class="text-nowrap">
+                                                    @QualityText(release)
+                                                    @if (release.IsUpgrade)
+                                                    {
+                                                        <div class="status-ok">Higher resolution</div>
+                                                    }
+                                                    else if (!release.IsSameResolution && !string.IsNullOrWhiteSpace(release.CandidateResolution))
+                                                    {
+                                                        <div class="status-warn">Lower resolution</div>
+                                                    }
+                                                </td>
+
+                                                <td class="col-num">@SizeFormatter.FormatBytes(release.Candidate.SizeBytes)</td>
+
+                                                <td class="col-num">
+                                                    <strong>@SizeFormatter.FormatBytes(release.SavingsBytes)</strong>
+                                                    <div class="cell-note">@release.SavingsPercent.ToString("P0")</div>
+                                                </td>
+
+                                                <td class="col-num">@release.Candidate.Seeders</td>
+
+                                                <td>
+                                                    <div class="d-flex gap-1 justify-content-end align-items-center text-nowrap">
+                                                        @if (leftOut == "Ignored")
+                                                        {
+                                                            <button type="button" class="btn btn-secondary btn-sm" @onclick="() => ChangeRulesAsync(() => _rules.IgnoredReleases.Remove(release.Candidate.Title))">Stop ignoring</button>
+                                                        }
+                                                        else if (leftOut is null)
+                                                        {
+                                                            @if (_confirmDownload == release)
+                                                            {
+                                                                <button type="button" class="btn btn-primary btn-sm" disabled="@_busy" @onclick="() => StartDownloadAsync(release)">Download it</button>
+                                                                <button type="button" class="btn btn-secondary btn-sm" disabled="@_busy" @onclick="() => _confirmDownload = null">Cancel</button>
+                                                            }
+                                                            else if (IsDownloading(group.Path))
+                                                            {
+                                                                <span class="cell-note">Downloading</span>
+                                                            }
+                                                            else
+                                                            {
+                                                                <button type="button" class="btn btn-secondary btn-sm" @onclick="() => _confirmDownload = release">Download</button>
+                                                                <button type="button"
+                                                                        class="btn btn-outline-secondary btn-sm"
+                                                                        title="Ignore this release: hide it from now on"
+                                                                        aria-label="Ignore this release"
+                                                                        @onclick="() => IgnoreReleaseAsync(release)">
+                                                                    <i class="bi bi-eye-slash" aria-hidden="true"></i>
+                                                                </button>
+                                                            }
+                                                        }
+                                                    </div>
+
+                                                    @if (_confirmDownload == release)
+                                                    {
+                                                        <div class="cell-note mt-1 ms-auto" style="max-width: 32ch">
+                                                            Starts it in @Client.Name. When it's done, the new file is linked into the library
+                                                            and yours goes to the Recycle Bin@(_autoSwap ? "" : " when you press Swap now").
+                                                        </div>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div class="detail-label">Your file</div>
+                            <code>@group.Path</code>
+                        </details>
+                    }
+                </div>
+            }
+
+            @if (Visible.Count > _shown)
+            {
+                <button type="button" class="btn btn-secondary" @onclick="() => _shown += PageSize">
+                    Show more (@(Visible.Count - _shown) left)
+                </button>
+            }
+        }
     }
 }
 
@@ -449,159 +596,108 @@ else
 
         public string VideoCodec { get; init; } = string.Empty;
 
+        /// <summary>The releases that fit the rules, best first.</summary>
         public List<SizeReductionCandidate> Releases { get; init; } = [];
 
-        public bool HasUpgrade =>
-            Releases.Any(release => release.IsUpgrade);
-
-        public long BestSavingsBytes =>
-            Releases.Max(release => release.SavingsBytes);
-
-        public double BestSavingsPercent =>
-            Releases.Max(release => release.SavingsPercent);
+        /// <summary>Everything found for it, the left-out ones too.</summary>
+        public List<SizeReductionCandidate> All { get; init; } = [];
     }
+
+    /// <summary>A line at the top of the page, with an Undo when the change can be undone.</summary>
+    private sealed record Note(string Text, bool Ok, Action? Undo = null);
 
     private List<DriveProfile> _profiles = [];
-
-    private SizeReductionCandidate? _confirmDownload;
-    private (SizeReductionCandidate Release, string Text, bool Ok)? _rowMessage;
-    private bool _starting;
-    private bool _checking;
+    private EncodeRules _rules = new();
+    private bool _prowlarrIsSetUp;
     private bool _autoSwap;
-    private string? _downloadMessage;
-    private bool _downloadOk;
 
-    private Guid? _confirmCancel;
-    private Timer? _refresh;
-
-    private async Task CancelAsync(SizeReductionDownload download)
-    {
-        _checking = true;
-
-        try
-        {
-            var problem = await Downloads.CancelAsync(download.Id);
-
-            _downloadOk = problem is null;
-            _downloadMessage = problem ?? $"Cancelled {download.ReleaseTitle}. It and what it downloaded were removed from {Client.Name}; your file is untouched.";
-        }
-        finally
-        {
-            _checking = false;
-            _confirmCancel = null;
-        }
-    }
-
-    // While anything is downloading, the numbers are refreshed every few seconds.
-    private void RefreshWhileDownloading(object? _)
-    {
-        if (Downloads.Downloads.Any(download => download.Status == SizeReductionDownloadStatus.Downloading))
-        {
-            _ = InvokeAsync(Downloads.CheckAsync);
-        }
-    }
-
-    private bool IsDownloading(string libraryFile) =>
-        Downloads.Downloads.Any(download =>
-            download.Status is SizeReductionDownloadStatus.Downloading or SizeReductionDownloadStatus.ReadyToSwap &&
-            string.Equals(download.LibraryFilePath, libraryFile, StringComparison.OrdinalIgnoreCase));
-
-    private async Task StartDownloadAsync(SizeReductionCandidate release)
-    {
-        _starting = true;
-
-        try
-        {
-            string? problem;
-
-            try
-            {
-                problem = await Downloads.StartAsync(release);
-            }
-            catch (Exception exception)
-            {
-                Simplifiarr.Core.Utilities.AppLog.Warn("Starting a Size Reduction download failed.", exception);
-                problem = $"It couldn't be added: {exception.Message}";
-            }
-
-            _downloadOk = problem is null;
-            _downloadMessage = problem ?? $"Added {release.Candidate.Title} to {Client.Name}. It's in Downloads above.";
-
-            // Said next to the button too, where you are looking.
-            _rowMessage = (release, problem ?? $"Added to {Client.Name}; see Downloads at the top.", problem is null);
-        }
-        finally
-        {
-            _starting = false;
-            _confirmDownload = null;
-        }
-    }
-
-    private async Task CheckDownloadsAsync()
-    {
-        _checking = true;
-
-        try
-        {
-            await Downloads.CheckAsync();
-        }
-        finally
-        {
-            _checking = false;
-        }
-    }
-
-    private async Task SwapAsync(SizeReductionDownload download)
-    {
-        _checking = true;
-
-        try
-        {
-            var problem = await Downloads.SwapAsync(download.Id);
-
-            _downloadOk = problem is null;
-            _downloadMessage = problem ?? download.Message;
-        }
-        finally
-        {
-            _checking = false;
-        }
-    }
-
+    /// <summary>Everything found, each saying whether the rules leave it out.</summary>
     private List<SizeReductionCandidate> _found = [];
 
-    /// <summary>Every file with a release, after the quality filter.</summary>
+    /// <summary>Every file with anything found, after the resolution filter.</summary>
     private List<FileGroup> _groups = [];
 
-    private bool _prowlarrIsSetUp;
     private bool _hasSearched;
     private bool _wasSearching;
-
     private int _unscannedCount;
 
     private bool _showTv;
     private bool _sameQualityOnly;
+    private bool _showLeftOut;
     private string _tier = string.Empty;
     private string _sort = "saving";
     private int _shown = PageSize;
 
+    private string _newAvoid = string.Empty;
+    private string _newRequire = string.Empty;
+
+    private Note? _note;
+    private SizeReductionCandidate? _confirmDownload;
+    private Guid? _confirmCancel;
+    private bool _busy;
+    private Timer? _refresh;
+
+    /// <summary>The files on this tab with a release that fits, after the filters.</summary>
+    private List<FileGroup> Offered =>
+        Filtered(_groups).Where(group => OfferedReleases(group).Any()).ToList();
+
+    /// <summary>
+    /// What is listed: files with a release that fits the rules and the
+    /// filters, plus the left-out ones when asked for. A file with nothing
+    /// left to offer drops off.
+    /// </summary>
     private List<FileGroup> Visible =>
-        Sorted(
-            _groups.Where(group =>
-                group.IsTv == _showTv &&
-                (_tier.Length == 0 ||
-                 string.Equals(group.Resolution, _tier, StringComparison.OrdinalIgnoreCase))))
+        Sorted(Filtered(_groups).Where(group => ShownReleases(group).Count > 0)).ToList();
+
+    private int LeftOutCount =>
+        Filtered(_groups).Sum(group => FilteredReleases(group.All).Count(release => release.LeftOutBecause is not null));
+
+    private string RulesSummary
+    {
+        get
+        {
+            var parts = new List<string>
+            {
+                _rules.Codecs.Count == 0
+                    ? "any codec"
+                    : string.Join(" or ", EncodeRules.CodecChoices.Where(choice => _rules.Codecs.Contains(choice.Codec)).Select(choice => choice.Label))
+            };
+
+            if (_rules.AvoidWords.Count > 0)
+            {
+                parts.Add($"{_rules.AvoidWords.Count} word(s) left out");
+            }
+
+            if (_rules.RequireWords.Count > 0)
+            {
+                parts.Add($"{_rules.RequireWords.Count} required");
+            }
+
+            var ignored = _rules.IgnoredReleases.Count + _rules.IgnoredFiles.Count;
+
+            if (ignored > 0)
+            {
+                parts.Add($"{ignored} ignored");
+            }
+
+            return string.Join(" · ", parts);
+        }
+    }
+
+    private List<(string Word, string Note)> AvoidSuggestions =>
+        EncodeRules.AvoidSuggestions
+            .Where(suggestion => !_rules.AvoidWords.Contains(suggestion.Word, StringComparer.OrdinalIgnoreCase))
             .ToList();
 
     protected override async Task OnInitializedAsync()
     {
         _wasSearching = Search.IsSearching;
 
+        Search.Changed += OnSearchChanged;
         Downloads.Changed += OnDownloadsChanged;
 
+        // While anything is downloading, the numbers are refreshed every few seconds.
         _refresh = new Timer(RefreshWhileDownloading, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
-
-        Search.Changed += OnSearchChanged;
 
         var settings =
             await SettingsService.GetSettingsAsync();
@@ -611,22 +707,25 @@ else
             !string.IsNullOrWhiteSpace(settings.ProwlarrApiKey);
 
         _autoSwap = settings.SizeReductionAutoSwap;
-
-        // Fresh progress for anything downloading.
-        _ = InvokeAsync(Downloads.CheckAsync);
+        _rules = settings.SizeReductionRules ?? new EncodeRules();
 
         _profiles =
             (await SettingsService.GetEnabledDriveProfilesAsync())
                 .OrderBy(profile => profile.Name)
                 .ToList();
 
+        // Fresh progress for anything downloading.
+        _ = InvokeAsync(Downloads.CheckAsync);
+
         await LoadAsync();
 
         // Open on whichever tab has something in it.
         _showTv =
-            !_groups.Any(group => !group.IsTv) &&
-            _groups.Any(group => group.IsTv);
+            !_groups.Any(group => !group.IsTv && group.Releases.Count > 0) &&
+            _groups.Any(group => group.IsTv && group.Releases.Count > 0);
     }
+
+    // ---------------------------------------------------------- Searching
 
     private void Start(string? driveName)
     {
@@ -649,10 +748,6 @@ else
 
             _wasSearching = Search.IsSearching;
 
-        Downloads.Changed += OnDownloadsChanged;
-
-        _refresh = new Timer(RefreshWhileDownloading, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
-
             if (justFinished)
             {
                 await LoadAsync();
@@ -664,12 +759,9 @@ else
 
     private async Task LoadAsync()
     {
-        _found = await Search.GetFoundAsync();
-
+        _found = await Search.GetFoundAsync(includeLeftOut: true);
         _unscannedCount = await Search.CountUnscannedAssetsAsync();
-
-        _hasSearched =
-            _profiles.Any(profile => Search.GetLastSearchUtc(profile.Name).HasValue);
+        _hasSearched = _profiles.Any(profile => Search.GetLastSearchUtc(profile.Name).HasValue);
 
         BuildGroups();
     }
@@ -678,44 +770,63 @@ else
     {
         _groups =
             _found
-                .Where(release =>
-                    !_sameQualityOnly || release.IsSameResolution || release.IsUpgrade)
                 .GroupBy(release => release.MediaAssetId)
                 .Select(group =>
                 {
                     var first = group.First();
+                    var isTv = first.Season is not null && first.Episode is not null;
 
-                    var isTv =
-                        first.Season is not null && first.Episode is not null;
-
-                    var title =
-                        first.AssetYear is null
-                            ? first.AssetTitle
-                            : $"{first.AssetTitle} ({first.AssetYear})";
+                    var all =
+                        group
+                            .OrderByDescending(release => release.IsUpgrade)
+                            .ThenByDescending(release => release.IsSameResolution)
+                            .ThenByDescending(release => release.SavingsBytes)
+                            .ToList();
 
                     return new FileGroup
                     {
                         MediaAssetId = group.Key,
                         Title = isTv
                             ? $"{first.AssetTitle} S{first.Season:00}E{first.Episode:00}"
-                            : title,
+                            : first.AssetYear is null ? first.AssetTitle : $"{first.AssetTitle} ({first.AssetYear})",
                         IsTv = isTv,
                         DriveName = first.DriveProfileName,
                         Path = first.CanonicalPath,
                         SizeBytes = first.AssetSizeBytes,
                         Resolution = first.AssetResolution,
                         VideoCodec = first.AssetVideoCodec,
-                        Releases = group
-                            .OrderByDescending(release => release.IsUpgrade)
-                            .ThenByDescending(release => release.IsSameResolution)
-                            .ThenByDescending(release => release.SavingsBytes)
-                            .ToList()
+                        All = all,
+                        Releases = all.Where(release => release.LeftOutBecause is null).ToList()
                     };
                 })
                 .ToList();
-
-        _shown = PageSize;
     }
+
+    // ------------------------------------------------------------ Filters
+
+    private IEnumerable<FileGroup> Filtered(IEnumerable<FileGroup> groups) =>
+        groups.Where(group =>
+            group.IsTv == _showTv &&
+            (_tier.Length == 0 || string.Equals(group.Resolution, _tier, StringComparison.OrdinalIgnoreCase)));
+
+    private IEnumerable<SizeReductionCandidate> FilteredReleases(IEnumerable<SizeReductionCandidate> releases) =>
+        releases.Where(release => !_sameQualityOnly || release.IsSameResolution || release.IsUpgrade);
+
+    private List<SizeReductionCandidate> ShownReleases(FileGroup group) =>
+        FilteredReleases(_showLeftOut ? group.All : group.Releases).ToList();
+
+    /// <summary>The releases that fit both the rules and the filters.</summary>
+    private IEnumerable<SizeReductionCandidate> OfferedReleases(FileGroup group) =>
+        FilteredReleases(group.Releases);
+
+    private bool HasUpgrade(FileGroup group) =>
+        OfferedReleases(group).Any(release => release.IsUpgrade);
+
+    private long BestSavingsBytes(FileGroup group) =>
+        OfferedReleases(group).Select(release => release.SavingsBytes).DefaultIfEmpty(0).Max();
+
+    private double BestSavingsPercent(FileGroup group) =>
+        OfferedReleases(group).Select(release => release.SavingsPercent).DefaultIfEmpty(0).Max();
 
     private IEnumerable<FileGroup> Sorted(IEnumerable<FileGroup> groups) =>
         _sort switch
@@ -723,8 +834,8 @@ else
             "title" => groups.OrderBy(group => group.Title, StringComparer.OrdinalIgnoreCase),
             "size" => groups.OrderByDescending(group => group.SizeBytes),
             _ => groups
-                .OrderByDescending(group => group.HasUpgrade)
-                .ThenByDescending(group => group.BestSavingsBytes)
+                .OrderByDescending(HasUpgrade)
+                .ThenByDescending(BestSavingsBytes)
         };
 
     private void ShowTab(bool tv)
@@ -733,11 +844,10 @@ else
         _shown = PageSize;
     }
 
-    private void SetSameQualityOnly(bool value)
+    private void SetSameQuality(bool value)
     {
         _sameQualityOnly = value;
-
-        BuildGroups();
+        _shown = PageSize;
     }
 
     private void SetTier(string? tier)
@@ -752,18 +862,201 @@ else
         _shown = PageSize;
     }
 
+    // -------------------------------------------------------------- Rules
+
+    /// <summary>Changes the rules, saves them, and shows the list as they now leave it.</summary>
+    private async Task ChangeRulesAsync(Action change)
+    {
+        change();
+
+        var settings =
+            await SettingsService.GetSettingsAsync();
+
+        settings.SizeReductionRules = _rules;
+
+        await SettingsService.SaveSettingsAsync(settings);
+
+        await LoadAsync();
+    }
+
+    private void SetCodec(string codec, bool wanted)
+    {
+        _rules.Codecs.Remove(codec);
+
+        if (wanted)
+        {
+            _rules.Codecs.Add(codec);
+        }
+    }
+
+    private async Task AddWordAsync(List<string> words, string? text, bool avoid)
+    {
+        if (avoid)
+        {
+            _newAvoid = string.Empty;
+        }
+        else
+        {
+            _newRequire = string.Empty;
+        }
+
+        if (EncodeRules.NormalizeWord(text) is { } word &&
+            !words.Contains(word, StringComparer.OrdinalIgnoreCase))
+        {
+            await ChangeRulesAsync(() => words.Add(word));
+        }
+    }
+
+    private async Task IgnoreReleaseAsync(SizeReductionCandidate release)
+    {
+        var title = release.Candidate.Title;
+
+        await ChangeRulesAsync(() => _rules.IgnoredReleases.Add(title));
+
+        _note = new Note($"Ignored {title}. It stays hidden after later searches.", true, () => _rules.IgnoredReleases.Remove(title));
+    }
+
+    private async Task IgnoreFileAsync(FileGroup group)
+    {
+        var path = group.Path;
+
+        await ChangeRulesAsync(() => _rules.IgnoredFiles.Add(path));
+
+        _note = new Note($"Ignored {group.Title}. Smaller copies of it won't be offered.", true, () => _rules.IgnoredFiles.Remove(path));
+    }
+
+    private async Task UndoAsync()
+    {
+        if (_note?.Undo is not { } undo)
+        {
+            return;
+        }
+
+        _note = null;
+
+        await ChangeRulesAsync(undo);
+    }
+
+    // ---------------------------------------------------------- Downloads
+
+    private bool IsDownloading(string libraryFile) =>
+        Downloads.Downloads.Any(download =>
+            download.Status is SizeReductionDownloadStatus.Downloading or SizeReductionDownloadStatus.ReadyToSwap &&
+            string.Equals(download.LibraryFilePath, libraryFile, StringComparison.OrdinalIgnoreCase));
+
+    private Task StartDownloadAsync(SizeReductionCandidate release) =>
+        RunAsync(async () =>
+        {
+            string? problem;
+
+            try
+            {
+                problem = await Downloads.StartAsync(release);
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn("Starting a Size Reduction download failed.", exception);
+                problem = $"It couldn't be added: {exception.Message}";
+            }
+
+            _confirmDownload = null;
+            _note = new Note(problem ?? $"Added {release.Candidate.Title} to {Client.Name}. It's under Downloads.", problem is null);
+        });
+
+    private Task CheckDownloadsAsync() =>
+        RunAsync(Downloads.CheckAsync);
+
+    private Task SwapAsync(SizeReductionDownload download) =>
+        RunAsync(async () =>
+        {
+            var problem = await Downloads.SwapAsync(download.Id);
+
+            _note = new Note(problem ?? download.Message, problem is null);
+        });
+
+    private Task CancelAsync(SizeReductionDownload download) =>
+        RunAsync(async () =>
+        {
+            var problem = await Downloads.CancelAsync(download.Id);
+
+            _confirmCancel = null;
+            _note = new Note(problem ?? $"Cancelled {download.ReleaseTitle}. It and what it downloaded were removed from {Client.Name}; your file is untouched.", problem is null);
+        });
+
+    /// <summary>One download action at a time.</summary>
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+
+        try
+        {
+            await action();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void RefreshWhileDownloading(object? _)
+    {
+        if (Downloads.Downloads.Any(download => download.Status == SizeReductionDownloadStatus.Downloading))
+        {
+            _ = InvokeAsync(Downloads.CheckAsync);
+        }
+    }
+
+    private void OnDownloadsChanged() =>
+        _ = InvokeAsync(StateHasChanged);
+
+    // ------------------------------------------------------------- Labels
+
+    private string ReleaseCountText(FileGroup group)
+    {
+        var offered = FilteredReleases(group.Releases).Count();
+        var leftOut = _showLeftOut ? FilteredReleases(group.All).Count() - offered : 0;
+
+        return leftOut == 0
+            ? $"{offered} smaller release(s)"
+            : $"{offered} smaller release(s), {leftOut} left out";
+    }
+
+    private static string QualityText(SizeReductionCandidate release)
+    {
+        var resolution =
+            string.IsNullOrWhiteSpace(release.CandidateResolution) ? "Resolution not stated" : release.CandidateResolution.ToLowerInvariant();
+
+        var codec =
+            EncodeRules.CodecOf(release.Candidate.Title, release.CandidateCodec);
+
+        var label =
+            EncodeRules.CodecChoices.FirstOrDefault(choice => choice.Codec == codec).Label ?? codec;
+
+        return string.IsNullOrWhiteSpace(label) ? resolution : $"{resolution} · {label}";
+    }
+
+    private static string TimeLeft(TimeSpan left) =>
+        left.TotalDays >= 2 ? $"about {(int)Math.Round(left.TotalDays)} days"
+        : left.TotalHours >= 1 ? $"{(int)left.TotalHours} h {left.Minutes} min"
+        : $"{Math.Max(1, left.Minutes)} min";
+
     // An indexer's link is shown as given, so only ever as a web link.
     private static bool IsWebLink(string? url) =>
         Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
         (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 
-    private static string FormatTime(DateTime utc) =>
-        DateTime.SpecifyKind(utc, DateTimeKind.Utc)
-            .ToLocalTime()
-            .ToString("g");
+    // "Nov 10"; the year too when it isn't this one.
+    private static string FormatTime(DateTime utc)
+    {
+        var local = DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime();
 
-    private void OnDownloadsChanged() =>
-        _ = InvokeAsync(StateHasChanged);
+        return local.ToString(local.Year == DateTime.Now.Year ? "MMM d" : "MMM d, yyyy");
+    }
 
     public void Dispose()
     {

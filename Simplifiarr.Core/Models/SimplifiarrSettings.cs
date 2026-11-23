@@ -164,6 +164,12 @@ public class SimplifiarrSettings
     /// </summary>
     public bool SizeReductionAutoSwap { get; set; }
 
+    /// <summary>
+    /// Which smaller releases Size Reduction offers, and what has been
+    /// ignored. Set on the Size Reduction page.
+    /// </summary>
+    public EncodeRules SizeReductionRules { get; set; } = new();
+
     /// <summary>What Junk Cleanup looks for. Set on the Junk page.</summary>
     public JunkRules Junk { get; set; } = new();
 }

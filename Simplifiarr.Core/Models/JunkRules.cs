@@ -29,8 +29,57 @@ public class JunkRules
     /// <summary>File types that are always junk, such as ".sfv".</summary>
     public List<string> Extensions { get; set; } = [.. DefaultExtensions];
 
-    /// <summary>Images that aren't named like artwork (poster.jpg, fanart.jpg...).</summary>
+    /// <summary>
+    /// The kinds of picture media players read from next to the media, and
+    /// the file names each goes by. "season01-poster.jpg" and numbered extras
+    /// ("backdrop2.jpg") count as the same kind.
+    /// </summary>
+    public static readonly IReadOnlyList<(string Kind, string Label, string[] Names)> PictureKinds =
+    [
+        ("Poster", "Posters", ["folder", "poster", "cover"]),
+        ("Backdrop", "Backdrops", ["backdrop", "fanart", "background"]),
+        ("Logo", "Logos", ["logo", "clearlogo"]),
+        ("Landscape", "Landscape", ["landscape", "thumb"]),
+        ("Banner", "Banners", ["banner"]),
+        ("ClearArt", "Clear art", ["clearart", "art"]),
+        ("Disc", "Disc art", ["disc", "discart"]),
+        ("Box", "Box art", ["box", "boxrear", "back"]),
+        ("KeyArt", "Key art", ["keyart"]),
+        ("CharacterArt", "Character art", ["characterart"]),
+        ("Menu", "Menu art", ["menu"]),
+        ("Screenshot", "Screenshots", ["screenshot"])
+    ];
+
+    /// <summary>Images that aren't a picture kind you keep (poster.jpg, fanart.jpg...).</summary>
     public bool UnrecognizedImages { get; set; } = true;
+
+    /// <summary>
+    /// Picture kinds (<see cref="PictureKinds"/>) unticked on the page: their
+    /// files count as junk too. Stored this way round so a kind added later
+    /// starts out kept.
+    /// </summary>
+    public List<string> UnwantedPictures { get; set; } = [];
+
+    /// <summary>
+    /// The picture kind an image's name is ("season01-poster" -> Poster,
+    /// "backdrop2" -> Backdrop), or null when it isn't named like one.
+    /// </summary>
+    public static (string Kind, string Label)? PictureKindOf(string nameWithoutExtension)
+    {
+        var name = nameWithoutExtension.TrimEnd('0', '1', '2', '3', '4', '5', '6', '7', '8', '9');
+
+        foreach (var (kind, label, names) in PictureKinds)
+        {
+            if (names.Any(known =>
+                    string.Equals(known, name, StringComparison.OrdinalIgnoreCase) ||
+                    name.EndsWith($"-{known}", StringComparison.OrdinalIgnoreCase)))
+            {
+                return (kind, label);
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>File names that are junk, with * as a wildcard: "RARBG*.txt".</summary>
     public List<string> JunkNames { get; set; } = [];
@@ -53,6 +102,10 @@ public class JunkRules
             value = "." + value;
         }
 
-        return value.Length > 1 && value.Length <= 16 && value[1..].All(char.IsLetterOrDigit) ? value : null;
+        // Letters and digits, plus the marks some apps use: ".!qB" for
+        // qBittorrent's unfinished files, ".part~" and the like.
+        return value.Length > 1 && value.Length <= 16 && value[1..].All(c => char.IsLetterOrDigit(c) || "!_-~$#@+".Contains(c))
+            ? value
+            : null;
     }
 }

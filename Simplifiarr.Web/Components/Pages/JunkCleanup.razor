@@ -16,10 +16,10 @@
 <PageHeader Title="Junk"
             Subtitle="Release leftovers sitting in your libraries: sample clips, checksum and tracker files, and stray images. Removing one moves it to Quarantine, so it can be put back." />
 
-<details class="panel junk-rules mb-3">
+<details class="panel rules-panel mb-3">
     <summary>What counts as junk</summary>
 
-    <div class="junk-rules-body">
+    <div class="rules-body">
         <div class="form-check">
             <input id="junk-samples" class="form-check-input" type="checkbox" checked="@_rules.SampleVideos" @onchange="e => ChangeAsync(() => _rules.SampleVideos = e.Value is true)" />
             <label class="form-check-label" for="junk-samples">Sample clips (<code>sample.mkv</code>, <code>Movie-sample.mkv</code>)</label>
@@ -30,27 +30,48 @@
         </div>
         <div class="form-check">
             <input id="junk-images" class="form-check-input" type="checkbox" checked="@_rules.UnrecognizedImages" @onchange="e => ChangeAsync(() => _rules.UnrecognizedImages = e.Value is true)" />
-            <label class="form-check-label" for="junk-images">Images not named like artwork (keeps <code>poster.jpg</code>, <code>fanart.jpg</code>, <code>folder.jpg</code> and the like)</label>
+            <label class="form-check-label" for="junk-images">Images that aren't pictures you keep (like <code>screen1.jpg</code> or a tracker's banner)</label>
         </div>
 
-        <div class="junk-rule-row">
-            <div class="junk-rule-label">These file types</div>
+        @if (_rules.UnrecognizedImages)
+        {
+            <div class="rule-row">
+                <div class="rule-label">Pictures to keep</div>
+                <div class="d-flex flex-wrap gap-3">
+                    @foreach (var (kind, label, names) in JunkRules.PictureKinds)
+                    {
+                        <div class="form-check mb-0" title="@string.Join(", ", names.Select(name => name + ".jpg"))">
+                            <input id="keep-@kind"
+                                   class="form-check-input"
+                                   type="checkbox"
+                                   checked="@(!_rules.UnwantedPictures.Contains(kind))"
+                                   @onchange="e => ChangeAsync(() => SetPictureKept(kind, e.Value is true))" />
+                            <label class="form-check-label" for="keep-@kind">@label</label>
+                        </div>
+                    }
+                </div>
+                <div class="cell-note">Unticked ones count as junk. Hover one to see the file names it covers.</div>
+            </div>
+        }
+
+        <div class="rule-row">
+            <div class="rule-label">These file types</div>
             <div class="d-flex flex-wrap gap-1 align-items-center">
                 @foreach (var extension in _rules.Extensions)
                 {
-                    <span class="badge text-bg-primary d-inline-flex align-items-center gap-1 junk-chip">
+                    <span class="badge text-bg-primary d-inline-flex align-items-center gap-1 rule-chip">
                         @extension
                         <button type="button" class="btn-close btn-close-white" aria-label="@($"Stop treating {extension} as junk")" @onclick="() => ChangeAsync(() => _rules.Extensions.Remove(extension))"></button>
                     </span>
                 }
-                <input class="form-control form-control-sm junk-input" placeholder=".exe" aria-label="Add a file type" value="@_newExtension" @onchange="e => AddExtensionAsync(e.Value?.ToString())" />
+                <input class="form-control form-control-sm rule-input" placeholder=".exe" aria-label="Add a file type" value="@_newExtension" @onchange="e => AddExtensionAsync(e.Value?.ToString())" />
             </div>
             @if (Suggestions.Count > 0)
             {
                 <div class="d-flex flex-wrap gap-1 mt-1">
                     @foreach (var (extension, note) in Suggestions)
                     {
-                        <button type="button" class="btn btn-sm btn-outline-secondary junk-suggestion" title="@note" @onclick="() => AddExtensionAsync(extension)">+ @extension</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary rule-suggestion" title="@note" @onclick="() => AddExtensionAsync(extension)">+ @extension</button>
                     }
                 </div>
             }
@@ -60,31 +81,31 @@
             }
         </div>
 
-        <div class="junk-rule-row">
-            <div class="junk-rule-label">Files named</div>
+        <div class="rule-row">
+            <div class="rule-label">Files named</div>
             <div class="d-flex flex-wrap gap-1 align-items-center">
                 @foreach (var name in _rules.JunkNames)
                 {
-                    <span class="badge text-bg-primary d-inline-flex align-items-center gap-1 junk-chip">
+                    <span class="badge text-bg-primary d-inline-flex align-items-center gap-1 rule-chip">
                         @name
                         <button type="button" class="btn-close btn-close-white" aria-label="@($"Stop treating {name} as junk")" @onclick="() => ChangeAsync(() => _rules.JunkNames.Remove(name))"></button>
                     </span>
                 }
-                <input class="form-control form-control-sm junk-input" placeholder="RARBG*.txt" aria-label="Add a junk file name" value="@_newJunkName" @onchange="e => AddNameAsync(_rules.JunkNames, e.Value?.ToString(), keep: false)" />
+                <input class="form-control form-control-sm rule-input" placeholder="RARBG*.txt" aria-label="Add a junk file name" value="@_newJunkName" @onchange="e => AddNameAsync(_rules.JunkNames, e.Value?.ToString(), keep: false)" />
             </div>
         </div>
 
-        <div class="junk-rule-row">
-            <div class="junk-rule-label">Never junk</div>
+        <div class="rule-row">
+            <div class="rule-label">Never junk</div>
             <div class="d-flex flex-wrap gap-1 align-items-center">
                 @foreach (var name in _rules.KeepNames)
                 {
-                    <span class="badge text-bg-secondary d-inline-flex align-items-center gap-1 junk-chip">
+                    <span class="badge text-bg-secondary d-inline-flex align-items-center gap-1 rule-chip">
                         @name
                         <button type="button" class="btn-close btn-close-white" aria-label="@($"Stop keeping {name}")" @onclick="() => ChangeAsync(() => _rules.KeepNames.Remove(name))"></button>
                     </span>
                 }
-                <input class="form-control form-control-sm junk-input" placeholder="theme.mp3" aria-label="Add a file name to always keep" value="@_newKeepName" @onchange="e => AddNameAsync(_rules.KeepNames, e.Value?.ToString(), keep: true)" />
+                <input class="form-control form-control-sm rule-input" placeholder="theme.mp3" aria-label="Add a file name to always keep" value="@_newKeepName" @onchange="e => AddNameAsync(_rules.KeepNames, e.Value?.ToString(), keep: true)" />
             </div>
         </div>
 
@@ -321,6 +342,16 @@ else
         LoadCandidates();
 
         _rulesNote = "Saved. Anything a rule no longer covers is already gone from the list; to find files a new rule covers, look again.";
+    }
+
+    private void SetPictureKept(string kind, bool keep)
+    {
+        _rules.UnwantedPictures.RemoveAll(unwanted => unwanted == kind);
+
+        if (!keep)
+        {
+            _rules.UnwantedPictures.Add(kind);
+        }
     }
 
     private async Task AddExtensionAsync(string? text)
