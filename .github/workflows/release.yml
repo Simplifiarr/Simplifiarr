@@ -93,7 +93,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $prerelease = if ('${{ steps.version.outputs.version }}' -match '-') { '--prerelease' } else { $null }
+
+          # The checkout has the tag only as a pointer to the commit, so
+          # fetch the tag itself to read its message: the release notes.
+          git fetch --force --depth=1 origin "+refs/tags/${env:GITHUB_REF_NAME}:refs/tags/${env:GITHUB_REF_NAME}"
+          git tag -l --format='%(contents)' $env:GITHUB_REF_NAME | Set-Content notes.md -Encoding utf8
+
           gh release create $env:GITHUB_REF_NAME (Get-ChildItem dist -File).FullName `
             --title "Simplifiarr ${{ steps.version.outputs.version }}" `
-            --notes-from-tag `
+            --notes-file notes.md `
             $prerelease
