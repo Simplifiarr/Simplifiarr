@@ -28,9 +28,9 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
 
@@ -41,6 +41,7 @@ jobs:
           $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '${{ inputs.version }}' }
           if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') { throw "'$version' isn't a version like 1.2.3" }
           "version=$version" >> $env:GITHUB_OUTPUT
+          "number=$($version.Split('-')[0])" >> $env:GITHUB_OUTPUT
 
       - name: Test
         run: dotnet test Simplifiarr.Tests --configuration Release --nologo
@@ -67,7 +68,7 @@ jobs:
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y | Out-Null }
-          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" "/DPublishDir=..\publish" installer\Simplifiarr.iss
+          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" "/DFileVersion=${{ steps.version.outputs.number }}" "/DPublishDir=..\publish" installer\Simplifiarr.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed." }
 
       - name: Checksums
@@ -80,7 +81,7 @@ jobs:
 
       - name: Keep the test build
         if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: simplifiarr-${{ steps.version.outputs.version }}
           path: dist/*

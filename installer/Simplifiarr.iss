@@ -20,6 +20,12 @@
   #define AppVersion "0.0.0"
 #endif
 
+; Windows file versions are numbers only (1.2.3), so a test build's
+; 1.2.3-test.1 passes its number part here.
+#ifndef FileVersion
+  #define FileVersion AppVersion
+#endif
+
 #ifndef PublishDir
   #define PublishDir "..\publish"
 #endif
@@ -36,7 +42,7 @@ AppPublisher=Simplifiarr
 AppPublisherURL=https://github.com/Simplifiarr/Simplifiarr
 AppSupportURL=https://github.com/Simplifiarr/Simplifiarr/issues
 AppUpdatesURL=https://github.com/Simplifiarr/Simplifiarr/releases
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#FileVersion}
 DefaultDirName={autopf}\Simplifiarr
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
