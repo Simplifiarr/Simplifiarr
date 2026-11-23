@@ -337,7 +337,7 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  ExePath, BinPath, Port, Data, RuleName: String;
+  ExePath, BinPath, Port, Data, RuleName, Shown: String;
 begin
   if CurStep <> ssPostInstall then
     Exit;
@@ -357,7 +357,14 @@ begin
     if (Data <> '') and (CompareText(Data, DefaultDataFolder()) <> 0) then
       BinPath := BinPath + ' --Simplifiarr:DataPath=\"' + Data + '\"';
 
-    Sc('create "' + ServiceName() + '" binPath= "' + BinPath + '" start= auto DisplayName= "Simplifiarr"');
+    { A second copy gets its own name in the Services list, so the two
+      can't be mixed up. }
+    if CompareText(ServiceName(), 'Simplifiarr') = 0 then
+      Shown := 'Simplifiarr'
+    else
+      Shown := 'Simplifiarr (' + ServiceName() + ')';
+
+    Sc('create "' + ServiceName() + '" binPath= "' + BinPath + '" start= auto DisplayName= "' + Shown + '"');
     Sc('description "' + ServiceName() + '" "Simplifiarr media library tools (http://localhost:' + Port + ')"');
   end;
 
