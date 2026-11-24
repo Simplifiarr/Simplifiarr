@@ -20,6 +20,9 @@ public enum HistoryActionType
     SizeReduced,
     EpisodeRolledOff,
     MovieRolledOff,
-    SeasonMerged
+    SeasonMerged,
+    MusicTidied,
+    MusicConverted,
+    MusicTagged
 }
 

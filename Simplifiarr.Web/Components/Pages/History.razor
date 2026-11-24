@@ -208,6 +208,8 @@ else
             record.ActionType == HistoryActionType.SeedMoved),
         new("titles", "Titles moved or deleted", record =>
             record.ActionType is HistoryActionType.TitleMoved or HistoryActionType.TitleDeleted or HistoryActionType.SeasonMerged),
+        new("music", "Music", record =>
+            record.ActionType is HistoryActionType.MusicTidied or HistoryActionType.MusicConverted or HistoryActionType.MusicTagged),
         new("failed", "Didn't work", record => !record.Success)
     ];
 
@@ -337,6 +339,12 @@ else
                 record.Success ? "Title deleted (Recycle Bin)" : "Couldn't delete title",
             HistoryActionType.SeasonMerged =>
                 record.Success ? "Split season merged into one folder" : "Season merged, some files left",
+            HistoryActionType.MusicTidied =>
+                record.Success ? "Music folder tidied" : "Music folder tidied, some files left",
+            HistoryActionType.MusicConverted =>
+                record.Success ? "Music track converted" : "Couldn't convert a music track",
+            HistoryActionType.MusicTagged =>
+                record.Success ? "Music tags fixed from MusicBrainz" : "Couldn't fix music tags",
             _ => record.ActionType.ToString()
         };
 }

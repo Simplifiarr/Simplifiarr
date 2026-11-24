@@ -21,6 +21,7 @@ public static class SpaceSavings
         (HistoryActionType.ConversionSucceeded, "Copies made hardlinks", "potential-waste", "file", "files"),
         (HistoryActionType.DuplicateQuarantined, "Duplicates", "duplicates", "copy", "copies"),
         (HistoryActionType.SizeReduced, "Size Reduction", "size-reduction", "file", "files"),
+        (HistoryActionType.MusicConverted, "Music converted", "music", "track", "tracks"),
         (HistoryActionType.JunkFileQuarantined, "Junk Cleanup", "junk-cleanup", "file", "files"),
         (HistoryActionType.DownloadCopyRemoved, "Download Cleanup", "download-cleanup", "file", "files"),
         (HistoryActionType.SeedMoved, "Move Seeds", "move-seeds", "torrent", "torrents"),

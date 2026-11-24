@@ -33,6 +33,7 @@ public static class FfprobeLocator
 
             _configuredPath = configuredPath;
             _searched = false;
+            _ffmpegSearched = false;
             _found = null;
         }
     }
@@ -65,6 +66,57 @@ public static class FfprobeLocator
             }
 
             return _found;
+        }
+    }
+
+    private static string? _ffmpeg;
+    private static bool _ffmpegSearched;
+
+    /// <summary>
+    /// Full path to ffmpeg.exe (used to check and convert music): next to
+    /// ffprobe when that was found, otherwise the same places ffprobe is
+    /// looked for. Null when it isn't installed.
+    /// </summary>
+    public static string? FindFfmpeg()
+    {
+        var probe = Find();
+
+        lock (Sync)
+        {
+            if (_ffmpegSearched)
+            {
+                return _ffmpeg;
+            }
+
+            _ffmpegSearched = true;
+
+            var folders =
+                (probe is null ? [] : new[] { Path.GetDirectoryName(probe)! })
+                    .Concat(GetCandidateFolders());
+
+            foreach (var folder in folders)
+            {
+                try
+                {
+                    var candidate = Path.Combine(folder, "ffmpeg.exe");
+
+                    if (File.Exists(candidate))
+                    {
+                        _ffmpeg = Path.GetFullPath(candidate);
+                        AppLog.Info($"Using ffmpeg at '{_ffmpeg}'.");
+
+                        return _ffmpeg;
+                    }
+                }
+                catch
+                {
+                    // A malformed PATH entry is not worth failing over.
+                }
+            }
+
+            AppLog.Warn("ffmpeg was not found, so music can't be checked for damage or converted. Install ffmpeg (winget install ffmpeg).");
+
+            return null;
         }
     }
 

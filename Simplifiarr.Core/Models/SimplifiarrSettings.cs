@@ -169,6 +169,17 @@ public class SimplifiarrSettings
     /// </summary>
     public DateTime? DetailedLoggingUntilUtc { get; set; }
 
+    /// <summary>What Music converts to unless you pick otherwise.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter<MusicConvertFormat>))]
+    public MusicConvertFormat MusicConvertFormat { get; set; } = MusicConvertFormat.Mp3V0;
+
+    /// <summary>What happens to the original when Music converts a track, unless you pick otherwise.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter<MusicConvertMode>))]
+    public MusicConvertMode MusicConvertMode { get; set; } = MusicConvertMode.OtherFolder;
+
+    /// <summary>Where "save the new file in another folder" writes, in the same Artist\Album layout.</summary>
+    public string MusicConvertOutputFolder { get; set; } = string.Empty;
+
     /// <summary>When Size Reduction searches the indexers by itself. Off by default.</summary>
     [JsonConverter(typeof(JsonStringEnumConverter<AutoScanMode>))]
     public AutoScanMode SizeReductionAuto { get; set; } =

@@ -118,6 +118,9 @@ builder.Services.AddSingleton<IUpdateService>(services =>
     new UpdateService(new HttpClient(), services.GetRequiredService<IUpdateLauncher>()));
 builder.Services.AddHostedService<Simplifiarr.Web.UpdateCheckService>();
 builder.Services.AddSingleton<ISupportBundleService, SupportBundleService>();
+builder.Services.AddSingleton<IMusicCleanupService, MusicCleanupService>();
+builder.Services.AddSingleton<IMusicConvertService, MusicConvertService>();
+builder.Services.AddHttpClient<IMusicBrainzClient, MusicBrainzClient>();
 
 var app = builder.Build();
 

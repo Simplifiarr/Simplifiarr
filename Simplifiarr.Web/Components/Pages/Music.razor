@@ -1,0 +1,736 @@
+@page "/music"
+@rendermode InteractiveServer
+@implements IDisposable
+
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+@using Simplifiarr.Core.Utilities
+
+@inject IMusicCleanupService Cleanup
+@inject IMusicConvertService Converter
+@inject ISettingsService SettingsService
+
+<PageTitle>Music - Simplifiarr</PageTitle>
+
+<PageHeader Title="Music"
+            Subtitle="Tidy up your music libraries, and convert tracks to other formats.">
+    @if (_roots.Count > 0)
+    {
+        <button type="button" class="btn btn-primary" disabled="@Cleanup.IsBusy" @onclick="ScanAsync">
+            <i class="bi bi-search" aria-hidden="true"></i> @(Cleanup.Result is null ? "Scan music" : "Scan again")
+        </button>
+    }
+</PageHeader>
+
+@if (!_loaded)
+{
+    <EmptyState Icon="hourglass-split" Text="Loading..." />
+}
+else if (_roots.Count == 0)
+{
+    <div class="alert alert-warning">
+        No music library is set up. Add one to a drive in <a href="settings">Settings</a>, under Drives.
+    </div>
+}
+else
+{
+    @if (Cleanup.IsBusy)
+    {
+        <div class="panel storage-box mb-3 d-flex align-items-center gap-3 flex-wrap">
+            <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+            <span>@(Cleanup.Status ?? "Working...")</span>
+            <button type="button" class="btn btn-secondary btn-sm ms-auto" @onclick="Cleanup.Stop">Stop</button>
+        </div>
+    }
+
+    @if (_message is not null)
+    {
+        <div class="alert @(_messageOk ? "alert-success" : "alert-warning")">@_message</div>
+    }
+
+    @if (Cleanup.Result is not { } result)
+    {
+        <EmptyState Icon="music-note-list" Text="@(Cleanup.IsBusy ? "Reading your music..." : $"Press Scan music to read {(_roots.Count == 1 ? "your music library" : $"your {_roots.Count} music libraries")}. Nothing is changed.")" />
+    }
+    else
+    {
+        <div class="stat-grid">
+            <StatCard Label="Tracks" Value="@result.Tracks.ToString("N0")" Note="@($"in {result.Albums:N0} album folders")" />
+            <StatCard Label="Size" Value="@SizeFormatter.FormatBytes(result.Bytes)" Note="@string.Join(" · ", result.Formats.OrderByDescending(format => format.Value).Take(4).Select(format => $"{format.Value:N0} {format.Key}"))" />
+            <StatCard Label="To look at" Value="@Shown(result).Count().ToString("N0")" Note="@($"scanned {result.ScannedUtc.ToLocalTime():d MMM, h:mm tt}")" Accent="@(Shown(result).Any())" />
+        </div>
+
+        @foreach (var problem in result.Problems)
+        {
+            <div class="alert alert-warning">@problem</div>
+        }
+
+        <div class="app-tabs" role="tablist" aria-label="Music">
+            @foreach (var tab in ShownTabs)
+            {
+                <button type="button" role="tab" aria-selected="@(_tab == tab.Key)"
+                        class="app-tab @(_tab == tab.Key ? "active" : null)"
+                        @onclick="() => _tab = tab.Key">
+                    @tab.Label
+                    @if (tab.Kind is { } kind)
+                    {
+                        <span class="app-tab-count">@result.Issues.Count(issue => issue.Kind == kind)</span>
+                    }
+                </button>
+            }
+        </div>
+
+        var current = ShownTabs.FirstOrDefault(tab => tab.Key == _tab) ?? ShownTabs.First();
+
+        @if (current.Kind is { } shownKind)
+        {
+            var issues = result.Issues.Where(issue => issue.Kind == shownKind).OrderByDescending(issue => issue.Bytes).ToList();
+
+            <p class="cell-note">@current.Explain</p>
+
+            @if (shownKind == MusicIssueKind.Broken)
+            {
+                <div class="toolbar">
+                    <div class="toolbar-summary cell-note">
+                        Empty and unreadable files are found by Scan. A deep check plays every track through ffmpeg (without sound)
+                        to find ones damaged part way through. It takes about as long as reading every file.
+                    </div>
+                    <div class="toolbar-actions">
+                        <button type="button" class="btn btn-secondary btn-sm" disabled="@Cleanup.IsBusy" @onclick="() => Cleanup.DeepCheckAsync()">
+                            Deep check all tracks
+                        </button>
+                    </div>
+                </div>
+            }
+
+            @if (issues.Count == 0)
+            {
+                <EmptyState Icon="check-circle" Text="Nothing here." />
+            }
+            else
+            {
+                @if (shownKind is MusicIssueKind.Junk or MusicIssueKind.Broken)
+                {
+                    <div class="toolbar">
+                        <div class="toolbar-summary">
+                            <strong>@issues.Count</strong> · @SizeFormatter.FormatBytes(issues.Sum(issue => issue.Bytes))
+                        </div>
+                        <div class="toolbar-actions">
+                            @if (_confirmAll == shownKind)
+                            {
+                                <button type="button" class="btn btn-danger btn-sm" disabled="@_working" @onclick="() => QuarantineAllAsync(issues)">Yes, all of them</button>
+                                <button type="button" class="btn btn-secondary btn-sm" @onclick="() => _confirmAll = null">Cancel</button>
+                            }
+                            else
+                            {
+                                <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => _confirmAll = shownKind">Quarantine all...</button>
+                            }
+                        </div>
+                    </div>
+                }
+
+                @foreach (var issue in issues.Take(_shown))
+                {
+                    <div class="group-card" @key="issue.Key">
+                        <div class="group-card-header">
+                            <div>
+                                <div class="group-card-title">@issue.Title</div>
+                                <div class="group-card-meta" style="white-space: normal">@issue.Detail</div>
+                                <div class="cell-note mt-1"><code>@issue.Folder</code></div>
+                            </div>
+                            @if (issue.Bytes > 0)
+                            {
+                                <div class="group-card-meta">@SizeFormatter.FormatBytes(issue.Bytes)</div>
+                            }
+                        </div>
+
+                        <div style="padding: 0 1.1rem 1rem">
+                            @if (issue.Copies.Count > 0)
+                            {
+                                <ul class="list-unstyled mb-2">
+                                    @foreach (var copy in issue.Copies)
+                                    {
+                                        <li class="mb-1">
+                                            <label class="d-flex gap-2 align-items-start">
+                                                <input type="radio" name="@issue.Key" class="form-check-input mt-1"
+                                                       checked="@(Kept(issue) == copy.Folder)"
+                                                       @onchange="() => _keep[issue.Key] = copy.Folder" />
+                                                <span>
+                                                    <code>@copy.Folder</code>
+                                                    <span class="cell-note d-block">@copy.Tracks track(s) · @copy.Formats · @SizeFormatter.FormatBytes(copy.Bytes)@(copy.Suggested ? " · suggested" : null)</span>
+                                                </span>
+                                            </label>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+
+                            @if (issue.Moves.Count > 0)
+                            {
+                                <details class="mb-2">
+                                    <summary class="cell-note">Where the @issue.Moves.Count file(s) go</summary>
+                                    <ul class="cell-note mb-0">
+                                        @foreach (var move in issue.Moves.Take(15))
+                                        {
+                                            <li>@Path.GetFileName(move.From) → <code>@Path.GetDirectoryName(move.To)</code></li>
+                                        }
+                                    </ul>
+                                </details>
+                            }
+
+                            <div class="d-flex gap-2 flex-wrap align-items-center">
+                                @if (_confirm == issue.Key)
+                                {
+                                    <button type="button" class="btn btn-danger btn-sm" disabled="@_working" @onclick="() => ApplyAsync(issue)">
+                                        @(_working ? "Working..." : ConfirmLabel(issue))
+                                    </button>
+                                    <button type="button" class="btn btn-secondary btn-sm" disabled="@_working" @onclick="() => _confirm = null">Cancel</button>
+                                    <span class="cell-note">@ConfirmNote(issue)</span>
+                                }
+                                else if (issue.CanTidy)
+                                {
+                                    <button type="button" class="btn btn-primary btn-sm" @onclick="() => _confirm = issue.Key">Tidy...</button>
+                                }
+                                else if (issue.Kind == MusicIssueKind.Duplicate || issue.CanQuarantine)
+                                {
+                                    <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => _confirm = issue.Key">
+                                        @(issue.Key == "empty" ? "Remove them..." : issue.Copies.Count > 0 ? "Keep the ticked copy..." : "Quarantine...")
+                                    </button>
+                                }
+                                else if (issue.Kind == MusicIssueKind.Tags && !_lookups.ContainsKey(issue.Folder))
+                                {
+                                    <button type="button" class="btn btn-secondary btn-sm" disabled="@(_lookingUp is not null)" @onclick="() => LookUpAsync(issue.Folder)">
+                                        @(_lookingUp == issue.Folder ? "Asking MusicBrainz..." : "Look up on MusicBrainz")
+                                    </button>
+                                }
+                            </div>
+
+                            @if (issue.Kind == MusicIssueKind.Tags && _lookups.TryGetValue(issue.Folder, out var matches))
+                            {
+                                <div class="mt-2">
+                                    @if (matches.Count == 0)
+                                    {
+                                        <div class="cell-note">MusicBrainz has nothing that fits these tracks. Fix them in a tag editor such as Mp3tag, then scan again.</div>
+                                    }
+                                    else
+                                    {
+                                        var chosen = Chosen(issue.Folder, matches);
+
+                                        @foreach (var match in matches)
+                                        {
+                                            <label class="d-flex gap-2 align-items-start mb-1">
+                                                <input type="radio" class="form-check-input mt-1" name="@("mb-" + issue.Key)"
+                                                       checked="@(match == chosen)"
+                                                       @onchange="() => _chosen[issue.Folder] = match.Release.Id" />
+                                                <span>
+                                                    <strong>@match.Release.Artist - @match.Release.Title</strong>
+                                                    <span class="cell-note">
+                                                        @ReleaseNote(match)
+                                                        · <a href="@match.Release.Url" target="_blank" rel="noopener">see it</a>
+                                                    </span>
+                                                </span>
+                                            </label>
+                                        }
+
+                                        @if (chosen is not null)
+                                        {
+                                            <div class="table-scroll mt-2">
+                                                <table class="table">
+                                                    <thead><tr><th>Track</th><th>Changes</th></tr></thead>
+                                                    <tbody>
+                                                        @foreach (var proposal in chosen.Tracks.Where(track => track.Changes.Count > 0))
+                                                        {
+                                                            <tr>
+                                                                <td class="file-name">@Path.GetFileName(proposal.Path)</td>
+                                                                <td class="cell-note">
+                                                                    @foreach (var change in proposal.Changes)
+                                                                    {
+                                                                        <div>@change.Field: <s>@(change.Before ?? "(none)")</s> → <strong>@change.After</strong></div>
+                                                                    }
+                                                                </td>
+                                                            </tr>
+                                                        }
+                                                    </tbody>
+                                                </table>
+                                            </div>
+
+                                            @if (chosen.Unmatched.Count > 0)
+                                            {
+                                                <div class="cell-note mb-2">Not on this release, left as they are: @string.Join(", ", chosen.Unmatched.Select(Path.GetFileName))</div>
+                                            }
+
+                                            <div class="d-flex gap-2 flex-wrap align-items-center">
+                                                @if (!chosen.FitsWholeFolder)
+                                                {
+                                                    <span class="cell-note status-warn">
+                                                        Only @chosen.Tracks.Count of your @(chosen.Tracks.Count + chosen.Unmatched.Count) tracks are on this release.
+                                                        Writing it would give part of the album a new name and split it in players, so it can't be written.
+                                                        Try another release, or fix these tags by hand.
+                                                    </span>
+                                                }
+                                                else if (chosen.Changing == 0)
+                                                {
+                                                    <span class="cell-note">The tags already match this release.</span>
+                                                }
+                                                else if (_confirm == "mb|" + issue.Folder)
+                                                {
+                                                    <button type="button" class="btn btn-primary btn-sm" disabled="@_working" @onclick="() => WriteTagsAsync(issue.Folder, chosen)">
+                                                        @(_working ? "Writing..." : $"Yes, write {chosen.Changing} track(s)")
+                                                    </button>
+                                                    <button type="button" class="btn btn-secondary btn-sm" disabled="@_working" @onclick="() => _confirm = null">Cancel</button>
+                                                    <span class="cell-note">Only the tags change; the music isn't re-encoded. Seeding tracks are skipped.</span>
+                                                }
+                                                else
+                                                {
+                                                    <button type="button" class="btn btn-primary btn-sm" @onclick="@(() => _confirm = "mb|" + issue.Folder)">Write these tags...</button>
+                                                }
+                                            </div>
+                                        }
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+
+                @if (issues.Count > _shown)
+                {
+                    <button type="button" class="btn btn-secondary btn-sm" @onclick="() => _shown += 50">Show 50 more (@(issues.Count - _shown) left)</button>
+                }
+            }
+        }
+        else
+        {
+            @* ----------------------------------------------------- Convert *@
+
+            <p class="cell-note">
+                Converts with ffmpeg, keeping the tags and cover art (Opus keeps the tags only). Each new file is written
+                under a temporary name first, so an interrupted conversion never leaves half a track. Lossy tracks are never
+                made lossless: it would only make them bigger.
+            </p>
+
+            @if (FfprobeLocator.FindFfmpeg() is null)
+            {
+                <div class="alert alert-warning">
+                    ffmpeg isn't installed, so nothing can be converted. Install it (for example <code>winget install ffmpeg</code>),
+                    then restart Simplifiarr.
+                </div>
+            }
+
+            <div class="panel storage-box mb-3">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label" for="convert-format">Convert to</label>
+                        <select id="convert-format" class="form-select" @bind="_format">
+                            @foreach (var format in Enum.GetValues<MusicConvertFormat>())
+                            {
+                                <option value="@format">@MusicFormats.Label(format)</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-8">
+                        <label class="form-label" for="convert-mode">The original</label>
+                        <select id="convert-mode" class="form-select" @bind="_mode">
+                            @foreach (var mode in Enum.GetValues<MusicConvertMode>())
+                            {
+                                <option value="@mode">@MusicFormats.Label(mode)</option>
+                            }
+                        </select>
+                        @if (_mode == MusicConvertMode.Replace)
+                        {
+                            <div class="cell-note mt-1">
+                                Tracks a torrent in your torrent client is seeding are skipped. A track that's only hardlinked to a
+                                leftover no torrent uses is replaced, and the leftover goes to Quarantine too, so the space is
+                                really freed. If Lidarr manages this library,
+                                rescan it afterwards so it picks up the new files.
+                            </div>
+                        }
+                    </div>
+                    @if (_mode == MusicConvertMode.OtherFolder)
+                    {
+                        <div class="col-12">
+                            <PathInput Label="Save converted files under"
+                                       EmptyText="Pick a folder, for example a phone or car copy of your library"
+                                       Help="Each track keeps its Artist\Album folders under here."
+                                       @bind-Value="_outputFolder" />
+                        </div>
+                    }
+                </div>
+
+                <div class="d-flex gap-2 flex-wrap align-items-center mt-3">
+                    <button type="button" class="btn btn-link btn-sm px-0" @onclick="SaveDefaultsAsync">Make these my defaults</button>
+                    @if (_defaultsSaved)
+                    {
+                        <span class="cell-note">Saved.</span>
+                    }
+                </div>
+            </div>
+
+            var albums = ConvertibleAlbums(result);
+
+            <div class="toolbar">
+                <div class="toolbar-summary">
+                    <input type="search" class="form-control form-control-sm d-inline-block" style="width: 14rem" placeholder="Filter by artist or album"
+                           @bind="_filter" @bind:event="oninput" aria-label="Filter albums" />
+                    <span class="ms-2"><strong>@albums.Count</strong> album(s) with tracks that can become @MusicFormats.Label(_format)</span>
+                </div>
+                <div class="toolbar-actions">
+                    <button type="button" class="btn btn-secondary btn-sm" @onclick="() => _picked = albums.Select(album => album.Folder).ToHashSet(StringComparer.OrdinalIgnoreCase)">Select all shown</button>
+                    <button type="button" class="btn btn-primary btn-sm" disabled="@(PickedTracks(result).Count == 0 || (_mode == MusicConvertMode.OtherFolder && string.IsNullOrWhiteSpace(_outputFolder)))" @onclick="() => Convert(result)">
+                        Convert @PickedTracks(result).Count track(s)
+                    </button>
+                </div>
+            </div>
+
+            @if (albums.Count == 0)
+            {
+                <EmptyState Icon="music-note" Text="No album has tracks that can be converted to that." />
+            }
+            else
+            {
+                <div class="table-scroll">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th class="col-check">Select</th>
+                                <th>Album</th>
+                                <th>Now</th>
+                                <th class="col-num">Tracks</th>
+                                <th class="col-num">Size</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var album in albums.Take(_shownAlbums))
+                            {
+                                <tr @key="album.Folder">
+                                    <SelectableCheckboxCell Checked="_picked.Contains(album.Folder)"
+                                                            OnChanged="selected => { if (selected) _picked.Add(album.Folder); else _picked.Remove(album.Folder); }" />
+                                    <td>
+                                        <div class="file-name">@album.Label</div>
+                                        <div class="cell-note">@album.Folder</div>
+                                    </td>
+                                    <td>@album.Formats</td>
+                                    <td class="col-num">@album.Tracks</td>
+                                    <td class="col-num">@SizeFormatter.FormatBytes(album.Bytes)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                @if (albums.Count > _shownAlbums)
+                {
+                    <button type="button" class="btn btn-secondary btn-sm mt-2" @onclick="() => _shownAlbums += 100">Show 100 more</button>
+                }
+            }
+        }
+    }
+
+    @* --------------------------------------------------------- Converting *@
+
+    @if (Converter.Current is not null || Converter.Queue.Count > 0 || Converter.Results.Count > 0)
+    {
+        <div class="panel storage-box mt-4">
+            <div class="toolbar mb-1">
+                <div class="toolbar-summary">
+                    @if (Converter.Current is { } now)
+                    {
+                        <strong>Converting @Path.GetFileName(now.SourcePath)</strong>
+                    }
+                    else
+                    {
+                        <strong>Conversions</strong>
+                    }
+                    @if (Converter.Queue.Count > 0)
+                    {
+                        <text> · @Converter.Queue.Count waiting</text>
+                    }
+                    @if (Converter.IsPaused)
+                    {
+                        <text> · <span class="status-warn">Paused</span></text>
+                    }
+                </div>
+                <div class="toolbar-actions">
+                    @if (Converter.IsPaused)
+                    {
+                        <button type="button" class="btn btn-primary btn-sm" @onclick="Converter.Resume">Resume</button>
+                    }
+                    else if (Converter.Queue.Count > 0)
+                    {
+                        <button type="button" class="btn btn-secondary btn-sm" @onclick="Converter.Pause">Pause after this one</button>
+                    }
+                    @if (Converter.Queue.Count > 0)
+                    {
+                        <button type="button" class="btn btn-secondary btn-sm" @onclick="Converter.ClearQueue">Cancel the rest</button>
+                    }
+                </div>
+            </div>
+
+            @if (Converter.Results.Count > 0)
+            {
+                var ok = Converter.Results.Count(item => item.Succeeded);
+
+                <details open="@(Converter.Current is null && Converter.Queue.Count == 0)">
+                    <summary>@ok converted@(Converter.Results.Count > ok ? $", {Converter.Results.Count - ok} not" : null)@(Converter.Results.Sum(item => item.SavedBytes) is > 0 and var saved ? $", {SizeFormatter.FormatBytes(saved)} saved" : null)</summary>
+                    <ul class="mb-0 mt-1">
+                        @foreach (var item in Converter.Results.Take(30))
+                        {
+                            <li class="@(item.Succeeded ? null : "status-warn")">@item.Message</li>
+                        }
+                    </ul>
+                </details>
+            }
+        </div>
+    }
+}
+
+@code
+{
+    private sealed record Tab(string Key, string Label, MusicIssueKind? Kind, string Explain);
+
+    private static readonly Tab[] Tabs =
+    [
+        new("folders", "Folders", MusicIssueKind.Folder,
+            "Tracks not in an album folder, several albums sharing one folder, and folders whose name doesn't match the album or artist in the tags. Tidying moves the files into Artist\\Album (Year) folders on the same drive: instant, and seeding keeps working."),
+        new("duplicates", "Same album twice", MusicIssueKind.Duplicate,
+            "Albums found in more than one folder with mostly the same tracks, and tracks there in two formats. The other copies go to Quarantine, so you can still restore them. Folders holding different parts of one album, like a bonus disc, are under Folders, to merge."),
+        new("tags", "Tags", MusicIssueKind.Tags,
+            "Tracks missing a title, artist, album or track number, albums with more than one album artist, and gaps or repeats in the numbering. Look an album up on MusicBrainz to see the right tags, then write them. Only the tags change, never the music."),
+        new("junk", "Junk", MusicIssueKind.Junk,
+            "Rip and download leftovers (.log, .m3u, .nfo, .sfv...) and empty folders. Cue sheets are kept when an album is one big file, since it needs them. Pictures are left alone."),
+        new("broken", "Broken", MusicIssueKind.Broken,
+            "Tracks that are empty, too small to be music, or that can't be read as what their name says."),
+        new("convert", "Convert", null, string.Empty)
+    ];
+
+    // Tags (and the MusicBrainz lookup behind them) are switched off for
+    // now; the code stays, and turning this on brings the tab back.
+    private const bool TagsEnabled = false;
+
+    private static IEnumerable<Tab> ShownTabs =>
+        Tabs.Where(tab => TagsEnabled || tab.Kind != MusicIssueKind.Tags);
+
+    private static IEnumerable<MusicIssue> Shown(MusicScanResult result) =>
+        result.Issues.Where(issue => TagsEnabled || issue.Kind != MusicIssueKind.Tags);
+
+    private sealed record AlbumRow(string Folder, string Label, string Formats, int Tracks, long Bytes);
+
+    private List<string> _roots = [];
+    private bool _loaded;
+    private string _tab = "folders";
+    private int _shown = 50;
+    private int _shownAlbums = 100;
+
+    private string? _confirm;
+    private MusicIssueKind? _confirmAll;
+    private bool _working;
+    private string? _message;
+    private bool _messageOk;
+    private readonly Dictionary<string, string> _keep = [];
+
+    private readonly Dictionary<string, IReadOnlyList<MusicMatch>> _lookups = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _chosen = new(StringComparer.OrdinalIgnoreCase);
+    private string? _lookingUp;
+
+    private MusicMatch? Chosen(string folder, IReadOnlyList<MusicMatch> matches) =>
+        _chosen.TryGetValue(folder, out var id) ? matches.FirstOrDefault(match => match.Release.Id == id) : matches.FirstOrDefault();
+
+    private static string ReleaseNote(MusicMatch match) =>
+        string.Join(
+            " · ",
+            new[]
+            {
+                match.Release.Year,
+                match.Release.Country,
+                match.Release.Disambiguation,
+                $"{match.Release.Media.Count} disc(s), {match.Release.TrackCount} tracks",
+                $"{match.Tracks.Count} of yours matched"
+            }.Where(part => !string.IsNullOrEmpty(part)));
+
+    private async Task LookUpAsync(string folder)
+    {
+        _lookingUp = folder;
+
+        try
+        {
+            _lookups[folder] = await Cleanup.LookUpAsync(folder);
+        }
+        finally
+        {
+            _lookingUp = null;
+        }
+    }
+
+    private async Task WriteTagsAsync(string folder, MusicMatch match)
+    {
+        _working = true;
+
+        try
+        {
+            _message = await Cleanup.WriteTagsAsync(folder, match);
+            _messageOk = !_message.Contains("; left", StringComparison.Ordinal);
+            _lookups.Remove(folder);
+        }
+        finally
+        {
+            _working = false;
+            _confirm = null;
+        }
+    }
+
+    private MusicConvertFormat _format;
+    private MusicConvertMode _mode;
+    private string _outputFolder = string.Empty;
+    private bool _defaultsSaved;
+    private string _filter = string.Empty;
+    private HashSet<string> _picked = new(StringComparer.OrdinalIgnoreCase);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var settings = await SettingsService.GetSettingsAsync();
+
+        _roots = MusicCleanupService.LibraryRoots(settings);
+        _format = settings.MusicConvertFormat;
+        _mode = settings.MusicConvertMode;
+        _outputFolder = settings.MusicConvertOutputFolder;
+        _loaded = true;
+
+        Cleanup.Changed += OnChanged;
+        Converter.Changed += OnChanged;
+    }
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private async Task ScanAsync()
+    {
+        _message = null;
+        _confirm = null;
+
+        await Cleanup.ScanAsync();
+    }
+
+    private string? Kept(MusicIssue issue) =>
+        _keep.TryGetValue(issue.Key, out var folder) ? folder : issue.Copies.FirstOrDefault(copy => copy.Suggested)?.Folder;
+
+    private static string ConfirmLabel(MusicIssue issue) =>
+        issue.CanTidy ? "Yes, tidy"
+        : issue.Key == "empty" ? "Yes, remove"
+        : "Yes, quarantine";
+
+    private string ConfirmNote(MusicIssue issue) =>
+        issue.CanTidy && issue.Key.StartsWith("split|") && issue.Paths.Count > 0 ? $"Moves {issue.Moves.Count} track(s) into one folder, and sends {issue.Paths.Count} that were in both to Quarantine."
+        : issue.CanTidy ? $"Moves {issue.Moves.Count} file(s). A file already at the new place is left where it is."
+        : issue.Copies.Count > 0 ? $"Keeps {Kept(issue)} and sends the other copies to Quarantine."
+        : issue.Key == "empty" ? "Deletes the empty folders."
+        : $"Sends {issue.Paths.Count} file(s) to Quarantine.";
+
+    private async Task ApplyAsync(MusicIssue issue)
+    {
+        _working = true;
+
+        try
+        {
+            if (issue.CanTidy)
+            {
+                _message = await Cleanup.TidyAsync(issue);
+            }
+            else if (issue.Copies.Count > 0)
+            {
+                var keep = Kept(issue);
+
+                _message = await Cleanup.QuarantineAsync(issue, issue.Copies.Where(copy => copy.Folder != keep).SelectMany(copy => copy.Paths).ToList());
+            }
+            else
+            {
+                _message = await Cleanup.QuarantineAsync(issue);
+            }
+
+            _messageOk = !_message.Contains("couldn't", StringComparison.OrdinalIgnoreCase) && !_message.Contains("left", StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            _working = false;
+            _confirm = null;
+        }
+    }
+
+    private async Task QuarantineAllAsync(List<MusicIssue> issues)
+    {
+        _working = true;
+        var done = 0;
+
+        try
+        {
+            foreach (var issue in issues)
+            {
+                await Cleanup.QuarantineAsync(issue);
+                done++;
+            }
+
+            _message = $"Cleared {done} item(s).";
+            _messageOk = true;
+        }
+        finally
+        {
+            _working = false;
+            _confirmAll = null;
+        }
+    }
+
+    private List<AlbumRow> ConvertibleAlbums(MusicScanResult result) =>
+        result.AllTracks
+            .Where(track => MusicFormats.CanConvert(track.Extension, _format))
+            .GroupBy(track => MusicAnalyzer.AlbumFolder(track.Folder), StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var sample = group.FirstOrDefault(track => track.Tags.Album is not null);
+                var label = sample is null ? Path.GetFileName(group.Key) : $"{sample.Tags.AlbumArtist ?? sample.Tags.Artist} - {sample.Tags.Album}";
+
+                return new AlbumRow(
+                    group.Key,
+                    label,
+                    string.Join("/", group.Select(track => track.Extension.TrimStart('.').ToUpperInvariant()).Distinct()),
+                    group.Count(),
+                    group.Sum(track => track.SizeBytes));
+            })
+            .Where(album => _filter.Length == 0 || album.Label.Contains(_filter, StringComparison.OrdinalIgnoreCase) || album.Folder.Contains(_filter, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(album => album.Label, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private List<MusicTrack> PickedTracks(MusicScanResult result) =>
+        result.AllTracks
+            .Where(track => _picked.Contains(MusicAnalyzer.AlbumFolder(track.Folder)))
+            .Where(track => MusicFormats.CanConvert(track.Extension, _format))
+            .ToList();
+
+    private void Convert(MusicScanResult result)
+    {
+        var tracks = PickedTracks(result);
+
+        Converter.Enqueue(
+            tracks.Select(track => new MusicConvertRequest(track.Path, track.LibraryRoot, _format, _mode, _mode == MusicConvertMode.OtherFolder ? _outputFolder : null)));
+
+        _message = $"{tracks.Count} track(s) queued to convert. It carries on if you leave the page.";
+        _messageOk = true;
+        _picked.Clear();
+    }
+
+    private async Task SaveDefaultsAsync()
+    {
+        var settings = await SettingsService.GetSettingsAsync();
+
+        settings.MusicConvertFormat = _format;
+        settings.MusicConvertMode = _mode;
+        settings.MusicConvertOutputFolder = _outputFolder;
+
+        await SettingsService.SaveSettingsAsync(settings);
+
+        _defaultsSaved = true;
+    }
+
+    public void Dispose()
+    {
+        Cleanup.Changed -= OnChanged;
+        Converter.Changed -= OnChanged;
+    }
+}
