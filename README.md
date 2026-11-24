@@ -150,11 +150,30 @@ starts with Windows, and opens it.
 Windows may warn that the installer is from an unknown publisher, because it
 isn't code-signed. Choose **More info**, then **Run anyway**.
 
+### Releases to avoid
+
+Please don't install or stay on these. Install 1.2.0 or later instead; it
+updates them in place and keeps your settings.
+
+| Releases | Why |
+| --- | --- |
+| 1.0.0, 1.0.1, 1.0.2, 1.1.0 | Anything the service sent to the "Recycle Bin" (old folders after a Storage move, files deleted from Quarantine, Rolling Shows and Rolling Movies deletions, Size Reduction's old files, Move Seeds' old copies) went into Windows' own hidden Recycle Bin on each drive, which nobody empties, so the space never came back. Size Reduction could also count space as saved while the old file was still a download's hardlink. |
+
+If you ran one of these, the hidden Recycle Bins may still hold that space.
+In an administrator PowerShell, this shows how much is in each drive's:
+
+```powershell
+foreach ($d in (Get-PSDrive -PSProvider FileSystem).Name) { $p = "${d}:\`$Recycle.Bin\S-1-5-18"; if (Test-Path -LiteralPath $p) { '{0}: {1:N1} GB' -f $d, ((Get-ChildItem -LiteralPath $p -Recurse -Force -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB) } }
+```
+
+Emptying it (`Remove-Item 'C:\$Recycle.Bin\S-1-5-18\*' -Recurse -Force`, per
+drive) deletes those files for good.
+
 To check the download, compare its SHA-256 with the one listed for it in the
 release's **SHA256SUMS.txt**:
 
 ```powershell
-Get-FileHash .\Simplifiarr-Setup-1.0.1.exe
+Get-FileHash .\Simplifiarr-Setup-1.2.0.exe
 ```
 
 ### Open it from other devices
