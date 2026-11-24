@@ -2,9 +2,12 @@
 
 @*
     The whole app's navigation, grouped by what you're there to do:
-      Link        - get downloads into libraries without copying
-      Clean up    - find things that waste space or don't belong
-      Safety net  - undo, review and exceptions
+      Torrents & seeding - get downloads into libraries and keep seeding
+      Free up space      - find what takes space and doesn't need to
+      Fix & tidy         - put wrong things right
+      Jellyfin           - how the library looks
+      Automatic          - rules that run by themselves
+      Safety net         - undo, review and exceptions
 *@
 
 <nav class="app-nav" aria-label="Main">
@@ -15,7 +18,7 @@
     </div>
 
     <div class="nav-group">
-        <div class="nav-group-label">Link</div>
+        <div class="nav-group-label">Torrents &amp; seeding</div>
 
         <NavLink class="nav-link" href="hardlinks">
             <i class="bi bi-link-45deg" aria-hidden="true"></i> Hardlinks
@@ -32,17 +35,14 @@
         <NavLink class="nav-link" href="torrent-rebuilder">
             <i class="bi bi-hammer" aria-hidden="true"></i> Torrent Rebuilder
         </NavLink>
-        <NavLink class="nav-link" href="collections">
-            <i class="bi bi-collection" aria-hidden="true"></i> Collections
-        </NavLink>
-        <NavLink class="nav-link" href="posters">
-            <i class="bi bi-image" aria-hidden="true"></i> Posters
-        </NavLink>
     </div>
 
     <div class="nav-group">
-        <div class="nav-group-label">Clean up</div>
+        <div class="nav-group-label">Free up space</div>
 
+        <NavLink class="nav-link" href="storage">
+            <i class="bi bi-device-hdd" aria-hidden="true"></i> Storage
+        </NavLink>
         <NavLink class="nav-link" href="duplicates">
             <i class="bi bi-copy" aria-hidden="true"></i> Duplicates
         </NavLink>
@@ -52,23 +52,41 @@
         <NavLink class="nav-link" href="download-cleanup">
             <i class="bi bi-folder-x" aria-hidden="true"></i> Downloads
         </NavLink>
-        <NavLink class="nav-link" href="playback-errors">
-            <i class="bi bi-exclamation-octagon" aria-hidden="true"></i> Playback Errors
-        </NavLink>
         <NavLink class="nav-link" href="size-reduction">
             <i class="bi bi-file-earmark-zip" aria-hidden="true"></i> Size Reduction
         </NavLink>
-        <NavLink class="nav-link" href="storage">
-            <i class="bi bi-device-hdd" aria-hidden="true"></i> Storage
+    </div>
+
+    <div class="nav-group">
+        <div class="nav-group-label">Fix &amp; tidy</div>
+
+        <NavLink class="nav-link" href="folder-fixer">
+            <i class="bi bi-signpost-split" aria-hidden="true"></i> Folder Fixer
+        </NavLink>
+        <NavLink class="nav-link" href="playback-errors">
+            <i class="bi bi-exclamation-octagon" aria-hidden="true"></i> Playback Errors
         </NavLink>
         <NavLink class="nav-link" href="music">
             <i class="bi bi-music-note-beamed" aria-hidden="true"></i> Music
         </NavLink>
-        <NavLink class="nav-link" href="folder-fixer">
-            <i class="bi bi-signpost-split" aria-hidden="true"></i> Folder Fixer
+    </div>
+
+    <div class="nav-group">
+        <div class="nav-group-label">Jellyfin</div>
+
+        <NavLink class="nav-link" href="posters">
+            <i class="bi bi-image" aria-hidden="true"></i> Posters
         </NavLink>
+        <NavLink class="nav-link" href="collections">
+            <i class="bi bi-collection" aria-hidden="true"></i> Collections
+        </NavLink>
+    </div>
+
+    <div class="nav-group">
+        <div class="nav-group-label">Automatic</div>
+
         <NavLink class="nav-link" href="rolling-shows">
-            <i class="bi bi-arrow-repeat" aria-hidden="true"></i> Rolling Shows
+            <i class="bi bi-tv" aria-hidden="true"></i> Rolling Shows
         </NavLink>
         <NavLink class="nav-link" href="rolling-movies">
             <i class="bi bi-film" aria-hidden="true"></i> Rolling Movies

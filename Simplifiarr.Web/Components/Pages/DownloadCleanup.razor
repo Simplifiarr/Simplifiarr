@@ -12,7 +12,7 @@
 <PageTitle>Downloads - Simplifiarr</PageTitle>
 
 <PageHeader Title="Downloads"
-            Subtitle="Download files that your library already has and that your torrent client is no longer using - so the download copy is just taking up room.">
+            Subtitle="Downloads no torrent uses any more, one per torrent folder, and what your library has of each.">
     <button type="button"
             class="btn btn-primary"
             disabled="@(IsBusy || _profiles.Count == 0)"
@@ -23,28 +23,26 @@
 </PageHeader>
 
 <details class="mb-3">
-    <summary>How a file gets on this list, and what deleting does</summary>
+    <summary>How a download gets on this page</summary>
 
     <div class="mt-2 text-muted">
         <p class="mb-2">
-            A download is only listed when the library has the same file (a
-            hardlink) or a copy whose every byte matches - checked by reading
-            both, not guessed from the name or size - <em>and</em> it isn't
-            part of any torrent in @Client.Name, in any state. If @Client.Name
-            can't be reached, nothing is checked and nothing can be deleted.
+            Only downloads that no torrent in @Client.Name uses, in any state, are listed. If @Client.Name can't be
+            reached, nothing is checked and nothing can be removed. A torrent's folder is listed as one, with its
+            subtitles, pictures, .nfo files and other leftovers.
         </p>
         <p class="mb-2">
-            This check is separate from the Scan at the top of the page,
-            because comparing whole files takes a while on a big library.
+            <strong>Safe to remove:</strong> the library has the very same file (a hardlink) or a copy whose every
+            byte matches, or nothing but leftovers is left. These are deleted, not put in Quarantine: Quarantine is on
+            one drive, and moving a hardlink there would make it a full copy.
+        </p>
+        <p class="mb-2">
+            <strong>Other releases:</strong> the library has the same movie or episode as a different file, usually
+            another quality. They go to Quarantine, so you can restore one.
         </p>
         <p class="mb-0">
-            Deleting here is permanent - these files do not go to Quarantine,
-            because Quarantine lives on one drive and moving a hardlink there
-            from another drive would turn it into a full copy. Each file is
-            checked again against @Client.Name and its library copy right
-            before it is deleted. Deleting a hardlinked download only removes
-            that extra name and frees no space; deleting an identical copy
-            frees its space.
+            The folder itself goes only when nothing else is in it. A folder holding something Simplifiarr doesn't
+            recognise (a game, an archive) keeps it. Everything is checked again right before it's removed.
         </p>
     </div>
 </details>
@@ -58,23 +56,18 @@
 
 @if (!string.IsNullOrWhiteSpace(_errorMessage))
 {
-    <div class="alert alert-danger">
-        @_errorMessage
-    </div>
+    <div class="alert alert-danger">@_errorMessage</div>
 }
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
-    <div class="alert alert-info">
-        @_statusMessage
-    </div>
+    <div class="alert alert-info">@_statusMessage</div>
 }
 
 @if (_skipReasons.Count > 0)
 {
     <details class="mb-3">
-        <summary>@_skipReasons.Count file(s) were left alone - why</summary>
-
+        <summary>@_skipReasons.Count were left alone - why</summary>
         <ul class="mt-2 text-muted mb-0">
             @foreach (var reason in _skipReasons.Take(50))
             {
@@ -88,180 +81,261 @@
 {
     <EmptyState Icon="search" Text="Downloads haven't been checked yet. Press Check downloads." />
 }
-else if (_candidates.Count == 0)
-{
-    <EmptyState Icon="check-circle" Text="@($"No removable download copies. Last checked {LastCheckedText}.")" />
-}
 else
 {
-    @if (_isConfirming)
+    @if (_confirming is { } confirming)
     {
-        <BatchConfirmBanner CssClass="alert alert-danger"
+        <BatchConfirmBanner CssClass="@(confirming == Section.Safe ? "alert alert-danger" : "alert alert-warning")"
                             IsBusy="_isProcessing"
-                            ConfirmLabel="Delete permanently"
-                            BusyLabel="Deleting..."
+                            ConfirmLabel="@(confirming == Section.Safe ? "Delete" : "Move to Quarantine")"
+                            BusyLabel="Working..."
                             OnConfirm="ConfirmAsync"
-                            OnCancel="CancelConfirm">
+                            OnCancel="() => _confirming = null">
             <Message>
-                <strong>Permanently delete @_pending.Count download file(s)?</strong>
-                They skip Quarantine and can't be restored. The library copies are
-                not touched. Each file is re-checked first and skipped if anything
-                has changed.
+                @if (confirming == Section.Safe)
+                {
+                    <strong>Delete @Selected(Section.Safe).Count download(s), with their folders and leftovers?</strong>
+                    <text> They skip Quarantine. Your library copies aren't touched.</text>
+                }
+                else
+                {
+                    <strong>Move @Selected(Section.Other).Count download(s) to Quarantine?</strong>
+                    <text> Their leftovers (subtitles, pictures...) are deleted and the folders removed. Your library copies aren't touched.</text>
+                }
+                <text> Each is checked again first and skipped if anything changed.</text>
             </Message>
         </BatchConfirmBanner>
     }
-    else
+
+    @foreach (var section in new[] { Section.Safe, Section.Other, Section.Missing })
     {
-        <div class="toolbar">
-            <div class="toolbar-summary">
-                <strong>@_candidates.Count</strong> file(s) ·
-                <strong>@SizeFormatter.FormatBytes(SpaceFreed(_candidates))</strong> freed by deleting them
-                @if (_selection.Count > 0)
-                {
-                    <text> · @_selection.Count selected</text>
-                }
-                <div class="cell-note">Last checked @LastCheckedText</div>
+        var rows = Rows(section);
+
+        <h2 class="section-title mt-4">@Heading(section)</h2>
+        <p class="cell-note">@Explain(section)</p>
+
+        @if (rows.Count == 0)
+        {
+            <EmptyState Icon="check-circle" Text="Nothing here." />
+            continue;
+        }
+
+        @if (section != Section.Missing && _confirming is null)
+        {
+            var picked = Selected(section);
+
+            <div class="toolbar">
+                <div class="toolbar-summary">
+                    <strong>@rows.Count</strong> · frees <strong>@SizeFormatter.FormatBytes(rows.Sum(row => row.FreedBytes))</strong>
+                    @if (picked.Count > 0)
+                    {
+                        <text> · @picked.Count selected (@SizeFormatter.FormatBytes(picked.Sum(row => row.FreedBytes)))</text>
+                    }
+                </div>
+                <div class="toolbar-actions">
+                    <button type="button" class="btn btn-secondary btn-sm" disabled="@IsBusy" @onclick="() => ToggleAll(section)">
+                        @(picked.Count == rows.Count ? "Select none" : "Select all")
+                    </button>
+                    <button type="button"
+                            class="btn @(section == Section.Safe ? "btn-danger" : "btn-outline-danger") btn-sm"
+                            disabled="@(IsBusy || picked.Count == 0)"
+                            @onclick="() => _confirming = section">
+                        @(section == Section.Safe ? $"Delete selected ({picked.Count})" : $"Move selected to Quarantine ({picked.Count})")
+                    </button>
+                </div>
             </div>
+        }
 
-            <div class="toolbar-actions">
-                <button type="button"
-                        class="btn btn-secondary btn-sm"
-                        disabled="@IsBusy"
-                        @onclick="() => _selection.ToggleSelectAll(_candidates)">
-                    @(_selection.Count == _candidates.Count ? "Select none" : "Select all")
-                </button>
-
-                <button type="button"
-                        class="btn btn-danger btn-sm"
-                        disabled="@(IsBusy || _selection.Count == 0)"
-                        @onclick="RequestConfirm">
-                    Delete selected (@_selection.Count)
-                </button>
-            </div>
-        </div>
-    }
-
-    <div class="table-scroll">
-        <table class="table">
-            <thead>
-                <tr>
-                    <th class="col-check">Select</th>
-                    <th>Download copy</th>
-                    <th>Proof</th>
-                    <th>Drive</th>
-                    <th class="col-num">Size</th>
-                    <th>Details</th>
-                </tr>
-            </thead>
-
-            <tbody>
-                @foreach (var candidate in _candidates.Take(_shown))
-                {
-                    <tr @key="candidate.DownloadPath">
-                        <SelectableCheckboxCell Checked="_selection.IsSelected(candidate)"
-                                                Disabled="IsBusy"
-                                                OnChanged="selected => _selection.SetSelected(candidate, selected)" />
-
-                        <td>
-                            <div class="file-name">@Path.GetFileName(candidate.DownloadPath)</div>
-                            <div class="cell-note">@Path.GetDirectoryName(candidate.DownloadPath)</div>
-                        </td>
-
-                        <td>
-                            @if (candidate.MatchKind == DownloadMatchKind.Hardlink)
-                            {
-                                <div>Same file as the library (hardlink)</div>
-                                <div class="cell-note">Deleting frees no space</div>
-                            }
-                            else
-                            {
-                                <div>Identical copy</div>
-                                <div class="cell-note">Every byte compared · frees @SizeFormatter.FormatBytes(candidate.SizeBytes)</div>
-                            }
-                        </td>
-
-                        <td>@candidate.DriveProfileName</td>
-                        <td class="col-num">@SizeFormatter.FormatBytes(candidate.SizeBytes)</td>
-
-                        <td>
-                            <details>
-                                <summary>Library copy</summary>
-
-                                <div class="detail-label">Kept in the library at</div>
-                                <code>@candidate.LibraryPath</code>
-                            </details>
-                        </td>
+        <div class="table-scroll">
+            <table class="table">
+                <thead>
+                    <tr>
+                        @if (section != Section.Missing)
+                        {
+                            <th class="col-check">Select</th>
+                        }
+                        <th>Download</th>
+                        <th>@(section == Section.Missing ? "In it" : "Your library has")</th>
+                        <th class="col-num">@(section == Section.Missing ? "Size" : "Frees")</th>
                     </tr>
-                }
-            </tbody>
-        </table>
-    </div>
+                </thead>
+                <tbody>
+                    @foreach (var row in rows.Take(Shown(section)))
+                    {
+                        <tr @key="row.Path">
+                            @if (section != Section.Missing)
+                            {
+                                <SelectableCheckboxCell Checked="_picked.Contains(row.Path)"
+                                                        Disabled="IsBusy"
+                                                        OnChanged="selected => Pick(row, selected)" />
+                            }
+                            <td>
+                                <div class="file-name">@row.Name</div>
+                                <div class="cell-note">@Contents(row) · @Path.GetDirectoryName(row.Path)</div>
+                                @if (row.IsFolder && !row.RemovesFolder)
+                                {
+                                    <div class="cell-note status-warn">The folder stays: it also holds @row.Kept.Count file(s) Simplifiarr doesn't recognise.</div>
+                                }
+                            </td>
+                            <td>
+                                @if (row.Kind == DownloadLeftoverKind.LeftoversOnly)
+                                {
+                                    <span class="cell-note">Nothing playable is left in it.</span>
+                                }
+                                else if (section == Section.Missing)
+                                {
+                                    <span class="cell-note">Not in your library. <a href="hardlinks">Link it in</a> if you want it, or leave it.</span>
+                                }
+                                else
+                                {
+                                    @foreach (var media in row.Media.Take(3))
+                                    {
+                                        <div class="file-name">@Path.GetFileName(media.LibraryPath)</div>
+                                        <div class="cell-note">
+                                            @Proof(media) · @Path.GetDirectoryName(media.LibraryPath)
+                                        </div>
+                                    }
+                                    @if (row.Media.Count > 3)
+                                    {
+                                        <div class="cell-note">and @(row.Media.Count - 3) more</div>
+                                    }
+                                }
+                            </td>
+                            <td class="col-num">@SizeFormatter.FormatBytes(section == Section.Missing ? row.SizeBytes : row.FreedBytes)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
 
-    @if (_candidates.Count > _shown)
-    {
-        <button type="button"
-                class="btn btn-secondary mt-3"
-                @onclick="() => _shown += PageSize">
-            Show @Math.Min(PageSize, _candidates.Count - _shown) more (@(_candidates.Count - _shown) left)
-        </button>
+        @if (rows.Count > Shown(section))
+        {
+            <button type="button" class="btn btn-secondary btn-sm mt-2" @onclick="() => _shown[section] = Shown(section) + PageSize">
+                Show @Math.Min(PageSize, rows.Count - Shown(section)) more
+            </button>
+        }
     }
+
+    <p class="cell-note mt-3">Last checked @LastCheckedText.</p>
 }
 
 @code
 {
     private const int PageSize = 100;
 
+    private enum Section
+    {
+        Safe,
+        Other,
+        Missing
+    }
+
     private List<DriveProfile> _profiles = [];
-
-    private List<DownloadCleanupCandidate> _candidates = [];
-
-    private List<DownloadCleanupCandidate> _pending = [];
-
-    private readonly CandidateSelection<DownloadCleanupCandidate> _selection =
-        new(candidate => candidate.DownloadPath);
-
-    private int _shown = PageSize;
+    private List<DownloadLeftover> _leftovers = [];
+    private readonly HashSet<string> _picked = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<Section, int> _shown = [];
 
     private string? _checkingDrive;
     private DateTime? _lastCheckedUtc;
     private bool _hasChecked;
-
     private string _statusMessage = string.Empty;
     private string _errorMessage = string.Empty;
-
     private List<string> _skipReasons = [];
-
-    private bool _isConfirming;
+    private Section? _confirming;
     private bool _isProcessing;
 
-    private bool IsBusy =>
-        _isProcessing || _checkingDrive is not null;
+    private bool IsBusy => _isProcessing || _checkingDrive is not null;
 
     private string LastCheckedText =>
-        _lastCheckedUtc is null
-            ? "never"
-            : _lastCheckedUtc.Value.ToLocalTime().ToString("g");
+        _lastCheckedUtc is null ? "never" : _lastCheckedUtc.Value.ToLocalTime().ToString("g");
+
+    private static Section SectionOf(DownloadLeftover leftover) =>
+        leftover.Kind switch
+        {
+            DownloadLeftoverKind.OtherRelease => Section.Other,
+            DownloadLeftoverKind.NotInLibrary => Section.Missing,
+            _ => Section.Safe
+        };
+
+    private List<DownloadLeftover> Rows(Section section) =>
+        _leftovers.Where(leftover => SectionOf(leftover) == section).ToList();
+
+    private List<DownloadLeftover> Selected(Section section) =>
+        Rows(section).Where(leftover => _picked.Contains(leftover.Path)).ToList();
+
+    private int Shown(Section section) => _shown.GetValueOrDefault(section, PageSize);
+
+    private static string Heading(Section section) =>
+        section switch
+        {
+            Section.Safe => "Safe to remove",
+            Section.Other => "Other releases of titles you already have",
+            _ => "Not in your library"
+        };
+
+    private string Explain(Section section) =>
+        section switch
+        {
+            Section.Safe => "The library has the same files, or only leftovers are left. Deleted along with their folder.",
+            Section.Other => "The library has the same movie or episode as a different file, usually an older or smaller quality left after an upgrade. Nothing is ticked to start with; they go to Quarantine.",
+            _ => $"No torrent in {Client.Name} uses these, and your library doesn't have them: never imported, or removed since. They're only shown here; nothing is removed."
+        };
+
+    private static string Contents(DownloadLeftover leftover)
+    {
+        var parts = new List<string>();
+
+        if (leftover.Media.Count > 0)
+        {
+            parts.Add($"{leftover.Media.Count} file(s) to play");
+        }
+
+        if (leftover.Junk.Count > 0)
+        {
+            parts.Add($"{leftover.Junk.Count} leftover(s)");
+        }
+
+        if (leftover.Kept.Count > 0)
+        {
+            parts.Add($"{leftover.Kept.Count} other");
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    private static string Proof(DownloadCleanupCandidate media) =>
+        media.MatchKind switch
+        {
+            DownloadMatchKind.Hardlink => "the same file (hardlink), frees nothing",
+            DownloadMatchKind.IdenticalCopy => "an identical copy, every byte compared",
+            DownloadMatchKind.OtherRelease =>
+                (media.LibraryQuality.Length > 0 ? media.LibraryQuality + " · " : null) +
+                SizeFormatter.FormatBytes(media.LibrarySizeBytes) +
+                (media.DownloadQuality.Length > 0 ? $" (this one is {media.DownloadQuality})" : null),
+            _ => string.Empty
+        };
 
     protected override async Task OnInitializedAsync()
     {
-        _profiles =
-            await SettingsService.GetEnabledDriveProfilesAsync();
+        _profiles = await SettingsService.GetEnabledDriveProfilesAsync();
 
-        LoadCandidates();
+        Load();
     }
 
-    private void LoadCandidates()
+    private void Load()
     {
-        _candidates =
+        // Two drive entries can share a downloads folder (one for everything
+        // on the drive, one just for one folder of it): each download once.
+        _leftovers =
             _profiles
-                .SelectMany(profile =>
-                    DownloadCleanupService.GetCandidates(profile.Name))
-                .OrderByDescending(candidate => candidate.SizeBytes)
-                .ThenBy(candidate => candidate.DownloadPath, StringComparer.OrdinalIgnoreCase)
+                .SelectMany(profile => DownloadCleanupService.GetLeftovers(profile.Name))
+                .DistinctBy(leftover => leftover.Path, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(leftover => leftover.FreedBytes)
+                .ThenBy(leftover => leftover.Path, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-        // The oldest check across the drives: the list is only as fresh
-        // as its least recently checked drive.
+        _picked.IntersectWith(_leftovers.Select(leftover => leftover.Path));
+
         var checks =
             _profiles
                 .Select(profile => DownloadCleanupService.GetLastScanUtc(profile.Name))
@@ -273,11 +347,31 @@ else
         _lastCheckedUtc = _hasChecked ? checks.Min() : null;
     }
 
-    private static long SpaceFreed(
-        IEnumerable<DownloadCleanupCandidate> candidates) =>
-        candidates
-            .Where(candidate => candidate.MatchKind == DownloadMatchKind.IdenticalCopy)
-            .Sum(candidate => candidate.SizeBytes);
+    private void Pick(DownloadLeftover leftover, bool picked)
+    {
+        if (picked)
+        {
+            _picked.Add(leftover.Path);
+        }
+        else
+        {
+            _picked.Remove(leftover.Path);
+        }
+    }
+
+    private void ToggleAll(Section section)
+    {
+        var rows = Rows(section);
+
+        if (rows.All(row => _picked.Contains(row.Path)))
+        {
+            rows.ForEach(row => _picked.Remove(row.Path));
+        }
+        else
+        {
+            rows.ForEach(row => _picked.Add(row.Path));
+        }
+    }
 
     private async Task CheckAllAsync()
     {
@@ -289,11 +383,8 @@ else
         _errorMessage = string.Empty;
         _statusMessage = string.Empty;
         _skipReasons = [];
+        _confirming = null;
 
-        CancelConfirm();
-
-        var found = 0;
-        var filesChecked = 0;
         var stillInUse = 0;
 
         try
@@ -304,37 +395,28 @@ else
 
                 await InvokeAsync(StateHasChanged);
 
-                var result =
-                    await DownloadCleanupService.ScanAsync(profile.Name);
+                var result = await DownloadCleanupService.ScanAsync(profile.Name);
 
                 if (result.Error is not null)
                 {
-                    // Almost always "the client can't be reached" - which
-                    // is the same answer for every drive, so stop here.
+                    // Almost always "the client can't be reached": the same for every drive.
                     _errorMessage = result.Error;
 
                     break;
                 }
 
-                found += result.Candidates.Count;
-                filesChecked += result.DownloadFilesChecked;
                 stillInUse += result.SkippedStillInClient;
             }
 
-            _selection.Clear();
+            _picked.Clear();
 
-            LoadCandidates();
+            Load();
 
             if (string.IsNullOrEmpty(_errorMessage))
             {
                 _statusMessage =
-                    $"Checked {filesChecked:N0} download file(s). {found:N0} can be removed.";
-
-                if (stillInUse > 0)
-                {
-                    _statusMessage +=
-                        $" {stillInUse:N0} more are in your library too, but {Client.Name} still has them, so they were left alone.";
-                }
+                    $"{Rows(Section.Safe).Count} safe to remove, {Rows(Section.Other).Count} other releases, {Rows(Section.Missing).Count} not in your library." +
+                    (stillInUse > 0 ? $" {stillInUse:N0} more are in your library too, but {Client.Name} still uses them, so they were left alone." : null);
             }
         }
         catch (Exception ex)
@@ -347,30 +429,9 @@ else
         }
     }
 
-    private void RequestConfirm()
-    {
-        if (IsBusy || _selection.Count == 0)
-        {
-            return;
-        }
-
-        _pending =
-            _candidates
-                .Where(_selection.IsSelected)
-                .ToList();
-
-        _isConfirming = true;
-    }
-
-    private void CancelConfirm()
-    {
-        _isConfirming = false;
-        _pending = [];
-    }
-
     private async Task ConfirmAsync()
     {
-        if (IsBusy || _pending.Count == 0)
+        if (IsBusy || _confirming is not { } section)
         {
             return;
         }
@@ -380,8 +441,7 @@ else
 
         try
         {
-            var result =
-                await DownloadCleanupService.RemoveAsync(_pending.ToList());
+            var result = await DownloadCleanupService.RemoveLeftoversAsync(Selected(section));
 
             if (result.Error is not null)
             {
@@ -392,23 +452,22 @@ else
 
             _skipReasons = result.SkipReasons;
 
+            var done = section == Section.Safe ? "Removed" : "Moved to Quarantine";
+
             _statusMessage =
                 result.Skipped == 0
-                    ? $"Deleted {result.Removed} download file(s)."
-                    : $"Deleted {result.Removed} download file(s); {result.Skipped} were left alone because something had changed.";
+                    ? $"{done}: {result.Removed} download(s)."
+                    : $"{done}: {result.Removed} download(s); {result.Skipped} left alone because something changed.";
 
-            _selection.Clear();
-
-            LoadCandidates();
+            Load();
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Deleting stopped: {ex.Message}";
+            _errorMessage = $"It stopped: {ex.Message}";
         }
         finally
         {
-            CancelConfirm();
-
+            _confirming = null;
             _isProcessing = false;
         }
     }

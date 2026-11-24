@@ -9,7 +9,17 @@ public enum DownloadMatchKind
     Hardlink,
 
     /// <summary>A separate copy whose every byte matches the library file.</summary>
-    IdenticalCopy
+    IdenticalCopy,
+
+    /// <summary>
+    /// Not the same file: another release (often another quality) of a
+    /// movie or episode the library already has. Goes to Quarantine, not
+    /// deleted, since nothing proves it identical.
+    /// </summary>
+    OtherRelease,
+
+    /// <summary>The library doesn't have it: shown, never removed.</summary>
+    NotInLibrary
 }
 
 /// <summary>
@@ -42,4 +52,12 @@ public class DownloadCleanupCandidate
     public DateTime DownloadModifiedUtc { get; set; }
 
     public DateTime LibraryModifiedUtc { get; set; }
+
+    /// <summary>For another release: the library file's size.</summary>
+    public long LibrarySizeBytes { get; set; }
+
+    /// <summary>For another release: "720p" and "1080p", when the names say.</summary>
+    public string DownloadQuality { get; set; } = string.Empty;
+
+    public string LibraryQuality { get; set; } = string.Empty;
 }

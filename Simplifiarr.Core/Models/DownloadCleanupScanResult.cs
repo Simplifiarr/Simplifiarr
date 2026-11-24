@@ -11,6 +11,10 @@ public class DownloadCleanupScanResult
     public List<DownloadCleanupCandidate> Candidates { get; set; } =
         [];
 
+    /// <summary>The same results by torrent folder, with the junk that goes with each.</summary>
+    public List<DownloadLeftover> Leftovers { get; set; } =
+        [];
+
     public int TorrentCount { get; set; }
 
     public int DownloadFilesChecked { get; set; }

@@ -11,8 +11,10 @@
 <nav class="help-contents" aria-label="On this page">
     <a href="help#start" onclick="document.getElementById('start').scrollIntoView({behavior:'smooth'}); return false;">Getting started</a>
     <a href="help#scan" onclick="document.getElementById('scan').scrollIntoView({behavior:'smooth'}); return false;">Scanning</a>
-    <a href="help#link" onclick="document.getElementById('link').scrollIntoView({behavior:'smooth'}); return false;">Link</a>
-    <a href="help#clean" onclick="document.getElementById('clean').scrollIntoView({behavior:'smooth'}); return false;">Clean up</a>
+    @foreach (var group in Groups)
+    {
+        <a href="@($"help#{group.Id}")" onclick="@($"document.getElementById('{group.Id}').scrollIntoView({{behavior:'smooth'}}); return false;")">@group.Title</a>
+    }
     <a href="help#safety" onclick="document.getElementById('safety').scrollIntoView({behavior:'smooth'}); return false;">Safety net</a>
     <a href="help#settings" onclick="document.getElementById('settings').scrollIntoView({behavior:'smooth'}); return false;">Settings</a>
     <a href="help#questions" onclick="document.getElementById('questions').scrollIntoView({behavior:'smooth'}); return false;">Questions</a>
@@ -86,31 +88,22 @@
     </p>
 </section>
 
-@* ------------------------------------------------------------------- Link *@
+@* ------------------------------------------------------------- Tool groups *@
+@* The same groups, in the same order, as the menu. *@
 
-<section class="section" id="link">
-    <h2 class="section-title">Link</h2>
+@foreach (var group in Groups)
+{
+    <section class="section" id="@group.Id">
+        <h2 class="section-title">@group.Title</h2>
 
-    <div class="panel">
-        @foreach (var page in LinkPages)
-        {
-            <HelpRow Page="page" />
-        }
-    </div>
-</section>
-
-@* ---------------------------------------------------------------- Clean up *@
-
-<section class="section" id="clean">
-    <h2 class="section-title">Clean up</h2>
-
-    <div class="panel">
-        @foreach (var page in CleanPages)
-        {
-            <HelpRow Page="page" />
-        }
-    </div>
-</section>
+        <div class="panel">
+            @foreach (var page in group.Pages)
+            {
+                <HelpRow Page="page" />
+            }
+        </div>
+    </section>
+}
 
 @* -------------------------------------------------------------- Safety net *@
 
@@ -209,10 +202,10 @@
         string Name,
         string Text);
 
-    private static readonly HelpPage[] LinkPages =
+    private static readonly HelpPage[] TorrentPages =
     [
         new("hardlinks", "link-45deg", "Hardlinks",
-            "Finished downloads that aren't in your library yet. Preview where each one will go, then link it in - it keeps seeding and costs no extra space. TV is grouped by show and season."),
+            "Finished downloads that aren't in your library yet. Preview where each one will go, then link it in - it keeps seeding and costs no extra space. TV is grouped by show and season, and new seasons get Sonarr's own folder name."),
         new("potential-waste", "arrow-repeat", "Potential Waste",
             "Library files that are full copies of a download. Converting swaps the copy for a hardlink; the old copy goes to Quarantine."),
         new("move-seeds", "truck", "Move Seeds",
@@ -220,33 +213,58 @@
         new("cross-seed", "share", "Cross-Seed",
             "Finds other torrents of files you already seed, so you can seed them on more trackers without downloading anything."),
         new("torrent-rebuilder", "hammer", "Torrent Rebuilder",
-            "Rebuilds one torrent from files already in your library, even renamed ones, so it can seed straight away."),
-        new("collections", "collection", "Collections",
-            "Group anything in your libraries and send the group to Jellyfin as a collection. Sending again only changes what changed."),
-        new("posters", "image", "Posters",
-            "Choose the poster, backdrop, logo and other artwork for any film, show, season or collection in Jellyfin from everything found online, or drop in your own. You pick which kinds of picture to work with.")
+            "Rebuilds one torrent from files already in your library, even renamed ones, so it can seed straight away.")
     ];
 
-    private static readonly HelpPage[] CleanPages =
+    private static readonly HelpPage[] SpacePages =
     [
+        new("storage", "device-hdd", "Storage",
+            "How full each drive is, and what fills it. Protected drives are kept under a limit you set: titles nobody watches move off them to the overflow drive with the most free space, one at a time, telling Radarr or Sonarr the new folder. Titles seeding, added recently or being watched stay put. Also lists titles worth a look, which can be deleted through Radarr or Sonarr."),
         new("duplicates", "copy", "Duplicates",
             "The same title more than once in your libraries, usually two qualities. Pick the one to keep."),
         new("junk-cleanup", "trash3", "Junk",
-            "Sample clips, checksum and tracker files, and stray images left in your libraries. You choose what counts as junk."),
+            "Sample clips, checksum and tracker files, and stray images left in your libraries. You choose what counts as junk, and which kinds of picture to keep."),
         new("download-cleanup", "folder-x", "Downloads",
             "Downloads your library already has, on any drive, that your torrent client is no longer seeding. Each is checked byte for byte against the library copy."),
+        new("size-reduction", "file-earmark-zip", "Size Reduction",
+            "Smaller releases of films and episodes you have, found on your indexers, kept to the encodes you accept. Download one and it is swapped in for yours.")
+    ];
+
+    private static readonly HelpPage[] FixPages =
+    [
+        new("folder-fixer", "signpost-split", "Folder Fixer",
+            "Movies and shows Radarr or Sonarr point at a folder that no longer exists, usually because it was moved by hand: points them at where the folder is now. Also finds seasons split across two folders (Season 6 and Season 06), explains why, and merges them."),
         new("playback-errors", "exclamation-octagon", "Playback Errors",
             "Files your media server may not be able to open: blocked by Windows, permissions it can't read, still packed in an archive, empty, unfinished, or badly named. Several can be fixed in one click."),
-        new("size-reduction", "file-earmark-zip", "Size Reduction",
-            "Smaller releases of films and episodes you have, found on your indexers, kept to the encodes you accept. Download one and it is swapped in for yours."),
-        new("storage", "device-hdd", "Storage",
-            "How full each drive is against a limit you set, and what fills it. Suggests titles to move so no drive fills up, and moves them one at a time, telling Radarr or Sonarr the new folder. Shows who has watched each title (Jellyfin) and who asked for it (Seerr), and lists titles worth a look, which can be deleted through Radarr or Sonarr. Titles still seeding are never moved or deleted."),
-        new("folder-fixer", "signpost-split", "Folder Fixer",
-            "Movies and shows Radarr or Sonarr point at a folder that no longer exists, usually because it was moved by hand. Points them at where the folder is now, or removes entries with nothing on disk. Nothing is moved."),
-        new("rolling-shows", "arrow-repeat", "Rolling Shows",
+        new("music", "music-note-beamed", "Music",
+            "Tidies music libraries: tracks not in an album folder, several albums in one folder, an album split across folders, the same album twice, leftovers and broken tracks. Converts tracks to MP3, AAC, Opus or FLAC, keeping their tags and cover art.")
+    ];
+
+    private static readonly HelpPage[] JellyfinPages =
+    [
+        new("posters", "image", "Posters",
+            "Choose the poster, backdrop, logo and other artwork for any film, show, season or collection in Jellyfin from everything found online, or drop in your own. You pick which kinds of picture to work with."),
+        new("collections", "collection", "Collections",
+            "Group anything in your libraries and send the group to Jellyfin as a collection. Sending again only changes what changed.")
+    ];
+
+    private static readonly HelpPage[] AutomaticPages =
+    [
+        new("rolling-shows", "tv", "Rolling Shows",
             "For daily and weekly shows: keep only the newest episodes, the last so many days, or the current season, and let older ones go as new ones arrive. Can wait until an episode is watched. Sonarr stops looking for each episode before it is deleted. Preview before turning a rule on; runs on every Scan, or the moment Sonarr imports an episode with its webhook."),
         new("rolling-movies", "film", "Rolling Movies",
             "Rules that delete movies by themselves. Pick which movies by Radarr tag, who asked for them in Seerr, folder, or one by one; they go a number of days after being watched (by whoever asked, anyone, or people you pick), after months unwatched, a number of days after arriving, or when their drive is over its limit. Each leaves Radarr, and Seerr so it can be asked for again. Favorites, movies you kept on Storage and the keep tag are never deleted. Preview before turning a rule on; runs on every Scan.")
+    ];
+
+    private sealed record HelpGroup(string Id, string Title, HelpPage[] Pages);
+
+    private static readonly HelpGroup[] Groups =
+    [
+        new("torrents", "Torrents & seeding", TorrentPages),
+        new("space", "Free up space", SpacePages),
+        new("fix", "Fix & tidy", FixPages),
+        new("jellyfin", "Jellyfin", JellyfinPages),
+        new("automatic", "Automatic", AutomaticPages)
     ];
 
     private static readonly HelpPage[] SafetyPages =

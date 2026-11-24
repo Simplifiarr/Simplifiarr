@@ -27,6 +27,8 @@ public sealed record ArrFolderProblem(
                       ? "Its folder is there but has no files, and no other copy was found"
                       : "Not found in any library folder or root folder") +
                   (Item.Monitored ? $". It is monitored, so {Item.Source} may still be looking for it" : string.Empty);
+
+    // (A monitored entry with nothing found anywhere isn't listed at all: see ArrFolderRepair.Find.)
 }
 
 /// <summary>
@@ -90,6 +92,14 @@ public static class ArrFolderRepair
                         .Where(folder => Key(Path.GetFileName(folder), null) == wanted ||
                                          (item.Year is null && Key(Path.GetFileName(folder), null) == Key(item.Title, null)))
                         .ToList();
+            }
+
+            // Monitored with nothing on disk anywhere: Radarr or Sonarr is
+            // still waiting to download it (often a Seerr request). Not a
+            // problem, and removing it would lose the request.
+            if (item.Monitored && matches.Count == 0)
+            {
+                continue;
             }
 
             problems.Add(new ArrFolderProblem(kind, item, matches.Count == 1 ? matches[0] : null, matches.Count, empty));

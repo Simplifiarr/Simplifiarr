@@ -83,6 +83,17 @@ public class ArrFolderRepairTests
     }
 
     [TestMethod]
+    public void A_monitored_title_with_nothing_on_disk_is_waiting_not_broken()
+    {
+        var waiting = new ArrItem("Sonarr", 3, "Static Dreams", @"E:\TV\Static Dreams (2017)", 2017, Monitored: true);
+        var moved = new ArrItem("Radarr", 4, "The Gorge", @"C:\Media\Movies\The Gorge (2025)", 2025, Monitored: true);
+
+        var problem = Find(waiting, moved).Single();
+
+        Assert.AreEqual(4, problem.Item.Id, "A monitored title whose folder moved is still worth fixing; one waiting to download isn't listed.");
+    }
+
+    [TestMethod]
     public void An_empty_folder_counts_as_nothing_on_disk()
     {
         var empty = @"O:\Movies\Harbour (2019)";
