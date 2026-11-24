@@ -135,7 +135,7 @@ public static class StoragePlanner
 
     /// <summary>
     /// Movies and shows on full drives that are held back from suggestions,
-    /// and why: still seeding, added recently, or too big.
+    /// and why: still seeding, still airing, added recently, or too big.
     /// </summary>
     public static List<(StorageTitle Title, string Reason)> HeldBack(
         IEnumerable<StorageDrive> drives,
@@ -150,6 +150,7 @@ public static class StoragePlanner
                 Title: title,
                 Reason:
                     title.IsSeeding ? "Still seeding"
+                    : title.StaysForNewEpisodes ? "Still airing"
                     : IsRecent(title, watch?.Invoke(title), recentAfterUtc) ? "Added or changed recently"
                     : title.SizeBytes > largestBytes ? "Too big to move by itself"
                     : null))

@@ -302,7 +302,7 @@ else if (!string.IsNullOrWhiteSpace(Search.LastMessage))
 
         <div class="cell-note">
             Downloads are tagged <code>@SizeReductionDownloadService.Tag</code> in @Client.Name. Swapping links the new file into
-            your library (it keeps seeding), sends the old one to the Recycle Bin and asks Radarr or Sonarr to rescan.
+            your library (it keeps seeding), moves the old one to Quarantine and asks Radarr or Sonarr to rescan.
             The old file's torrent, if any, is left alone.
         </div>
     </section>
@@ -546,7 +546,7 @@ else if (!string.IsNullOrWhiteSpace(Search.LastMessage))
                                                     {
                                                         <div class="cell-note mt-1 ms-auto" style="max-width: 32ch">
                                                             Starts it in @Client.Name. When it's done, the new file is linked into the library
-                                                            and yours goes to the Recycle Bin@(_autoSwap ? "" : " when you press Swap now").
+                                                            and yours goes to Quarantine@(_autoSwap ? "" : " when you press Swap now").
                                                         </div>
                                                     }
                                                 </td>

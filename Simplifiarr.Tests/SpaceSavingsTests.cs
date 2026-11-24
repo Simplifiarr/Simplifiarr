@@ -40,7 +40,7 @@ public class SpaceSavingsTests
                 Record(HistoryActionType.MovieRolledOff, 1, success: false)
             ]);
 
-        CollectionAssert.AreEqual(new[] { "Duplicates", "Size Reduction", "Rolling Shows" }, savings.Select(saving => saving.Tool).ToList());
+        CollectionAssert.AreEqual(new[] { "Copies", "Size Reduction", "Rolling Shows" }, savings.Select(saving => saving.Tool).ToList());
 
         var reduced = savings.Single(saving => saving.Tool == "Size Reduction");
         Assert.AreEqual(500, reduced.Bytes);
@@ -68,9 +68,10 @@ public class SpaceSavingsTests
                 Record(HistoryActionType.DownloadCopyRemoved, 30, message: "Download copy deleted - qBittorrent no longer has it and the library has an identical copy.")
             ]);
 
-        Assert.AreEqual(200, savings.Single(saving => saving.Tool == "Copies made hardlinks").Bytes);
+        // Links and deleted copies are both Copies now: one tile.
+        Assert.AreEqual(230, savings.Single(saving => saving.Tool == "Copies").Bytes);
+        Assert.AreEqual(3, savings.Single(saving => saving.Tool == "Copies").Count);
         Assert.AreEqual(40, savings.Single(saving => saving.Tool == "Rolling Shows").Bytes);
-        Assert.AreEqual(30, savings.Single(saving => saving.Tool == "Download Cleanup").Bytes);
         Assert.AreEqual(270, savings.Sum(saving => saving.Bytes));
     }
 

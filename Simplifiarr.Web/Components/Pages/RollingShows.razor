@@ -152,11 +152,11 @@
                     <div class="detail-label" style="margin-top: 0">Deleted episodes go</div>
                     <div class="form-check">
                         <input id="del-recycle" class="form-check-input" type="radio" name="permanent" checked="@(!edited.Permanent)" @onchange="() => edited.Permanent = false" />
-                        <label class="form-check-label" for="del-recycle">to the Recycle Bin</label>
+                        <label class="form-check-label" for="del-recycle">to Quarantine, where you can restore them</label>
                     </div>
                     <div class="form-check">
                         <input id="del-permanent" class="form-check-input" type="radio" name="permanent" checked="@edited.Permanent" @onchange="() => edited.Permanent = true" />
-                        <label class="form-check-label" for="del-permanent">for good (daily shows fill the Recycle Bin fast)</label>
+                        <label class="form-check-label" for="del-permanent">for good (daily shows fill Quarantine fast)</label>
                     </div>
 
                     @if (_unit != KeepUnit.Episodes)

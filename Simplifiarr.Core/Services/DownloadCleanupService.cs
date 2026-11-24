@@ -38,7 +38,7 @@ public class DownloadCleanupService
              "radarr", "sonarr", "lidarr", "readarr", "complete", "completed", "done", "finished", "downloads", "seedonly", "seed only", "cross-seed", "crossseed"],
             StringComparer.OrdinalIgnoreCase);
 
-    private enum FileRole
+    internal enum FileRole
     {
         Media,
         Junk,
@@ -433,7 +433,7 @@ public class DownloadCleanupService
         return Path.Combine(current, parts[index]);
     }
 
-    private static FileRole RoleOf(FileRecord file)
+    internal static FileRole RoleOf(FileRecord file)
     {
         if (JunkExtensions.Contains(file.Extension) ||
             file.FileName.StartsWith("._", StringComparison.Ordinal) ||
@@ -881,7 +881,9 @@ public class DownloadCleanupService
 
         if (candidate.MatchKind == DownloadMatchKind.OtherRelease)
         {
-            return NativeHardlinks.GetIdentity(candidate.DownloadPath) is { LinkCount: > 1 }
+            // Another name in the Recycle Bin is a leftover of an earlier
+            // swap or delete, not something using it.
+            return NativeHardlinks.OtherNamesOnlyInRecycleBin(candidate.DownloadPath, []) is null
                 ? "it is hardlinked somewhere now, so moving it would free nothing."
                 : null;
         }

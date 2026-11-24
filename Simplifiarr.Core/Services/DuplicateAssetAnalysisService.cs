@@ -30,11 +30,10 @@ public class DuplicateAssetAnalysisService
                         MediaType.Comic)
                 .Where(asset =>
                     !string.IsNullOrWhiteSpace(asset.CanonicalPath))
-                // This page is about the same title twice in your
-                // libraries. A file sitting in a downloads folder is not a
-                // library copy (a download that duplicates a library file
-                // is Potential Waste's job), even if a mis-set library
-                // folder caused it to be catalogued.
+                // The same title twice in your libraries. A file sitting in
+                // a downloads folder is not a library copy (Copies works
+                // downloads out from the files themselves), even if a
+                // mis-set library folder caused it to be catalogued.
                 .Where(asset =>
                     !profiles.Any(profile =>
                         profile.AllDownloadPaths().Any(root =>
@@ -90,8 +89,8 @@ public class DuplicateAssetAnalysisService
 
     /// <summary>
     /// Drops files marked "not a duplicate"; a title left with a single copy
-    /// is no longer a duplicate. Shared by the Duplicates page and Home so
-    /// the two always agree.
+    /// is no longer a duplicate. Copies uses it for books, audiobooks,
+    /// music and comics.
     /// </summary>
     public static List<DuplicateAssetGroup> RemoveIgnored(
         List<DuplicateAssetGroup> groups,

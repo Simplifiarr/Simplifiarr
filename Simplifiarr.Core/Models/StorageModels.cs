@@ -43,9 +43,17 @@ public sealed class StorageTitle
 
     public bool IsSeeding => SeedingBytes > 0;
 
+    /// <summary>
+    /// A show Sonarr still expects episodes of, on the downloads drive. It
+    /// stays there, so new episodes keep being hardlinked rather than copied
+    /// to another drive.
+    /// </summary>
+    public bool StaysForNewEpisodes { get; set; }
+
     /// <summary>Only movies and TV: Radarr and Sonarr are told the new place.</summary>
     public bool CanMove =>
         !IsSeeding &&
+        !StaysForNewEpisodes &&
         Kind is StorageKinds.Movies or StorageKinds.Tv;
 }
 
@@ -83,6 +91,9 @@ public sealed class StorageDrive
     /// are overflow drives.
     /// </summary>
     public bool IsProtected { get; set; }
+
+    /// <summary>The drive new downloads land on (it is also protected).</summary>
+    public bool IsDownloadsDrive { get; set; }
 
     /// <summary>A protected drive starts moving titles off above this used share.</summary>
     public int LimitPercent { get; set; }

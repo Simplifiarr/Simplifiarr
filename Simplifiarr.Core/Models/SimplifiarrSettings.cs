@@ -158,6 +158,15 @@ public class SimplifiarrSettings
     public int StorageRecentDays { get; set; } = 14;
 
     /// <summary>
+    /// The drive entry new downloads land on, or blank when each drive has
+    /// its own downloads. When set, that drive is the one kept clear: its
+    /// finished titles move to the other drives as it fills, and nothing is
+    /// moved onto it. Every other drive is an overflow drive. Shows still
+    /// airing stay on it, so their new episodes keep being hardlinked.
+    /// </summary>
+    public string DownloadsDrive { get; set; } = string.Empty;
+
+    /// <summary>
     /// After an automatic scan, queue the suggested moves by itself. Off
     /// by default.
     /// </summary>

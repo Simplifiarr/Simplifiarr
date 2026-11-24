@@ -7,9 +7,8 @@ namespace Simplifiarr.Core.Services;
 /// fresh result, but because the scan has already read the drive's folders
 /// once, none of them goes back to the disk for a file listing.
 ///
-/// Size Reduction and Download Cleanup are deliberately not here: the first
-/// searches indexers over the network and the second compares whole files
-/// byte for byte, so they stay on their own pages as things you ask for.
+/// Size Reduction is deliberately not here: it searches indexers over the
+/// network, so it stays on its own page as something you ask for.
 /// </summary>
 public class DefaultScanStepProvider
     : IScanStepProvider
@@ -20,7 +19,7 @@ public class DefaultScanStepProvider
     public DefaultScanStepProvider(
         IMoviePromotionCandidateService movies,
         IMediaPromotionService mediaPromotion,
-        IWasteCandidateService waste,
+        ICopiesService copies,
         IJunkFileScannerService junk,
         IPlaybackErrorService playbackErrors,
         ISeedMoveService seedMoves,
@@ -29,12 +28,13 @@ public class DefaultScanStepProvider
         IWatchHistoryService watchHistory,
         ISizeReductionDownloadService sizeReductionDownloads,
         IRollingShowService rollingShows,
-        IRollingMovieService rollingMovies)
+        IRollingMovieService rollingMovies,
+        IDownloadsDriveCheck downloadsDrive)
     {
         var steps = new List<ScanStep>
         {
             new(
-                "Finding movies and TV to link",
+                "Finding movies and TV not in your library",
                 profile => movies.GetCandidatesAsync(profile.Name, forceRefresh: true, MediaKind.All))
         };
 
@@ -44,14 +44,9 @@ public class DefaultScanStepProvider
         {
             steps.Add(
                 new ScanStep(
-                    $"Finding {definition.PluralName.ToLowerInvariant()} to link",
+                    $"Finding {definition.PluralName.ToLowerInvariant()} not in your library",
                     profile => mediaPromotion.ScanAsync(definition.MediaType, profile.Name)));
         }
-
-        steps.Add(
-            new ScanStep(
-                "Checking for full copies",
-                profile => waste.GetCandidatesAsync(profile.Name, forceRefresh: true, MediaKind.All)));
 
         steps.Add(
             new ScanStep(
@@ -88,6 +83,18 @@ public class DefaultScanStepProvider
                     await arrEnrichment.EnrichFromSonarrAsync();
                     await arrEnrichment.EnrichFromRadarrAsync();
                 }),
+
+            // Every drive at once, now that each drive's folders are read:
+            // what is on disk more than once, and which downloads the
+            // library already has. Uses the listings just saved.
+            new FinishingStep(
+                "Matching downloads to your library",
+                () => copies.ScanAsync()),
+
+            // With a downloads drive: is everything new arriving there?
+            new FinishingStep(
+                "Checking where new downloads land",
+                downloadsDrive.CheckAsync),
 
             // Who has watched what, and who asked for it. Does nothing
             // when Jellyfin isn't set up.

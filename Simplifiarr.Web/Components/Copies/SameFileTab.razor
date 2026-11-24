@@ -1,0 +1,413 @@
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+@using Simplifiarr.Core.Utilities
+
+@inject ICopiesService Copies
+@inject ISeedMoveService SeedMoves
+@inject ISettingsService SettingsService
+
+@*
+    The "Same file twice" tab of Copies: a download with the same bytes as
+    a library file. What to do follows from whether a torrent still seeds it:
+    not seeding, the download goes; seeding on the same drive, the library
+    copy becomes another name for it; seeding from another drive, Move Seeds
+    moves the torrent next to the library copy.
+*@
+
+@if (!Result.ClientReachable)
+{
+    <div class="alert alert-warning">
+        Couldn't reach @Result.ClientName, so nothing is offered for deleting: Simplifiarr won't delete a download
+        without knowing no torrent uses it.
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(_status))
+{
+    <div class="alert alert-info">@_status</div>
+}
+
+@if (_skipped.Count > 0)
+{
+    <details class="mb-3">
+        <summary>@_skipped.Count left alone - why</summary>
+        <ul class="mt-2 text-muted mb-0">
+            @foreach (var reason in _skipped.Take(50))
+            {
+                <li>@reason</li>
+            }
+        </ul>
+    </details>
+}
+
+@if (_confirming is { } confirming)
+{
+    <BatchConfirmBanner CssClass="@(confirming == Section.Delete ? "alert alert-danger" : "alert alert-warning")"
+                        IsBusy="_working"
+                        ConfirmLabel="@(confirming == Section.Delete ? "Delete" : "Link")"
+                        BusyLabel="@(confirming == Section.Delete ? "Comparing and deleting..." : "Linking...")"
+                        OnConfirm="ConfirmAsync"
+                        OnCancel="() => _confirming = null">
+        <Message>
+            @if (confirming == Section.Delete)
+            {
+                <strong>Delete @PickedDeletes.Count download(s), with their folders and leftovers?</strong>
+                <text>
+                    Each one is compared byte for byte with your library file first, which takes a while for big files.
+                    They skip Quarantine; your library files aren't touched.
+                </text>
+            }
+            else
+            {
+                <strong>Link @PickedLinks.Count library file(s) to their downloads?</strong>
+                <text>
+                    Each library copy goes to Quarantine and the library gets a second name for the download instead.
+                    Seeding carries on. Empty Quarantine to get the space back.
+                </text>
+            }
+        </Message>
+    </BatchConfirmBanner>
+}
+
+<h2 class="section-title">Delete: your library already has these</h2>
+<p class="cell-note">
+    Download folders no torrent in @Result.ClientName uses, whose files your library has: the very same file under
+    another name, the same bytes, or nothing but leftovers (subtitles, pictures, .nfo files). The whole folder goes
+    unless it holds something else.
+</p>
+
+@if (Result.ToDelete.Count == 0)
+{
+    <EmptyState Icon="check-circle" Text="Nothing to delete." />
+}
+else
+{
+    <div class="toolbar">
+        <div class="toolbar-summary">
+            <strong>@Result.ToDelete.Count</strong> · frees <strong>@SizeFormatter.FormatBytes(Result.ToDelete.Sum(row => row.FreedBytes))</strong>
+            @if (PickedDeletes.Count > 0)
+            {
+                <text> · @PickedDeletes.Count selected (@SizeFormatter.FormatBytes(PickedDeletes.Sum(row => row.FreedBytes)))</text>
+            }
+        </div>
+        <div class="toolbar-actions">
+            <button type="button" class="btn btn-secondary btn-sm" disabled="@Busy" @onclick="ToggleDeletes">
+                @(PickedDeletes.Count == Result.ToDelete.Count ? "Select none" : "Select all")
+            </button>
+            <button type="button" class="btn btn-danger btn-sm" disabled="@(Busy || PickedDeletes.Count == 0)" @onclick="() => _confirming = Section.Delete">
+                Delete selected (@PickedDeletes.Count)
+            </button>
+        </div>
+    </div>
+
+    <div class="table-scroll">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th class="col-check">Select</th>
+                    <th>Download</th>
+                    <th>Your library has</th>
+                    <th class="col-num">Frees</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in Result.ToDelete.Take(_shownDeletes))
+                {
+                    <tr @key="row.Path">
+                        <SelectableCheckboxCell Checked="_pickedDeletes.Contains(row.Path)"
+                                                Disabled="Busy"
+                                                OnChanged="selected => Pick(_pickedDeletes, row.Path, selected)" />
+                        <td>
+                            <div class="file-name">@row.Name</div>
+                            <div class="cell-note">@Contents(row) · @Path.GetDirectoryName(row.Path)</div>
+                            @if (row.IsFolder && !row.RemovesFolder)
+                            {
+                                <div class="cell-note status-warn">The folder stays: it also holds @row.Kept.Count other file(s).</div>
+                            }
+                        </td>
+                        <td>
+                            @if (row.Kind == DownloadLeftoverKind.LeftoversOnly)
+                            {
+                                <span class="cell-note">Nothing playable is left in it.</span>
+                            }
+                            else
+                            {
+                                @foreach (var media in row.Media.Take(3))
+                                {
+                                    <div class="file-name">@Path.GetFileName(media.LibraryPath)</div>
+                                    <div class="cell-note">
+                                        @(media.MatchKind == DownloadMatchKind.Hardlink ? "the same file (hardlink), frees nothing" : "the same bytes")
+                                        · @Path.GetDirectoryName(media.LibraryPath)
+                                    </div>
+                                }
+                                @if (row.Media.Count > 3)
+                                {
+                                    <div class="cell-note">and @(row.Media.Count - 3) more</div>
+                                }
+                            }
+                        </td>
+                        <td class="col-num">@SizeFormatter.FormatBytes(row.FreedBytes)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (Result.ToDelete.Count > _shownDeletes)
+    {
+        <button type="button" class="btn btn-secondary btn-sm mt-2" @onclick="() => _shownDeletes += PageSize">
+            Show @Math.Min(PageSize, Result.ToDelete.Count - _shownDeletes) more
+        </button>
+    }
+}
+
+<h2 class="section-title mt-4">Link: still seeding</h2>
+<p class="cell-note">
+    A torrent still seeds the download, and your library has the same bytes as a separate file on the same drive.
+    Linking keeps seeding going and takes the space once.
+</p>
+
+@if (Result.ToLink.Count == 0)
+{
+    <EmptyState Icon="check-circle" Text="Nothing to link." />
+}
+else
+{
+    <div class="toolbar">
+        <div class="toolbar-summary">
+            <strong>@Result.ToLink.Count</strong> · frees <strong>@SizeFormatter.FormatBytes(Result.ToLink.Sum(row => row.FreedBytes))</strong>
+            @if (PickedLinks.Count > 0)
+            {
+                <text> · @PickedLinks.Count selected (@SizeFormatter.FormatBytes(PickedLinks.Sum(row => row.FreedBytes)))</text>
+            }
+        </div>
+        <div class="toolbar-actions">
+            <button type="button" class="btn btn-secondary btn-sm" disabled="@Busy" @onclick="ToggleLinks">
+                @(PickedLinks.Count == Result.ToLink.Count ? "Select none" : "Select all")
+            </button>
+            <button type="button" class="btn btn-primary btn-sm" disabled="@(Busy || PickedLinks.Count == 0)" @onclick="() => _confirming = Section.Link">
+                Link selected (@PickedLinks.Count)
+            </button>
+        </div>
+    </div>
+
+    <div class="table-scroll">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th class="col-check">Select</th>
+                    <th>Library file</th>
+                    <th>Seeding download</th>
+                    <th class="col-num">Frees</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in Result.ToLink.Take(_shownLinks))
+                {
+                    <tr @key="row.Library.Path">
+                        <SelectableCheckboxCell Checked="_pickedLinks.Contains(row.Library.Path)"
+                                                Disabled="Busy"
+                                                OnChanged="selected => Pick(_pickedLinks, row.Library.Path, selected)" />
+                        <td>
+                            <div class="file-name">@row.Library.FileName</div>
+                            <div class="cell-note">@row.Library.DriveName · @Path.GetDirectoryName(row.Library.Path)</div>
+                        </td>
+                        <td>
+                            <div class="file-name">@row.Download.FileName</div>
+                            <div class="cell-note">
+                                @(row.Download.SeedingUnknown ? $"{Result.ClientName} couldn't be asked" : $"seeding as \"{row.Download.Torrent}\"")
+                                · @Path.GetDirectoryName(row.Download.Path)
+                            </div>
+                        </td>
+                        <td class="col-num">@SizeFormatter.FormatBytes(row.FreedBytes)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (Result.ToLink.Count > _shownLinks)
+    {
+        <button type="button" class="btn btn-secondary btn-sm mt-2" @onclick="() => _shownLinks += PageSize">
+            Show @Math.Min(PageSize, Result.ToLink.Count - _shownLinks) more
+        </button>
+    }
+}
+
+@if (_seedMoveCount > 0)
+{
+    <h2 class="section-title mt-4">Seeding from another drive</h2>
+
+    <div class="action-row">
+        <div>
+            <div class="action-row-title">
+                @_seedMoveCount torrent(s) seed from a different drive than your library copy
+            </div>
+            <div class="action-row-detail">
+                A hardlink can't cross drives, so these are two copies. Moving the seed next to the library copy frees
+                @SizeFormatter.FormatBytes(_seedMoveBytes).
+            </div>
+        </div>
+        <a class="btn btn-secondary" href="move-seeds">Open Move Seeds</a>
+    </div>
+}
+
+@code
+{
+    private const int PageSize = 100;
+
+    private enum Section
+    {
+        Delete,
+        Link
+    }
+
+    [Parameter, EditorRequired]
+    public CopiesScanResult Result { get; set; } = new();
+
+    [Parameter]
+    public bool IsScanning { get; set; }
+
+    /// <summary>Raised after something was deleted or linked.</summary>
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    private readonly HashSet<string> _pickedDeletes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _pickedLinks = new(StringComparer.OrdinalIgnoreCase);
+
+    private int _shownDeletes = PageSize;
+    private int _shownLinks = PageSize;
+
+    private Section? _confirming;
+    private bool _working;
+    private string _status = string.Empty;
+    private List<string> _skipped = [];
+
+    private int _seedMoveCount;
+    private long _seedMoveBytes;
+
+    private bool Busy => _working || IsScanning;
+
+    private List<DownloadLeftover> PickedDeletes =>
+        Result.ToDelete.Where(row => _pickedDeletes.Contains(row.Path)).ToList();
+
+    private List<CopyToLink> PickedLinks =>
+        Result.ToLink.Where(row => _pickedLinks.Contains(row.Library.Path)).ToList();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Ticks for rows a new check no longer lists would act on nothing.
+        _pickedDeletes.IntersectWith(Result.ToDelete.Select(row => row.Path));
+        _pickedLinks.IntersectWith(Result.ToLink.Select(row => row.Library.Path));
+
+        var moves =
+            (await SettingsService.GetEnabledDriveProfilesAsync())
+                .SelectMany(profile => SeedMoves.GetCandidates(profile.Name))
+                .DistinctBy(candidate => candidate.TorrentHash, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+        _seedMoveCount = moves.Count;
+        _seedMoveBytes = moves.Sum(candidate => candidate.LinkedBytes);
+    }
+
+    private static void Pick(HashSet<string> picked, string key, bool selected)
+    {
+        if (selected)
+        {
+            picked.Add(key);
+        }
+        else
+        {
+            picked.Remove(key);
+        }
+    }
+
+    private void ToggleDeletes()
+    {
+        if (PickedDeletes.Count == Result.ToDelete.Count)
+        {
+            _pickedDeletes.Clear();
+        }
+        else
+        {
+            _pickedDeletes.UnionWith(Result.ToDelete.Select(row => row.Path));
+        }
+    }
+
+    private void ToggleLinks()
+    {
+        if (PickedLinks.Count == Result.ToLink.Count)
+        {
+            _pickedLinks.Clear();
+        }
+        else
+        {
+            _pickedLinks.UnionWith(Result.ToLink.Select(row => row.Library.Path));
+        }
+    }
+
+    private static string Contents(DownloadLeftover leftover)
+    {
+        var parts = new List<string>();
+
+        if (leftover.Media.Count > 0)
+        {
+            parts.Add($"{leftover.Media.Count} file(s) to play");
+        }
+
+        if (leftover.Junk.Count > 0)
+        {
+            parts.Add($"{leftover.Junk.Count} leftover(s)");
+        }
+
+        if (leftover.Kept.Count > 0)
+        {
+            parts.Add($"{leftover.Kept.Count} other");
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (Busy || _confirming is not { } section)
+        {
+            return;
+        }
+
+        _working = true;
+        _status = string.Empty;
+        _skipped = [];
+
+        try
+        {
+            var result =
+                section == Section.Delete
+                    ? await Copies.DeleteAsync(PickedDeletes)
+                    : await Copies.LinkAsync(PickedLinks);
+
+            _skipped = result.Skipped;
+
+            var done = section == Section.Delete ? "Deleted" : "Linked";
+
+            _status =
+                result.Error ??
+                $"{done} {result.Done}, freeing {SizeFormatter.FormatBytes(result.FreedBytes)}" +
+                (section == Section.Link && result.Done > 0 ? " once you empty Quarantine" : null) +
+                (result.Skipped.Count > 0 ? $"; {result.Skipped.Count} left alone." : ".");
+
+            (section == Section.Delete ? _pickedDeletes : _pickedLinks).Clear();
+
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception exception)
+        {
+            _status = $"It stopped: {exception.Message}";
+        }
+        finally
+        {
+            _confirming = null;
+            _working = false;
+        }
+    }
+}

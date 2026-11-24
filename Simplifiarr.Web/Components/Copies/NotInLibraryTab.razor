@@ -1,6 +1,3 @@
-@page "/hardlinks"
-@rendermode InteractiveServer
-
 @implements IDisposable
 
 @using Simplifiarr.Core.Models
@@ -12,34 +9,28 @@
 @inject IPromotionExecuteService PromotionExecuteService
 @inject IIgnoredItemsService IgnoredItemsService
 @inject IHistoryService HistoryService
-@inject IWasteCandidateCacheService WasteCandidateCache
 @inject IQuarantineService QuarantineService
 @inject IScanCoordinator Scans
 @inject IMediaPromotionService MediaPromotion
+@inject ICopiesService Copies
 
-<PageTitle>Hardlinks - Simplifiarr</PageTitle>
+@*
+    The "Not in your library" tab of Copies: downloads the library has no
+    copy or version of, linked in without copying. Downloads Copies placed
+    elsewhere (the same file, the same bytes, another version) are left out.
+*@
 
-<PageHeader Title="Hardlinks"
-            Subtitle="Finished downloads that can be linked into your libraries without copying. This list comes from the last scan.">
-    <a class="btn btn-secondary" href="ignored">
+<div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+    <p class="text-muted mb-0">
+        Finished downloads your library has no copy or other version of. Linking adds them to the library without
+        copying: the library gets a second name for the same file, and seeding carries on.
+    </p>
+    <a class="btn btn-secondary btn-sm text-nowrap" href="ignored">
         <i class="bi bi-eye-slash" aria-hidden="true"></i> Ignored items
     </a>
-</PageHeader>
+</div>
 
-@if (_profiles.Count == 0)
-{
-    <div class="alert alert-warning">
-        No drives are set up yet. <a href="settings">Add one in Settings</a>.
-    </div>
-}
-else if (_isScanning)
-{
-    <div class="alert alert-info">
-        A scan is running. This page will update when it finishes.
-    </div>
-}
-
-<div class="app-tabs" role="tablist" aria-label="Media type">
+<div class="app-tabs app-tabs-sub" role="tablist" aria-label="Media type">
     <button type="button"
             role="tab"
             aria-selected="@(_activeTab == MoviesTab)"
@@ -567,8 +558,34 @@ else if (_activeTab == TvTab)
             .SelectMany(profile =>
                 MediaPromotion.GetCandidates(definition.MediaType, profile.Name))
             .Select(candidate => candidate.SourcePath)
+            .Where(path => !Matched.Contains(path))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Count();
+
+    /// <summary>
+    /// Raised when the number of downloads listed here changes, so Copies
+    /// can update this tab's count.
+    /// </summary>
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    private int _notifiedCount = -1;
+
+    // Downloads Copies placed in another tab.
+    private HashSet<string> Matched =>
+        new(Copies.Last?.MatchedDownloads ?? [], StringComparer.OrdinalIgnoreCase);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        var count = _candidates.Count + MediaTypeDefinitions.All.Sum(CountFor);
+
+        if (count != _notifiedCount)
+        {
+            _notifiedCount = count;
+
+            await OnChanged.InvokeAsync();
+        }
+    }
 
     private List<DriveProfile> _profiles = [];
 
@@ -698,10 +715,13 @@ else if (_activeTab == TvTab)
 
     private void LoadCachedCandidates()
     {
+        var matched = Matched;
+
         _candidates =
             _profiles
                 .SelectMany(profile =>
                     PromotionCandidateCache.GetCandidates(profile.Name))
+                .Where(candidate => !matched.Contains(candidate.SourcePath))
                 .GroupBy(
                     candidate => candidate.SourcePath,
                     StringComparer.OrdinalIgnoreCase)
@@ -813,20 +833,6 @@ else if (_activeTab == TvTab)
             });
     }
 
-    private void BumpHealthyHardlinkCount(
-        string driveProfileName,
-        bool isTv)
-    {
-        if (string.IsNullOrWhiteSpace(driveProfileName))
-        {
-            return;
-        }
-
-        WasteCandidateCache.IncrementHealthyHardlinkCount(
-            driveProfileName,
-            isTv ? MediaKind.Tv : MediaKind.Movies);
-    }
-
     private async Task ExecuteSelectedAsync()
     {
         var promotedCandidate =
@@ -857,9 +863,6 @@ else if (_activeTab == TvTab)
 
             if (result.Success)
             {
-                BumpHealthyHardlinkCount(
-                    promotedCandidate.DriveProfileName,
-                    promotedCandidate.IsTv);
 
                 PromotionCandidateCache.RemoveCandidate(
                     promotedCandidate.SourcePath);
@@ -933,9 +936,6 @@ else if (_activeTab == TvTab)
                 {
                     succeeded++;
 
-                    BumpHealthyHardlinkCount(
-                        episode.DriveProfileName,
-                        episode.IsTv);
 
                     PromotionCandidateCache.RemoveCandidate(
                         episode.SourcePath);
@@ -1014,9 +1014,6 @@ else if (_activeTab == TvTab)
                 {
                     succeeded++;
 
-                    BumpHealthyHardlinkCount(
-                        candidate.DriveProfileName,
-                        candidate.IsTv);
 
                     PromotionCandidateCache.RemoveCandidate(
                         candidate.SourcePath);

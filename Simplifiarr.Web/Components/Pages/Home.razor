@@ -36,13 +36,13 @@ else
 
         <StatCard Label="Reclaimable now"
                   Value="@_dashboard.PossibleDuplicateCopySizeFormatted"
-                  Note="@Count(_dashboard.PossibleDuplicateCopyCount, "full copy", "full copies")"
-                  Href="potential-waste" />
+                  Note="@Count(_dashboard.PossibleDuplicateCopyCount, "extra copy", "extra copies")"
+                  Href="copies/same-file" />
 
         <StatCard Label="Healthy hardlinks"
                   Value="@_dashboard.HealthyHardlinkCount.ToString("N0")"
                   Note="library files sharing space with a download"
-                  Href="potential-waste" />
+                  Href="copies" />
 
         <StatCard Label="In quarantine"
                   Value="@Count(_dashboard.QuarantinedFileCount, "file", "files")"
@@ -102,16 +102,27 @@ else
                     </div>
                 }
 
+                @foreach (var problem in _dashboard.DownloadsDriveProblems)
+                {
+                    <div class="action-row action-row-warn">
+                        <div>
+                            <div class="action-row-title">Your apps aren't all set up the way Simplifiarr expects</div>
+                            <div class="action-row-detail">@problem</div>
+                        </div>
+                        <a class="btn btn-secondary" href="setup">Setup</a>
+                    </div>
+                }
+
                 @if (_dashboard.PromotionOpportunityCount > 0)
                 {
                     <div class="action-row">
                         <div>
                             <div class="action-row-title">
-                                @Count(_dashboard.PromotionOpportunityCount, "download is", "downloads are") ready to link into your libraries
+                                @Count(_dashboard.PromotionOpportunityCount, "download isn't", "downloads aren't") in your library yet
                             </div>
-                            <div class="action-row-detail">Nothing is copied or moved - the library gets a second name for the same file.</div>
+                            <div class="action-row-detail">Linking them in copies nothing - the library gets a second name for the same file.</div>
                         </div>
-                        <a class="btn btn-primary" href="hardlinks">Review</a>
+                        <a class="btn btn-primary" href="copies/not-in-library">Review</a>
                     </div>
                 }
 
@@ -120,13 +131,13 @@ else
                     <div class="action-row">
                         <div>
                             <div class="action-row-title">
-                                @Count(_dashboard.PossibleDuplicateCopyCount, "library file is a full copy", "library files are full copies") of a download
+                                @Count(_dashboard.PossibleDuplicateCopyCount, "download takes", "downloads take") the space of a library file a second time
                             </div>
                             <div class="action-row-detail">
-                                Converting to hardlinks frees @_dashboard.PossibleDuplicateCopySizeFormatted.
+                                Deleting the ones nothing seeds, and linking the ones still seeding, frees @_dashboard.PossibleDuplicateCopySizeFormatted.
                             </div>
                         </div>
-                        <a class="btn btn-secondary" href="potential-waste">Review</a>
+                        <a class="btn btn-secondary" href="copies/same-file">Review</a>
                     </div>
                 }
 
@@ -150,13 +161,13 @@ else
                     <div class="action-row">
                         <div>
                             <div class="action-row-title">
-                                @Count(_dashboard.DuplicateTitleCount, "title is", "titles are") in your libraries more than once
+                                @Count(_dashboard.DuplicateTitleCount, "title is", "titles are") on your drives in more than one version
                             </div>
                             <div class="action-row-detail">
-                                Keeping one copy of each frees up to @_dashboard.DuplicateReclaimableFormatted.
+                                Keeping one of each frees up to @_dashboard.DuplicateReclaimableFormatted.
                             </div>
                         </div>
-                        <a class="btn btn-secondary" href="duplicates">Review</a>
+                        <a class="btn btn-secondary" href="copies/versions">Review</a>
                     </div>
                 }
 
@@ -327,6 +338,7 @@ else
         _dashboard.JunkFileCount == 0 &&
         _dashboard.PlaybackErrorCount == 0 &&
         ScanProblems.Count == 0 &&
+        _dashboard.DownloadsDriveProblems.Count == 0 &&
         _dashboard.Drives.All(drive => drive.SetupProblems.Count == 0);
 
     private string HeaderLine

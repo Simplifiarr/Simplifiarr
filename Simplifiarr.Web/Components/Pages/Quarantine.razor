@@ -12,7 +12,7 @@
 <PageTitle>Quarantine - Simplifiarr</PageTitle>
 
 <PageHeader Title="Quarantine"
-            Subtitle="Files Simplifiarr moved out of your libraries, held here until you decide. Restore puts one back where it came from. Delete sends it to the Windows Recycle Bin, so even that can be undone." />
+            Subtitle="Files Simplifiarr moved out of your libraries, held here until you decide. Restore puts one back where it came from. Delete removes it for good, and the space is free straight away." />
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
@@ -35,16 +35,16 @@ else
     {
         <BatchConfirmBanner CssClass="alert alert-danger"
                             IsBusy="_isWorking"
-                            ConfirmLabel="Send to Recycle Bin"
+                            ConfirmLabel="Delete for good"
                             BusyLabel="Deleting..."
                             OnConfirm="ConfirmBatchAsync"
                             OnCancel="CancelBatch">
             <Message>
                 <strong>
-                    Send @_pending.Count file(s)
-                    (@SizeFormatter.FormatBytes(_pending.Sum(item => item.SizeBytes))) to the Recycle Bin?
+                    Delete @_pending.Count file(s)
+                    (@SizeFormatter.FormatBytes(_pending.Sum(item => item.SizeBytes))) for good?
                 </strong>
-                The space is freed once the Recycle Bin is emptied.
+                This can't be undone. The space is free straight away.
             </Message>
         </BatchConfirmBanner>
     }
@@ -94,7 +94,7 @@ else
                 @foreach (var item in _items.Take(_shown))
                 {
                     var originalPath =
-                        _originalPaths.GetValueOrDefault(item.FullPath);
+                        OriginalFor(item.FullPath);
 
                     var isConfirmingDelete =
                         string.Equals(_confirmDeletePath, item.FullPath, StringComparison.OrdinalIgnoreCase);
@@ -139,7 +139,7 @@ else
                                             class="btn btn-danger btn-sm"
                                             disabled="@_isWorking"
                                             @onclick="() => DeleteManyAsync([item])">
-                                        Send to Recycle Bin
+                                        Delete for good
                                     </button>
 
                                     <button type="button"
@@ -208,9 +208,33 @@ else
 
     private List<QuarantineItem>? _items;
 
-    // Where each quarantined file came from, looked up from History.
+    // Where each quarantined file or folder came from, looked up from History.
     private Dictionary<string, string> _originalPaths =
         new(StringComparer.OrdinalIgnoreCase);
+
+    // Where a quarantined file goes back to. A file inside a quarantined
+    // folder (a whole movie, say) goes back inside that folder's old place.
+    private string? OriginalFor(string fullPath)
+    {
+        for (var current = fullPath; !string.IsNullOrEmpty(current); current = Path.GetDirectoryName(current))
+        {
+            if (_originalPaths.TryGetValue(current, out var original))
+            {
+                return string.Equals(current, fullPath, StringComparison.OrdinalIgnoreCase)
+                    ? original
+                    : Path.Combine(original, Path.GetRelativePath(current, fullPath));
+            }
+        }
+
+        return null;
+    }
+
+    // A size reduction keeps the old file's place as its download path;
+    // a download taken out has no library path.
+    private static string OriginalOf(HistoryRecord record) =>
+        record.ActionType == HistoryActionType.SizeReduced ? record.DownloadPath
+        : !string.IsNullOrWhiteSpace(record.LibraryPath) ? record.LibraryPath
+        : record.DownloadPath;
 
     private List<QuarantineItem> _pending = [];
 
@@ -242,16 +266,16 @@ else
 
         _originalPaths =
             history
-                .Where(record =>
-                    !string.IsNullOrWhiteSpace(record.QuarantinePath) &&
-                    !string.IsNullOrWhiteSpace(record.LibraryPath))
-                .OrderByDescending(record => record.TimestampUtc)
+                .Where(record => !string.IsNullOrWhiteSpace(record.QuarantinePath))
+                .Select(record => (record.QuarantinePath, Original: OriginalOf(record), record.TimestampUtc))
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.Original))
+                .OrderByDescending(entry => entry.TimestampUtc)
                 .GroupBy(
-                    record => record.QuarantinePath,
+                    entry => entry.QuarantinePath,
                     StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(
                     group => group.Key,
-                    group => group.First().LibraryPath,
+                    group => group.First().Original,
                     StringComparer.OrdinalIgnoreCase);
 
         _selection.Clear();
@@ -370,8 +394,8 @@ else
 
             _statusMessage =
                 failed == 0
-                    ? $"Sent {deleted} file(s) ({SizeFormatter.FormatBytes(bytes)}) to the Recycle Bin."
-                    : $"Sent {deleted} file(s) to the Recycle Bin; {failed} could not be deleted and are still here.";
+                    ? $"Deleted {deleted} file(s) for good, freeing {SizeFormatter.FormatBytes(bytes)}."
+                    : $"Deleted {deleted} file(s) for good; {failed} could not be deleted and are still here.";
 
             await RefreshAsync();
         }

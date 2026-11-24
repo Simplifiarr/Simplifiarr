@@ -288,65 +288,8 @@ public class IgnoredItemsBulkTests : TempFolderTest
 }
 
 [TestClass]
-public class FullCopyDetectionTests : TempFolderTest
+public class LinkSafetyTests : TempFolderTest
 {
-    private DuplicateCandidateService Service() =>
-        new(
-            new FileInventoryCacheService(new FileScannerService()),
-            new HardlinkService());
-
-    [TestMethod]
-    public async Task A_library_file_with_a_same_sized_download_is_a_candidate()
-    {
-        WriteFile(@"movies\Movie (2020)\Movie (2020).mkv", "same-bytes");
-        WriteFile(@"downloads\Movie.2020.1080p.mkv", "same-bytes");
-        WriteFile(@"downloads\Other.2021.1080p.mkv", "different length");
-
-        var found =
-            await Service().FindVideoCandidatesAsync(
-                Path.Combine(Folder, "movies"),
-                Path.Combine(Folder, "downloads"),
-                forceRefresh: true);
-
-        Assert.HasCount(1, found);
-        Assert.IsFalse(found[0].IsAlreadyHardlinked);
-        StringAssert.EndsWith(found[0].LibraryPath, "Movie (2020).mkv");
-        StringAssert.EndsWith(found[0].DownloadPath, "Movie.2020.1080p.mkv");
-    }
-
-    [TestMethod]
-    public async Task When_the_library_folder_contains_the_downloads_no_file_is_paired_with_itself()
-    {
-        // The setup that produced "full copies" of files that were really
-        // one file: the movie library is the whole drive.
-        WriteFile(@"downloads\Movie.2020.1080p.mkv", "same-bytes");
-        WriteFile(@"downloads\Other.2021.1080p.mkv", "different length");
-
-        var found =
-            await Service().FindVideoCandidatesAsync(
-                Folder,
-                Path.Combine(Folder, "downloads"),
-                forceRefresh: true);
-
-        Assert.IsEmpty(found);
-    }
-
-    [TestMethod]
-    public async Task Real_copies_are_still_found_when_the_library_contains_the_downloads()
-    {
-        WriteFile(@"Movie (2020)\Movie (2020).mkv", "same-bytes");
-        WriteFile(@"downloads\Movie.2020.1080p.mkv", "same-bytes");
-
-        var found =
-            await Service().FindVideoCandidatesAsync(
-                Folder,
-                Path.Combine(Folder, "downloads"),
-                forceRefresh: true);
-
-        Assert.HasCount(1, found);
-        StringAssert.EndsWith(found[0].LibraryPath, @"Movie (2020)\Movie (2020).mkv");
-    }
-
     [TestMethod]
     public async Task A_plan_to_convert_a_file_into_itself_is_refused()
     {

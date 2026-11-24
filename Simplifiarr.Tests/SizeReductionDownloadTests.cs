@@ -134,6 +134,34 @@ public class SizeReductionDownloadTests : TempFolderTest
     }
 
     [TestMethod]
+    public async Task An_old_file_that_is_also_a_download_counts_nothing_as_saved()
+    {
+        // Radarr hardlinked the old file in from a download that is still on disk.
+        var oldDownload = Path.Combine(Folder, "Torrents", "Movies", "Harbour.2019.1080p", "Harbour.2019.1080p.mkv");
+        Directory.CreateDirectory(Path.GetDirectoryName(oldDownload)!);
+        Assert.IsNull(NativeHardlinks.CreateHardlink(_oldFile, oldDownload));
+
+        await _service.StartAsync(Candidate());
+        FinishDownload();
+        await _service.CheckAsync();
+
+        var download = _service.Downloads.Single();
+
+        Assert.IsNull(await _service.SwapAsync(download.Id));
+
+        download = _service.Downloads.Single();
+
+        Assert.IsFalse(File.Exists(_oldFile));
+        Assert.IsEmpty(_recycled, "Not sent to the Recycle Bin, where it would be one more hidden name.");
+        Assert.IsTrue(File.Exists(oldDownload), "The download keeps the old bytes.");
+        Assert.AreEqual(0, download.SavedBytes);
+        StringAssert.Contains(download.Message, "no space is freed");
+
+        var record = (await new HistoryService(new DriveSettings(_settings)).GetHistoryAsync()).Single(entry => entry.ActionType == HistoryActionType.SizeReduced);
+        Assert.AreEqual(0, record.SizeBytes);
+    }
+
+    [TestMethod]
     public async Task With_automatic_swapping_it_swaps_on_its_own()
     {
         _settings.SizeReductionAutoSwap = true;

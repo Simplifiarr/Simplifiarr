@@ -25,6 +25,39 @@ public static class NativeHardlinks
         OperatingSystem.IsWindows();
 
     /// <summary>
+    /// True for a name inside a drive's Recycle Bin ("C:\$Recycle.Bin\...").
+    /// A hardlinked file sent there keeps its other names' data alive, but
+    /// nothing uses it: it goes when the Recycle Bin is emptied.
+    /// </summary>
+    public static bool IsInRecycleBin(string path) =>
+        path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Any(part => string.Equals(part, "$Recycle.Bin", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// This file's names other than <paramref name="known"/>, when every one
+    /// of them is in the Recycle Bin; null when any is somewhere else, or
+    /// they can't be read.
+    /// </summary>
+    public static List<string>? OtherNamesOnlyInRecycleBin(string path, IEnumerable<string> known)
+    {
+        if (GetIdentity(path) is not { LinkCount: > 1 } identity)
+        {
+            return [];
+        }
+
+        var knownNames = new HashSet<string>(known.Append(path), StringComparer.OrdinalIgnoreCase);
+        var others = GetLinkPaths(path).Where(name => !knownNames.Contains(name)).ToList();
+
+        // Windows said there are more names than it listed: can't be sure.
+        if (others.Count + knownNames.Count(name => File.Exists(name)) < identity.LinkCount)
+        {
+            return null;
+        }
+
+        return others.All(IsInRecycleBin) ? others : null;
+    }
+
+    /// <summary>
     /// Returns null when the file can't be opened (missing, no access).
     /// </summary>
     public static FileIdentity? GetIdentity(string path)

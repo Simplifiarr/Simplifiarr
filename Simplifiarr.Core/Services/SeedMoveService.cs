@@ -61,10 +61,11 @@ public class SeedMoveService : ISeedMoveService
     public TimeSpan PollInterval { get; set; } = TimeSpan.FromSeconds(2);
 
     /// <summary>
-    /// Removes an old seed file once the move is proven. Sends it to the
-    /// Recycle Bin; tests replace it so nothing lands in a real one.
+    /// Removes an old seed file once the move is proven: the client has
+    /// checked every piece on the new drive. Deleted for good, since the
+    /// Recycle Bin would keep the space taken on the old drive. Tests replace it.
     /// </summary>
-    public Func<string, bool> RemoveOldFile { get; set; } = RecycleBinHelper.Send;
+    public Func<string, bool> RemoveOldFile { get; set; } = FileRemoval.Delete;
 
     public IReadOnlyList<SeedMoveCandidate> GetCandidates(
         string driveName) =>
@@ -587,7 +588,7 @@ public class SeedMoveService : ISeedMoveService
 
         if (shared < links.Count)
         {
-            message += " Some files ended up as copies rather than links; Potential Waste will offer to convert them after the next scan.";
+            message += " Some files ended up as copies rather than links; Copies will offer to link them after the next scan.";
         }
 
         return new(true, message, freed);

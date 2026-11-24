@@ -48,6 +48,15 @@ public sealed class SizeReductionDownload
     /// <summary>The new library file, once swapped.</summary>
     public string? NewLibraryFilePath { get; set; }
 
+    /// <summary>
+    /// Space the swap really freed: nothing while the old file lives on
+    /// under another name (the download it came from, still seeding or not).
+    /// </summary>
+    public long SavedBytes { get; set; }
+
+    /// <summary>Where the old library file went in Quarantine, once swapped.</summary>
+    public string OldFileQuarantinePath { get; set; } = string.Empty;
+
     public DateTime AddedUtc { get; set; } = DateTime.UtcNow;
 
     public DateTime? FinishedUtc { get; set; }
@@ -56,9 +65,11 @@ public sealed class SizeReductionDownload
 /// <summary>
 /// Downloads a smaller release found by Size Reduction and, once it has
 /// finished, swaps it in for the library file: the new file is hardlinked
-/// into the library (so it keeps seeding), the old one goes to the Recycle
-/// Bin, and Radarr or Sonarr is asked to rescan. The old file's torrent, if
-/// any, is left alone.
+/// into the library (so it keeps seeding), the old one goes to Quarantine,
+/// and Radarr or Sonarr is asked to rescan. The old file's torrent, if
+/// any, is left alone. An old file that is also a download (a hardlink) has
+/// only its library name removed: the bytes stay under the download's name,
+/// so nothing is counted as saved, and Copies lists that download.
 /// </summary>
 public interface ISizeReductionDownloadService
 {
@@ -122,8 +133,33 @@ public class SizeReductionDownloadService : ISizeReductionDownloadService
         _downloads = JsonFileStore.Load<List<SizeReductionDownload>>(_path) ?? [];
     }
 
-    /// <summary>For tests: how the old library file is removed.</summary>
-    public Func<string, bool> RemoveOldFile { get; set; } = RecycleBinHelper.Send;
+    /// <summary>
+    /// For tests: how the old library file is removed. Unset, it goes to
+    /// Quarantine on its own drive, where it can be restored.
+    /// </summary>
+    public Func<string, bool>? RemoveOldFile { get; set; }
+
+    private async Task<string?> TakeOutAsync(string path) =>
+        RemoveOldFile is not null ? (RemoveOldFile(path) ? string.Empty : null)
+        : await QuarantineService.MoveIntoAsync(_settings, path);
+
+    // Removes one name of a file that has others: its bytes stay under them.
+    private static bool DeleteLinkedName(string path)
+    {
+        try
+        {
+            File.SetAttributes(path, File.GetAttributes(path) & ~FileAttributes.ReadOnly);
+            File.Delete(path);
+
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            AppLog.Warn($"Size Reduction couldn't remove the old library name {path}: {exception.Message}");
+
+            return false;
+        }
+    }
 
     public event Action? Changed;
 
@@ -297,7 +333,8 @@ public class SizeReductionDownloadService : ISizeReductionDownloadService
                     FileName = Path.GetFileName(download.NewLibraryFilePath ?? download.LibraryFilePath),
                     LibraryPath = download.NewLibraryFilePath ?? download.LibraryFilePath,
                     DownloadPath = download.LibraryFilePath,
-                    SizeBytes = Math.Max(0, download.LibraryFileBytes - download.ReleaseBytes),
+                    QuarantinePath = problem is null ? download.OldFileQuarantinePath : string.Empty,
+                    SizeBytes = problem is null ? download.SavedBytes : 0,
                     Success = problem is null,
                     Message = download.Message
                 });
@@ -312,8 +349,10 @@ public class SizeReductionDownloadService : ISizeReductionDownloadService
 
     private async Task<string?> SwapCoreAsync(SizeReductionDownload download)
     {
+        var torrents = await _client.TryGetTorrentsAsync();
+
         var torrent =
-            (await _client.TryGetTorrentsAsync())?
+            torrents?
                 .FirstOrDefault(entry => string.Equals(entry.TorrentHash, download.TorrentHash, StringComparison.OrdinalIgnoreCase));
 
         if (torrent is null || torrent.Progress < 1)
@@ -358,17 +397,33 @@ public class SizeReductionDownloadService : ISizeReductionDownloadService
             return Keep(download, $"{target} already exists.");
         }
 
+        // The old file may have other names: the download it was linked from,
+        // seeding or left behind. Its bytes then stay on disk whatever
+        // happens to the library name. Sending that name to the Recycle Bin
+        // would only hide one more name, so it is deleted instead (nothing is
+        // lost: the other name has the same bytes) and nothing counts as saved.
+        var old = SeedingCheck.From(torrents?.Select(entry => (entry.ContentPath, entry.Name))).Check(oldFile);
+        var linked = old.State != SeedState.NotLinked;
+
         if (NativeHardlinks.CreateHardlink(newFile, staging) is { } linkError)
         {
             return Keep(download, $"Couldn't link the new file into the library: {linkError}");
         }
 
-        if (!RemoveOldFile(oldFile))
+        string? quarantined = string.Empty;
+
+        if (linked ? !DeleteLinkedName(oldFile) : (quarantined = await TakeOutAsync(oldFile)) is null)
         {
             File.Delete(staging);
 
-            return Keep(download, "The old file couldn't be sent to the Recycle Bin, so nothing was changed.");
+            return Keep(
+                download,
+                linked
+                    ? "The old library file couldn't be removed, so nothing was changed."
+                    : "The old file couldn't be moved to Quarantine, so nothing was changed.");
         }
+
+        download.OldFileQuarantinePath = quarantined ?? string.Empty;
 
         File.Move(staging, target);
 
@@ -389,10 +444,20 @@ public class SizeReductionDownloadService : ISizeReductionDownloadService
             AppLog.Warn("Couldn't ask Radarr or Sonarr to rescan after a size reduction.", exception);
         }
 
+        download.SavedBytes = linked ? 0 : Math.Max(0, download.LibraryFileBytes - video.SizeBytes);
+
         Update(
             download,
             SizeReductionDownloadStatus.Swapped,
-            $"Swapped in. {SizeFormatter.FormatBytes(Math.Max(0, download.LibraryFileBytes - video.SizeBytes))} saved; the old file is in the Recycle Bin.");
+            old.State switch
+            {
+                SeedState.Seeding =>
+                    $"Swapped in. The old file is still seeding as \"{old.Torrent}\", so no space is freed until that torrent is removed; Copies lists it then.",
+                SeedState.NotLinked =>
+                    $"Swapped in. {SizeFormatter.FormatBytes(download.SavedBytes)} saved once you empty Quarantine, where the old file is.",
+                _ =>
+                    $"Swapped in. The old file is also at {old.OtherNames.FirstOrDefault() ?? "another name"}, so no space is freed yet; Copies lists it to remove."
+            });
 
         Save();
 

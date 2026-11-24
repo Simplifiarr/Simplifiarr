@@ -1,0 +1,307 @@
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+@using Simplifiarr.Core.Utilities
+
+@inject ICopiesService Copies
+
+@*
+    The "More than one version" tab of Copies: the same movie, episode, book
+    or album as different files, in the library or in downloads. Keep one;
+    the others go to Quarantine. Nothing is picked for you.
+*@
+
+@if (!string.IsNullOrWhiteSpace(_status))
+{
+    <div class="alert alert-info">@_status</div>
+}
+
+<p class="text-muted">
+    Usually an older or smaller quality left after an upgrade. Nothing is picked for you: remove the ones you don't
+    want and they go to Quarantine, where you can restore them. The last one of a title always stays, and one a
+    torrent is seeding can't be removed here.
+</p>
+
+@if (Result.Versions.Count == 0)
+{
+    <EmptyState Icon="check-circle" Text="Nothing is here more than once." />
+}
+else
+{
+    <div class="app-tabs app-tabs-sub" role="tablist" aria-label="Media type">
+        <button type="button" role="tab" aria-selected="@(_type is null)" class="app-tab @(_type is null ? "active" : null)" @onclick="() => Show(null)">
+            All <span class="app-tab-count">@Result.Versions.Count</span>
+        </button>
+
+        @foreach (var type in TypeOrder.Where(type => Result.Versions.Any(group => group.MediaType == type)))
+        {
+            <button type="button" role="tab" aria-selected="@(_type == type)" class="app-tab @(_type == type ? "active" : null)" @onclick="() => Show(type)">
+                @TypeLabel(type) <span class="app-tab-count">@Result.Versions.Count(group => group.MediaType == type)</span>
+            </button>
+        }
+    </div>
+
+    <div class="toolbar">
+        <div class="toolbar-summary">
+            <strong>@Filtered.Count</strong> title(s) ·
+            <strong>@SizeFormatter.FormatBytes(Filtered.Sum(group => group.ReclaimableBytes))</strong>
+            freed if you keep only the largest of each
+        </div>
+
+        <div class="toolbar-actions">
+            <label class="visually-hidden" for="version-filter">Filter by title</label>
+            <input id="version-filter"
+                   type="search"
+                   class="form-control form-control-sm"
+                   style="width: 14rem"
+                   placeholder="Filter by title"
+                   @bind="_filter"
+                   @bind:event="oninput"
+                   @bind:after="() => _shown = PageSize" />
+        </div>
+    </div>
+
+    @if (Filtered.Count == 0)
+    {
+        <EmptyState Icon="funnel" Text="No titles match that filter." />
+    }
+
+    @foreach (var group in Filtered.Take(_shown))
+    {
+        <div class="group-card" @key="group.Identity">
+            <div class="group-card-header">
+                <div class="group-card-title">
+                    @group.DisplayTitle
+
+                    @if (_type is null)
+                    {
+                        <span class="pill ms-1">@TypeLabel(group.MediaType)</span>
+                    }
+                </div>
+
+                <div class="group-card-meta">
+                    @group.Versions.Count versions · @SizeFormatter.FormatBytes(group.ReclaimableBytes) could be freed
+                </div>
+            </div>
+
+            <div class="table-scroll">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>File</th>
+                            <th>Where</th>
+                            <th class="col-num">Size</th>
+                            <th>Quality</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        @for (var index = 0; index < group.Versions.Count; index++)
+                        {
+                            var version = group.Versions[index];
+                            var isLargest = index == 0;
+                            var confirming = string.Equals(_confirmPath, version.Path, StringComparison.OrdinalIgnoreCase);
+
+                            <tr @key="version.Path">
+                                <td>
+                                    <div class="file-name">
+                                        @version.FileName
+
+                                        @if (isLargest)
+                                        {
+                                            <span class="pill ms-1" title="The biggest, usually the best quality">Largest</span>
+                                        }
+
+                                        @if (group.Versions.Any(other => !ReferenceEquals(other, version) && other.SizeBytes == version.SizeBytes))
+                                        {
+                                            <span class="pill pill-muted ms-1" title="Another version is exactly the same size: probably the same file, copied">Same size</span>
+                                        }
+                                    </div>
+                                    <div class="cell-note">@Path.GetDirectoryName(version.Path)</div>
+                                </td>
+
+                                <td>
+                                    <div>@Where(version)</div>
+
+                                    @if (version.Seeding)
+                                    {
+                                        <span class="pill pill-warn" title="@SeedingTitle(version)">Seeding</span>
+                                    }
+                                </td>
+
+                                <td class="col-num">@SizeFormatter.FormatBytes(version.SizeBytes)</td>
+
+                                <td>@(version.Quality.Length > 0 ? version.Quality : "-")</td>
+
+                                <td>
+                                    <div class="cell-actions">
+                                        @if (confirming)
+                                        {
+                                            <button type="button" class="btn btn-danger btn-sm" disabled="@Busy" @onclick="() => RemoveAsync(group, version)">
+                                                @(_working ? "Moving..." : "Move to Quarantine")
+                                            </button>
+
+                                            <button type="button" class="btn btn-secondary btn-sm" disabled="@_working" @onclick="() => _confirmPath = null">
+                                                Cancel
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <button type="button"
+                                                    class="btn btn-outline-danger btn-sm"
+                                                    title="@(version.Seeding ? "A torrent is seeding it. Remove the torrent in your client first." : "Moves this one to Quarantine. It can be restored from there.")"
+                                                    disabled="@(Busy || version.Seeding)"
+                                                    @onclick="() => _confirmPath = version.Path">
+                                                Remove
+                                            </button>
+
+                                            <button type="button"
+                                                    class="btn btn-secondary btn-sm"
+                                                    title="Stop listing this file here. Undo it on the Ignored page."
+                                                    disabled="@Busy"
+                                                    @onclick="() => Ignore(group, version)">
+                                                Not the same title
+                                            </button>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    @if (Filtered.Count > _shown)
+    {
+        <button type="button" class="btn btn-secondary" @onclick="() => _shown += PageSize">
+            Show @Math.Min(PageSize, Filtered.Count - _shown) more (@(Filtered.Count - _shown) left)
+        </button>
+    }
+}
+
+@code
+{
+    // Each title draws its own small table, so a page at a time.
+    private const int PageSize = 25;
+
+    private static readonly MediaType[] TypeOrder =
+    [
+        MediaType.Movie, MediaType.TvEpisode, MediaType.Book,
+        MediaType.Audiobook, MediaType.Music, MediaType.Comic
+    ];
+
+    [Parameter, EditorRequired]
+    public CopiesScanResult Result { get; set; } = new();
+
+    [Parameter]
+    public bool IsScanning { get; set; }
+
+    /// <summary>Raised after a version was removed or ignored.</summary>
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    private MediaType? _type;
+    private string _filter = string.Empty;
+    private int _shown = PageSize;
+    private string? _confirmPath;
+    private bool _working;
+    private string _status = string.Empty;
+
+    private bool Busy => _working || IsScanning;
+
+    private List<CopyVersionGroup> Filtered =>
+        Result.Versions
+            .Where(group => _type is null || group.MediaType == _type)
+            .Where(group =>
+                string.IsNullOrWhiteSpace(_filter) ||
+                group.DisplayTitle.Contains(_filter.Trim(), StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+    protected override void OnParametersSet()
+    {
+        if (_type is not null && !Result.Versions.Any(group => group.MediaType == _type))
+        {
+            _type = null;
+        }
+    }
+
+    private void Show(MediaType? type)
+    {
+        _type = type;
+        _confirmPath = null;
+        _shown = PageSize;
+    }
+
+    private static string Where(CopyFile version) =>
+        (version.InLibrary, version.InDownloads) switch
+        {
+            (true, true) => $"Library and downloads (one file) · {version.DriveName}",
+            (true, false) => $"Library · {version.DriveName}",
+            _ => $"Downloads · {version.DriveName}"
+        };
+
+    private string SeedingTitle(CopyFile version) =>
+        version.SeedingUnknown
+            ? $"{Result.ClientName} couldn't be asked, so it's treated as seeding."
+            : $"Seeding as \"{version.Torrent}\".";
+
+    private async Task RemoveAsync(CopyVersionGroup group, CopyFile version)
+    {
+        if (Busy)
+        {
+            return;
+        }
+
+        _working = true;
+
+        try
+        {
+            var result = await Copies.RemoveVersionAsync(group, version);
+
+            _status =
+                result.Done > 0
+                    ? $"Moved \"{version.FileName}\" to Quarantine. Delete it there to free {SizeFormatter.FormatBytes(version.SizeBytes)}, or restore it if you change your mind." +
+                      (result.Note is null ? null : " " + result.Note)
+                    : result.Error ?? string.Join(" ", result.Skipped);
+
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception exception)
+        {
+            _status = $"Couldn't move \"{version.FileName}\" to Quarantine: {exception.Message}";
+        }
+        finally
+        {
+            _confirmPath = null;
+            _working = false;
+        }
+    }
+
+    private async Task Ignore(CopyVersionGroup group, CopyFile version)
+    {
+        if (Busy)
+        {
+            return;
+        }
+
+        Copies.Ignore(group, version);
+
+        _status = $"\"{version.FileName}\" won't be listed here any more. Undo this on the Ignored page.";
+
+        await OnChanged.InvokeAsync();
+    }
+
+    private static string TypeLabel(MediaType type) =>
+        type switch
+        {
+            MediaType.Movie => "Movies",
+            MediaType.TvEpisode => "TV",
+            MediaType.Book => "Books",
+            MediaType.Audiobook => "Audiobooks",
+            MediaType.Music => "Music",
+            MediaType.Comic => "Comics",
+            _ => type.ToString()
+        };
+}

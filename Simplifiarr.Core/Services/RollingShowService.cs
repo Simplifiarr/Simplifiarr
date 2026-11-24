@@ -98,17 +98,16 @@ public class RollingShowService : IRollingShowService
         }
     }
 
-    /// <summary>For tests: how a file is deleted. True on success.</summary>
-    public Func<string, bool, bool> DeleteFile { get; set; } = (path, permanent) =>
-    {
-        if (!permanent)
-        {
-            return RecycleBinHelper.Send(path);
-        }
+    /// <summary>
+    /// For tests: how an episode is removed. Returns where it went in
+    /// Quarantine, empty when deleted for good, or null when it couldn't be.
+    /// </summary>
+    public Func<string, bool, Task<string?>>? DeleteFile { get; set; }
 
-        File.Delete(path);
-        return true;
-    };
+    private Task<string?> RemoveAsync(string path, bool permanent) =>
+        DeleteFile is not null ? DeleteFile(path, permanent)
+        : permanent ? Task.FromResult<string?>(FileRemoval.Delete(path) ? string.Empty : null)
+        : QuarantineService.MoveIntoAsync(_settings, path);
 
     /// <summary>For tests: the clock.</summary>
     public Func<DateTime> UtcNow { get; set; } = () => DateTime.UtcNow;
@@ -250,7 +249,9 @@ public class RollingShowService : IRollingShowService
                         .ToList()
                     : [];
 
-            if (!DeleteFile(file, rule.Permanent))
+            var quarantined = await RemoveAsync(file, rule.Permanent);
+
+            if (quarantined is null)
             {
                 problems.Add($"{Path.GetFileName(file)} couldn't be deleted");
                 continue;
@@ -275,10 +276,11 @@ public class RollingShowService : IRollingShowService
                     ActionType = HistoryActionType.EpisodeRolledOff,
                     FileName = Path.GetFileName(file),
                     LibraryPath = file,
+                    QuarantinePath = quarantined,
                     SizeBytes = deletion.Episode.SizeBytes,
                     Success = true,
                     Message = $"{rule.SeriesTitle} S{deletion.Episode.Season:00}E{deletion.Episode.Number:00}: {deletion.Reason}. " +
-                              (rule.Permanent ? "Deleted for good." : "Sent to the Recycle Bin.")
+                              (rule.Permanent ? "Deleted for good." : "Moved to Quarantine.")
                 });
         }
 

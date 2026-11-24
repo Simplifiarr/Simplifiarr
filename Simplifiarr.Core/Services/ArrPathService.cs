@@ -14,7 +14,9 @@ public sealed record ArrItem(
     string Path,
     int? Year = null,
     bool Monitored = false,
-    bool Upcoming = false);
+    bool Upcoming = false,
+    bool Airing = false,
+    DateTime? AddedUtc = null);
 
 /// <summary>
 /// Finds which Radarr movie or Sonarr show owns a folder, and tells it the
@@ -171,7 +173,13 @@ public class ArrPathService : IArrPathService
                     entry.TryGetProperty("monitored", out var monitored) && monitored.ValueKind == JsonValueKind.True,
                     // Not out yet: there is nothing to have on disk.
                     entry.TryGetProperty("status", out var status) &&
-                    status.GetString() is "tba" or "announced" or "inCinemas" or "upcoming"));
+                    status.GetString() is "tba" or "announced" or "inCinemas" or "upcoming",
+                    // A show with new episodes still coming.
+                    status.ValueKind == JsonValueKind.String && status.GetString() == "continuing",
+                    entry.TryGetProperty("added", out var added) && added.ValueKind == JsonValueKind.String &&
+                    DateTime.TryParse(added.GetString(), null, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var addedUtc)
+                        ? addedUtc
+                        : null));
         }
 
         return items;

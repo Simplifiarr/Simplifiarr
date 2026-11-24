@@ -7,9 +7,10 @@
 @inject IPromotionExecuteService PromotionExecuteService
 @inject IIgnoredItemsService IgnoredItemsService
 @inject IHistoryService HistoryService
+@inject ICopiesService Copies
 
 @*
-    The Hardlinks tab for one media type handled by the shared pipeline
+    The "Not in your library" list for one media type handled by the shared pipeline
     (books, audiobooks, music, comics). Everything here is the same for every
     type; what differs - the name and the middle columns - comes from the
     type's MediaTypeDefinition.
@@ -291,10 +292,14 @@ else
 
     private void LoadCandidates()
     {
+        // Downloads Copies placed in another tab (the library has them).
+        var matched = new HashSet<string>(Copies.Last?.MatchedDownloads ?? [], StringComparer.OrdinalIgnoreCase);
+
         _candidates =
             Profiles
                 .SelectMany(profile =>
                     MediaPromotion.GetCandidates(Definition.MediaType, profile.Name))
+                .Where(candidate => !matched.Contains(candidate.SourcePath))
                 .GroupBy(
                     candidate => candidate.SourcePath,
                     StringComparer.OrdinalIgnoreCase)

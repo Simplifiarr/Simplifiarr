@@ -99,17 +99,16 @@ public class RollingMovieService : IRollingMovieService
         _state = JsonFileStore.Load<RollingMovieState>(_path) ?? new RollingMovieState();
     }
 
-    /// <summary>For tests: how a movie's folder is deleted. True on success.</summary>
-    public Func<string, bool, bool> DeleteFolder { get; set; } = (folder, permanent) =>
-    {
-        if (!permanent)
-        {
-            return RecycleBinHelper.Send(folder);
-        }
+    /// <summary>
+    /// For tests: how a movie's folder is removed. Returns where it went in
+    /// Quarantine, empty when deleted for good, or null when it couldn't be.
+    /// </summary>
+    public Func<string, bool, Task<string?>>? DeleteFolder { get; set; }
 
-        Directory.Delete(folder, recursive: true);
-        return true;
-    };
+    private Task<string?> RemoveAsync(string folder, bool permanent) =>
+        DeleteFolder is not null ? DeleteFolder(folder, permanent)
+        : permanent ? Task.FromResult<string?>(FileRemoval.Delete(folder) ? string.Empty : null)
+        : QuarantineService.MoveIntoAsync(_settings, folder);
 
     /// <summary>For tests: the clock.</summary>
     public Func<DateTime> UtcNow { get; set; } = () => DateTime.UtcNow;
@@ -336,19 +335,19 @@ public class RollingMovieService : IRollingMovieService
                 continue;
             }
 
-            bool removed;
+            string? quarantined;
 
             try
             {
-                removed = DeleteFolder(folder, rule.Permanent);
+                quarantined = await RemoveAsync(folder, rule.Permanent);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
                 AppLog.Warn($"Couldn't delete {folder}.", exception);
-                removed = false;
+                quarantined = null;
             }
 
-            if (!removed)
+            if (quarantined is null)
             {
                 problems.Add($"{movie.Name} left Radarr but its folder couldn't be deleted; delete {folder} yourself");
                 await RecordAsync(movie, folder, false, $"{deletion.Reason}. Removed from Radarr, but the folder couldn't be deleted.");
@@ -375,7 +374,8 @@ public class RollingMovieService : IRollingMovieService
                 movie,
                 folder,
                 true,
-                $"{deletion.Reason}. " + (rule.Permanent ? "Deleted for good." : "Sent to the Recycle Bin."));
+                $"{deletion.Reason}. " + (rule.Permanent ? "Deleted for good." : "Moved to Quarantine."),
+                quarantined);
         }
 
         _movies = null;
@@ -395,13 +395,14 @@ public class RollingMovieService : IRollingMovieService
         return message;
     }
 
-    private Task RecordAsync(RollingMovie movie, string folder, bool success, string message) =>
+    private Task RecordAsync(RollingMovie movie, string folder, bool success, string message, string? quarantinePath = null) =>
         _history.AddRecordAsync(
             new HistoryRecord
             {
                 ActionType = HistoryActionType.MovieRolledOff,
                 FileName = movie.Name,
                 LibraryPath = folder,
+                QuarantinePath = quarantinePath ?? string.Empty,
                 SizeBytes = movie.SizeBytes,
                 Success = success,
                 Message = message

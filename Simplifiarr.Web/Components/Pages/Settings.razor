@@ -83,10 +83,38 @@ else
 
     @if (_tab == DrivesTab)
     {
+        <div class="panel mb-3" style="padding: 1rem 1.1rem">
+            <label class="form-label" for="downloads-drive"><strong>New downloads land on</strong></label>
+            <select id="downloads-drive" class="form-select" style="max-width: 28rem" @bind="_settings.DownloadsDrive">
+                <option value="">Each drive has its own downloads</option>
+                @foreach (var profile in _settings.DriveProfiles.Where(profile => profile.Enabled && !string.IsNullOrWhiteSpace(profile.Name)))
+                {
+                    <option value="@profile.Name">@profile.Name</option>
+                }
+            </select>
+            <div class="cell-note mt-2" style="max-width: 75ch">
+                @if (DownloadsDriveSet)
+                {
+                    <text>
+                        Everything new arrives on @_settings.DownloadsDrive and is linked into its libraries, so nothing is
+                        copied. As it fills, finished titles move to the other drives, which only need libraries. Shows
+                        still airing stay on it. Set your torrent client to save there, and make its library folders the
+                        defaults in Radarr, Sonarr and Seerr. The <a href="setup">Setup</a> page checks all of that and changes what it can.
+                    </text>
+                }
+                else
+                {
+                    <text>
+                        Each drive gets its own downloads folder and libraries, since a hardlink can only be made
+                        between folders on one drive. Pick one drive here to have everything arrive there instead.
+                    </text>
+                }
+            </div>
+        </div>
+
         <div class="toolbar">
             <div class="toolbar-summary" style="max-width: 70ch">
-                One entry per drive. A hardlink can only be made between folders on the
-                same drive, so each drive gets its own downloads folder and libraries.
+                One entry per drive.
             </div>
 
             <div class="toolbar-actions">
@@ -122,6 +150,13 @@ else
                         @if (problems.Count > 0)
                         {
                             <span class="status-warn ms-1">· folders overlap</span>
+                        }
+
+                        @if (DownloadsDriveSet && profile.Enabled)
+                        {
+                            <span class="pill @(IsDownloadsDrive(profile) ? "pill-ok" : "pill-muted") ms-1">
+                                @(IsDownloadsDrive(profile) ? "Downloads drive" : "Overflow")
+                            </span>
                         }
                     </div>
 
@@ -172,7 +207,7 @@ else
                             <div class="col-md-6">
                                 <PathInput Label="Downloads folder"
                                            Placeholder="D:\Torrents"
-                                           Help="Where your torrent client saves finished downloads. Movies, TV and books are looked for here unless they have their own folder below"
+                                           Help="@(DownloadsDriveSet && !IsDownloadsDrive(profile) ? "Downloads already on this drive are still checked; new ones should land on the downloads drive" : "Where your torrent client saves finished downloads. Everything under it is looked at")"
                                            @bind-Value="profile.DownloadPath" />
                             </div>
 
@@ -194,92 +229,96 @@ else
                                            EmptyText="No movie library on this drive"
                                            @bind-Value="profile.MovieLibraryPath" />
                             </div>
-
-                            <div class="col-md-6">
-                                <PathInput Label="Movie downloads"
-                                           Placeholder="D:\Torrents\Movies"
-                                           EmptyText="Not set, so movies are looked for in the main downloads folder"
-                                           @bind-Value="profile.MovieDownloadPath" />
-                            </div>
-
                             <div class="col-md-6">
                                 <PathInput Label="TV"
                                            Placeholder="D:\TV"
                                            EmptyText="No TV library on this drive"
                                            @bind-Value="profile.TvLibraryPath" />
                             </div>
-
-                            <div class="col-md-6">
-                                <PathInput Label="TV downloads"
-                                           Placeholder="D:\Torrents\TV"
-                                           EmptyText="Not set, so TV is looked for in the main downloads folder"
-                                           @bind-Value="profile.TvDownloadPath" />
-                            </div>
-
                             <div class="col-md-6">
                                 <PathInput Label="Books"
                                            Placeholder="D:\Books"
                                            EmptyText="No book library on this drive"
                                            @bind-Value="profile.BookLibraryPath" />
                             </div>
-
-                            <div class="col-md-6">
-                                <PathInput Label="Book downloads"
-                                           Placeholder="D:\Torrents\Books"
-                                           EmptyText="Not set, so books are looked for in the main downloads folder"
-                                           @bind-Value="profile.BookDownloadPath" />
-                            </div>
-
                             <div class="col-md-6">
                                 <PathInput Label="Audiobooks"
                                            Placeholder="D:\Audiobooks"
                                            EmptyText="No audiobook library on this drive"
                                            @bind-Value="profile.AudiobookLibraryPath" />
                             </div>
-
-                            <div class="col-md-6">
-                                <PathInput Label="Audiobook downloads"
-                                           Placeholder="D:\Torrents\Audiobooks"
-                                           EmptyText="Not set, so audiobooks are not looked for"
-                                           @bind-Value="profile.AudiobookDownloadPath" />
-                            </div>
-
                             <div class="col-md-6">
                                 <PathInput Label="Music"
                                            Placeholder="D:\Music"
                                            EmptyText="No music library on this drive"
                                            @bind-Value="profile.MusicLibraryPath" />
                             </div>
-
-                            <div class="col-md-6">
-                                <PathInput Label="Music downloads"
-                                           Placeholder="D:\Torrents\Music"
-                                           EmptyText="Not set, so music is not looked for"
-                                           @bind-Value="profile.MusicDownloadPath" />
-                            </div>
-
                             <div class="col-md-6">
                                 <PathInput Label="Comics"
                                            Placeholder="D:\Comics"
                                            EmptyText="No comic library on this drive"
                                            @bind-Value="profile.ComicLibraryPath" />
                             </div>
+                        </div>
 
+                        <h3 class="mt-4 mb-2">Audiobook, music and comic downloads</h3>
+
+                        <p class="cell-note mb-2">
+                            These need a folder each: an audiobook and a song are the same kind of file and can't be
+                            told apart. Any of them can be a folder inside the main downloads folder.
+                        </p>
+
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <PathInput Label="Audiobook downloads"
+                                           Placeholder="D:\Torrents\Audiobooks"
+                                           EmptyText="Not set, so audiobook downloads are not looked for"
+                                           @bind-Value="profile.AudiobookDownloadPath" />
+                            </div>
+                            <div class="col-md-6">
+                                <PathInput Label="Music downloads"
+                                           Placeholder="D:\Torrents\Music"
+                                           EmptyText="Not set, so music downloads are not looked for"
+                                           @bind-Value="profile.MusicDownloadPath" />
+                            </div>
                             <div class="col-md-6">
                                 <PathInput Label="Comic downloads"
                                            Placeholder="D:\Torrents\Comics"
-                                           EmptyText="Not set, so comics are not looked for"
+                                           EmptyText="Not set, so comic downloads are not looked for"
                                            @bind-Value="profile.ComicDownloadPath" />
                             </div>
                         </div>
 
-                        <p class="cell-note mt-2 mb-0">
-                            Movies, TV and books can share the main downloads folder, or each have one
-                            of their own. A movie downloads folder is only searched for movies and a TV
-                            one only for TV. Audiobooks, music and comics always need their own,
-                            because an audiobook and a song are the same kind of file and can't be told
-                            apart. Any of these can be a folder inside the main downloads folder.
-                        </p>
+                        <details class="mt-3" open="@(HasOwnVideoDownloads(profile))">
+                            <summary>Separate movie, TV and book download folders (optional)</summary>
+
+                            <p class="cell-note mt-2 mb-2">
+                                Not needed: everything under the main downloads folder is looked at, and movies are
+                                told from episodes by their names. Set one only to keep a kind apart; a movie
+                                downloads folder is then searched only for movies, and a TV one only for TV.
+                            </p>
+
+                            <div class="row g-3">
+                            <div class="col-md-6">
+                                <PathInput Label="Movie downloads"
+                                           Placeholder="D:\Torrents\Movies"
+                                           EmptyText="Not set: movies are found in the main downloads folder"
+                                           @bind-Value="profile.MovieDownloadPath" />
+                            </div>
+                            <div class="col-md-6">
+                                <PathInput Label="TV downloads"
+                                           Placeholder="D:\Torrents\TV"
+                                           EmptyText="Not set: TV is found in the main downloads folder"
+                                           @bind-Value="profile.TvDownloadPath" />
+                            </div>
+                            <div class="col-md-6">
+                                <PathInput Label="Book downloads"
+                                           Placeholder="D:\Torrents\Books"
+                                           EmptyText="Not set: books are found in the main downloads folder"
+                                           @bind-Value="profile.BookDownloadPath" />
+                            </div>
+                            </div>
+                        </details>
 
                         <div class="form-check mt-3">
                             <input class="form-check-input"
@@ -294,22 +333,38 @@ else
                             </div>
                         </div>
 
-                        <div class="form-check mt-3">
-                            <input class="form-check-input"
-                                   type="checkbox"
-                                   id="@($"drive-protected-{index}")"
-                                   @bind="profile.IsProtected" />
-                            <label class="form-check-label" for="@($"drive-protected-{index}")">
-                                Protected: keep this drive clear
-                            </label>
-                            <div class="cell-note">
-                                Titles move off a protected drive once it gets too full, and nothing is moved onto it.
-                                Every other drive is an overflow drive: it takes what full drives send it.
+                        @if (DownloadsDriveSet)
+                        {
+                            <div class="cell-note mt-3">
+                                @if (IsDownloadsDrive(profile))
+                                {
+                                    <text><strong>The downloads drive.</strong> Finished titles move off it once it gets too full, and nothing is moved onto it.</text>
+                                }
+                                else
+                                {
+                                    <text><strong>An overflow drive.</strong> It takes the titles the downloads drive sends it.</text>
+                                }
                             </div>
-                        </div>
+                        }
+                        else
+                        {
+                            <div class="form-check mt-3">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="@($"drive-protected-{index}")"
+                                       @bind="profile.IsProtected" />
+                                <label class="form-check-label" for="@($"drive-protected-{index}")">
+                                    Protected: keep this drive clear
+                                </label>
+                                <div class="cell-note">
+                                    Titles move off a protected drive once it gets too full, and nothing is moved onto it.
+                                    Every other drive is an overflow drive: it takes what full drives send it.
+                                </div>
+                            </div>
+                        }
 
                         <div class="row g-3 mt-1">
-                            @if (profile.IsProtected)
+                            @if (KeptClear(profile))
                             {
                                 <div class="col-md-6">
                                     <label class="form-label" for="@($"drive-full-{index}")">Start moving titles off above</label>
@@ -686,7 +741,7 @@ else
                     <label class="form-check-label" for="sr-autoswap">Swap a smaller release in as soon as it has downloaded</label>
                     <div class="cell-note">
                         For releases you pressed Download on. Off: each one waits for you to press Swap now. Either way the
-                        old file goes to the Recycle Bin and Radarr or Sonarr rescans.
+                        old file goes to Quarantine and Radarr or Sonarr rescans.
                     </div>
                 </div>
             </div>
@@ -760,7 +815,7 @@ else
                     </label>
                     <div class="cell-note">
                         Queues the same moves Storage suggests, as if you had pressed Move all. Each file is
-                        still copied and checked before the old folder goes to the Recycle Bin. Try Move all
+                        still copied and checked before the old folder is deleted. Try Move all
                         by hand a few times before turning this on.
                     </div>
                 </div>
@@ -939,6 +994,28 @@ else
 
 @code
 {
+    // False until the settings have loaded.
+    private bool DownloadsDriveSet =>
+        _settings is { } settings &&
+        !string.IsNullOrWhiteSpace(settings.DownloadsDrive) &&
+        settings.DriveProfiles.Any(profile => profile.Enabled && string.Equals(profile.Name, settings.DownloadsDrive, StringComparison.OrdinalIgnoreCase));
+
+    // The downloads drive entry, or another entry on the same drive.
+    private bool IsDownloadsDrive(DriveProfile profile) =>
+        DownloadsDriveSet &&
+        StorageService.DownloadsDriveRoot(_settings!) is { } root &&
+        string.Equals(StorageService.RootOfProfile(profile), root, StringComparison.OrdinalIgnoreCase);
+
+    // The drive whose titles move off as it fills.
+    private bool KeptClear(DriveProfile profile) =>
+        DownloadsDriveSet ? IsDownloadsDrive(profile) : profile.IsProtected;
+
+    // Open the optional folders when this drive already uses one.
+    private static bool HasOwnVideoDownloads(DriveProfile profile) =>
+        !string.IsNullOrWhiteSpace(profile.MovieDownloadPath) ||
+        !string.IsNullOrWhiteSpace(profile.TvDownloadPath) ||
+        !string.IsNullOrWhiteSpace(profile.BookDownloadPath);
+
     // A tenth of the drive the entry is on, in GB, for the "leave free"
     // placeholder; null when the drive can't be read.
     private static int? TenthOfDriveGb(DriveProfile profile)

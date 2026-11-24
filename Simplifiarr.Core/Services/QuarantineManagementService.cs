@@ -28,7 +28,10 @@ public class QuarantineManagementService : IQuarantineManagementService
             var fileDirectory =
                 Path.GetDirectoryName(fullPath);
 
-            if (!RecycleBinHelper.Send(fullPath))
+            // Deleting from Quarantine is the final step, so it is for good.
+            // The Recycle Bin would only hold the space: the service's own is
+            // a hidden folder on the same drive that nobody empties.
+            if (!FileRemoval.Delete(fullPath))
             {
                 return false;
             }
@@ -41,7 +44,7 @@ public class QuarantineManagementService : IQuarantineManagementService
                     QuarantinePath = fullPath,
                     SizeBytes = fileInfo.Length,
                     Success = true,
-                    Message = "Quarantined file sent to the Recycle Bin."
+                    Message = "Deleted from Quarantine for good."
                 });
 
             CleanupEmptyQuarantineFolders(fileDirectory);

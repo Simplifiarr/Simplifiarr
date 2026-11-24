@@ -1,0 +1,215 @@
+@page "/copies"
+@page "/copies/{Tab}"
+@page "/hardlinks"
+@page "/potential-waste"
+@page "/duplicates"
+@page "/download-cleanup"
+@rendermode InteractiveServer
+@inherits ScanAwareComponent
+
+@using Simplifiarr.Core.Models
+@using Simplifiarr.Core.Services
+@using Simplifiarr.Core.Utilities
+
+@inject ICopiesService CopiesService
+@inject ISettingsService SettingsService
+@inject IPromotionCandidateCacheService PromotionCandidateCache
+@inject IMediaPromotionService MediaPromotion
+@inject NavigationManager Navigation
+
+<PageTitle>Copies - Simplifiarr</PageTitle>
+
+<PageHeader Title="Copies"
+            Subtitle="Everything on your drives more than once, and downloads your library doesn't have yet. Every drive is checked together, and each download is in one tab only.">
+    <button type="button"
+            class="btn btn-secondary"
+            disabled="@(_checking || IsScanning || _profiles.Count == 0)"
+            @onclick="CheckAgainAsync">
+        <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
+        @(_checking ? "Checking..." : "Check again")
+    </button>
+</PageHeader>
+
+<details class="mb-3">
+    <summary>How a file gets sorted</summary>
+
+    <div class="mt-2 text-muted">
+        <p class="mb-2">
+            Every library and download folder on every drive is looked at together. Two names for one file (a hardlink)
+            are one file and take the space once, so they're fine and not listed.
+        </p>
+        <p class="mb-2">
+            <strong>Same file twice:</strong> a download with the same bytes as a library file. If no torrent seeds it,
+            it's deleted with its folder, after every byte is compared. If a torrent seeds it from the same drive, the
+            library copy becomes a second name for it. If it seeds from another drive, Move Seeds moves it.
+        </p>
+        <p class="mb-2">
+            <strong>More than one version:</strong> the same movie, episode, book or album as different files. You choose
+            which to keep; the others go to Quarantine.
+        </p>
+        <p class="mb-0">
+            <strong>Not in your library:</strong> downloads your library has no copy or version of. Link them in, or
+            leave them.
+        </p>
+    </div>
+</details>
+
+@if (_profiles.Count == 0)
+{
+    <div class="alert alert-warning">
+        No drives are set up yet. <a href="settings">Add one in Settings</a>.
+    </div>
+}
+else if (IsScanning)
+{
+    <div class="alert alert-info">
+        A scan is running. This page will update when it finishes.
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (_result is null)
+{
+    <EmptyState Icon="search" Text="Nothing has been checked yet. Press Scan at the top of the page." />
+}
+else
+{
+    <div class="app-tabs" role="tablist" aria-label="Copies">
+        @foreach (var (key, label) in Tabs)
+        {
+            <button type="button"
+                    role="tab"
+                    aria-selected="@(_tab == key)"
+                    class="app-tab @(_tab == key ? "active" : null)"
+                    @onclick="() => Open(key)">
+                @label <span class="app-tab-count">@Count(key)</span>
+            </button>
+        }
+    </div>
+
+    @switch (_tab)
+    {
+        case SameFile:
+            <SameFileTab @key="_result" Result="_result" IsScanning="IsScanning" OnChanged="StateHasChanged" />
+            break;
+
+        case Versions:
+            <VersionsTab @key="_result" Result="_result" IsScanning="IsScanning" OnChanged="StateHasChanged" />
+            break;
+
+        default:
+            <NotInLibraryTab @key="_result" OnChanged="StateHasChanged" />
+            break;
+    }
+
+    <p class="cell-note mt-3">Last checked @_result.ScannedUtc.ToLocalTime().ToString("g").</p>
+}
+
+@code
+{
+    private const string NotInLibrary = "not-in-library";
+    private const string SameFile = "same-file";
+    private const string Versions = "versions";
+
+    private static readonly (string Key, string Label)[] Tabs =
+    [
+        (SameFile, "Same file twice"),
+        (Versions, "More than one version"),
+        (NotInLibrary, "Not in your library")
+    ];
+
+    [Parameter]
+    public string? Tab { get; set; }
+
+    private string _tab = SameFile;
+    private CopiesScanResult? _result;
+    private List<DriveProfile> _profiles = [];
+    private bool _checking;
+    private string _error = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _profiles = await SettingsService.GetEnabledDriveProfilesAsync();
+        _result = CopiesService.Last;
+    }
+
+    protected override void OnParametersSet()
+    {
+        // The old pages' addresses open the tab that does their job now.
+        var path = Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].TrimEnd('/');
+
+        _tab =
+            path switch
+            {
+                "hardlinks" => NotInLibrary,
+                "potential-waste" or "download-cleanup" => SameFile,
+                "duplicates" => Versions,
+                _ => Tabs.Any(tab => tab.Key == Tab) ? Tab! : SameFile
+            };
+    }
+
+    protected override Task OnScanFinishedAsync()
+    {
+        _result = CopiesService.Last;
+
+        return Task.CompletedTask;
+    }
+
+    private void Open(string tab)
+    {
+        _tab = tab;
+        Navigation.NavigateTo($"copies/{tab}", replace: true);
+    }
+
+    private int Count(string tab)
+    {
+        if (_result is null)
+        {
+            return 0;
+        }
+
+        if (tab == SameFile)
+        {
+            return _result.ExtraCopyCount;
+        }
+
+        if (tab == Versions)
+        {
+            return _result.Versions.Count;
+        }
+
+        var matched = new HashSet<string>(_result.MatchedDownloads, StringComparer.OrdinalIgnoreCase);
+
+        return _profiles
+            .SelectMany(profile =>
+                PromotionCandidateCache.GetCandidates(profile.Name).Select(candidate => candidate.SourcePath)
+                    .Concat(MediaTypeDefinitions.All.SelectMany(definition =>
+                        MediaPromotion.GetCandidates(definition.MediaType, profile.Name).Select(candidate => candidate.SourcePath))))
+            .Where(path => !matched.Contains(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+    }
+
+    private async Task CheckAgainAsync()
+    {
+        _checking = true;
+        _error = string.Empty;
+
+        try
+        {
+            _result = await CopiesService.ScanAsync();
+        }
+        catch (Exception exception)
+        {
+            _error = $"The check stopped: {exception.Message}";
+        }
+        finally
+        {
+            _checking = false;
+        }
+    }
+}

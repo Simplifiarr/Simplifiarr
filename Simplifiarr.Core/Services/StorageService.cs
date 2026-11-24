@@ -49,12 +49,19 @@ public class StorageService : IStorageService
             title => title.FolderPath,
             title => Directory.Exists(title.FolderPath));
 
+    private readonly ITorrentClient? _client;
+    private readonly IArrPathService? _arr;
+
     public StorageService(
         ISettingsService settings,
-        IFileInventoryService inventory)
+        IFileInventoryService inventory,
+        ITorrentClient? client = null,
+        IArrPathService? arr = null)
     {
         _settings = settings;
         _inventory = inventory;
+        _client = client;
+        _arr = arr;
     }
 
     public DateTime? GetLastScanUtc(string driveName) =>
@@ -87,6 +94,13 @@ public class StorageService : IStorageService
 
         var titles = new List<StorageTitle>();
 
+        // Seeding means a torrent in the client uses the file. A hardlink in
+        // a downloads folder alone doesn't: it can be a leftover whose torrent
+        // was removed long ago, which a move takes care of. Without the
+        // client, any hardlink into downloads counts, to be safe.
+        var torrents = _client is null ? null : await _client.TryGetTorrentsAsync();
+        var seeding = torrents is null ? null : SeedingCheck.From(torrents.Select(torrent => (torrent.ContentPath, torrent.Name)));
+
         foreach (var (kind, libraryPath) in Libraries(profile))
         {
             if (!Directory.Exists(libraryPath))
@@ -96,8 +110,13 @@ public class StorageService : IStorageService
 
             var files = await _inventory.GetInventoryAsync(libraryPath, forceRefresh: true);
 
-            titles.AddRange(Measure(profile.Name, kind, libraryPath, files, downloadRoots));
+            titles.AddRange(
+                seeding is null
+                    ? Measure(profile.Name, kind, libraryPath, files, downloadRoots)
+                    : Measure(profile.Name, kind, libraryPath, files, path => seeding.Check(path).State == SeedState.Seeding));
         }
+
+        await MarkShowsStillAiringAsync(settings, profile, titles);
 
         _cache.SetCandidates(profile.Name, titles);
         _cache.SetLastScanUtc(profile.Name, MediaKind.All);
@@ -144,6 +163,83 @@ public class StorageService : IStorageService
             .ToList();
     }
 
+    /// <summary>
+    /// The same, with seeding decided by <paramref name="isSeeding"/>.
+    /// </summary>
+    public static List<StorageTitle> Measure(
+        string driveName,
+        string kind,
+        string libraryPath,
+        IEnumerable<FileRecord> files,
+        Func<string, bool> isSeeding)
+    {
+        var titles = Measure(driveName, kind, libraryPath, files, []);
+        var byFolder = files.ToLookup(file => TopEntry(Path.TrimEndingDirectorySeparator(Path.GetFullPath(libraryPath)), file.FullPath), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var title in titles)
+        {
+            title.SeedingBytes =
+                byFolder[title.FolderPath]
+                    .Where(file => file.SizeBytes >= SmallestCheckedForSeedingBytes)
+                    .Where(file => NativeHardlinks.GetIdentity(file.FullPath) is { LinkCount: > 1 } && isSeeding(file.FullPath))
+                    .Sum(file => file.SizeBytes);
+        }
+
+        return titles;
+    }
+
+    // With a downloads drive, shows Sonarr still gets episodes of stay on it:
+    // moved away, every new episode would be copied across drives.
+    private async Task MarkShowsStillAiringAsync(SimplifiarrSettings settings, DriveProfile profile, List<StorageTitle> titles)
+    {
+        if (_arr is null ||
+            DownloadsDriveRoot(settings) is not { } downloadsRoot ||
+            !string.Equals(RootOfProfile(profile), downloadsRoot, StringComparison.OrdinalIgnoreCase) ||
+            !titles.Any(title => title.Kind == StorageKinds.Tv))
+        {
+            return;
+        }
+
+        try
+        {
+            var airing =
+                (await _arr.GetAllAsync(StorageKinds.Tv))
+                    .Where(show => show.Airing)
+                    .Select(show => Path.TrimEndingDirectorySeparator(show.Path))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var title in titles.Where(title => title.Kind == StorageKinds.Tv))
+            {
+                title.StaysForNewEpisodes = airing.Contains(Path.TrimEndingDirectorySeparator(title.FolderPath));
+            }
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        {
+            // Without Sonarr every show stays put rather than risk copies.
+            AppLog.Warn("Storage couldn't ask Sonarr which shows are still airing, so no show on the downloads drive will move this time.", exception);
+
+            foreach (var title in titles.Where(title => title.Kind == StorageKinds.Tv))
+            {
+                title.StaysForNewEpisodes = true;
+            }
+        }
+    }
+
+    /// <summary>The root ("C:\") of the drive new downloads land on, or null when each drive has its own.</summary>
+    public static string? DownloadsDriveRoot(SimplifiarrSettings settings)
+    {
+        if (string.IsNullOrWhiteSpace(settings.DownloadsDrive))
+        {
+            return null;
+        }
+
+        var profile =
+            settings.DriveProfiles.FirstOrDefault(candidate =>
+                candidate.Enabled && string.Equals(candidate.Name, settings.DownloadsDrive, StringComparison.OrdinalIgnoreCase));
+
+        return profile is null || RootOfProfile(profile) is not { Length: > 0 } root ? null : root;
+    }
+
     private static string TopEntry(string library, string filePath)
     {
         var relative = Path.GetRelativePath(library, filePath);
@@ -175,6 +271,7 @@ public class StorageService : IStorageService
                 .ToList();
 
         var drives = new List<StorageDrive>();
+        var downloadsRoot = DownloadsDriveRoot(settings);
 
         foreach (var group in profiles.GroupBy(RootOfProfile, StringComparer.OrdinalIgnoreCase))
         {
@@ -194,7 +291,11 @@ public class StorageService : IStorageService
             {
                 Root = group.Key,
                 ProfileNames = group.Select(profile => profile.Name).ToList(),
-                IsProtected = group.Any(profile => profile.IsProtected),
+                IsProtected =
+                    downloadsRoot is null
+                        ? group.Any(profile => profile.IsProtected)
+                        : string.Equals(group.Key, downloadsRoot, StringComparison.OrdinalIgnoreCase),
+                IsDownloadsDrive = string.Equals(group.Key, downloadsRoot, StringComparison.OrdinalIgnoreCase),
                 LimitPercent = limit,
                 BringBackToPercent =
                     Math.Clamp(
@@ -248,7 +349,8 @@ public class StorageService : IStorageService
             StoragePlanner.RecentAfterUtc(settings, DateTime.UtcNow));
     }
 
-    private static string RootOfProfile(DriveProfile profile)
+    /// <summary>The root ("C:\") of the drive a drive entry is on, or empty.</summary>
+    public static string RootOfProfile(DriveProfile profile)
     {
         var anyPath =
             new[] { profile.DriveRoot }

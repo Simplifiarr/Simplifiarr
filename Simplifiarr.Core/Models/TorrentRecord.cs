@@ -1,5 +1,20 @@
 namespace Simplifiarr.Core.Models;
 
+/// <summary>
+/// Where a torrent client saves: its default folder, and each category's
+/// own folder (empty when the category uses the default folder plus its name).
+/// </summary>
+public sealed record TorrentClientLayout(string DefaultSavePath, IReadOnlyDictionary<string, string> Categories)
+{
+    /// <summary>The folder a category's torrents are saved to.</summary>
+    public string FolderOf(string? category) =>
+        string.IsNullOrWhiteSpace(category) || !Categories.TryGetValue(category, out var path)
+            ? DefaultSavePath
+            : string.IsNullOrWhiteSpace(path)
+                ? System.IO.Path.Combine(DefaultSavePath, category)
+                : path.Replace('/', System.IO.Path.DirectorySeparatorChar);
+}
+
 public class TorrentRecord
 {
     public Guid Id { get; set; } = Guid.NewGuid();

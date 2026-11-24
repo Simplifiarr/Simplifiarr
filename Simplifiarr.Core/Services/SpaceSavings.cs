@@ -15,15 +15,17 @@ public static class SpaceSavings
     // - A rolled-off torrent removed after seeding: it shares its space with
     //   the episode or movie already counted.
     // - A download deleted while hardlinked to the library: it was the same
-    //   file, so nothing was freed. Download Cleanup's message says so.
+    //   file, so nothing was freed. Its message says so.
+    // Several actions can belong to one tool: Copies links, deletes and
+    // removes versions, and pages that did those before it count there too.
     private static readonly (HistoryActionType Type, string Tool, string Href, string One, string Many)[] Tools =
     [
-        (HistoryActionType.ConversionSucceeded, "Copies made hardlinks", "potential-waste", "file", "files"),
-        (HistoryActionType.DuplicateQuarantined, "Duplicates", "duplicates", "copy", "copies"),
+        (HistoryActionType.ConversionSucceeded, "Copies", "copies", "file", "files"),
+        (HistoryActionType.DuplicateQuarantined, "Copies", "copies", "file", "files"),
+        (HistoryActionType.DownloadCopyRemoved, "Copies", "copies", "file", "files"),
         (HistoryActionType.SizeReduced, "Size Reduction", "size-reduction", "file", "files"),
         (HistoryActionType.MusicConverted, "Music converted", "music", "track", "tracks"),
         (HistoryActionType.JunkFileQuarantined, "Junk Cleanup", "junk-cleanup", "file", "files"),
-        (HistoryActionType.DownloadCopyRemoved, "Download Cleanup", "download-cleanup", "file", "files"),
         (HistoryActionType.SeedMoved, "Move Seeds", "move-seeds", "torrent", "torrents"),
         (HistoryActionType.TitleDeleted, "Deleted from Storage", "storage", "title", "titles"),
         (HistoryActionType.EpisodeRolledOff, "Rolling Shows", "rolling-shows", "episode", "episodes"),
@@ -45,8 +47,10 @@ public static class SpaceSavings
 
         bool WasRestored(HistoryRecord record) =>
             record.QuarantinePath.Length > 0 &&
-            restored.TryGetValue(record.QuarantinePath, out var when) &&
-            record.TimestampUtc <= when;
+            restored.Any(entry =>
+                (string.Equals(entry.Key, record.QuarantinePath, StringComparison.OrdinalIgnoreCase) ||
+                 Utilities.PathContainment.IsPathUnderRoot(entry.Key, record.QuarantinePath)) &&
+                record.TimestampUtc <= entry.Value);
 
         var result = new List<ToolSaving>();
 
@@ -66,6 +70,16 @@ public static class SpaceSavings
             }
         }
 
-        return result.OrderByDescending(saving => saving.Bytes).ToList();
+        return result
+            .GroupBy(saving => saving.Tool)
+            .Select(group =>
+            {
+                var count = group.Sum(saving => saving.Count);
+                var first = Tools.First(tool => tool.Tool == group.Key);
+
+                return new ToolSaving(group.Key, first.Href, count, group.Sum(saving => saving.Bytes), count == 1 ? first.One : first.Many);
+            })
+            .OrderByDescending(saving => saving.Bytes)
+            .ToList();
     }
 }

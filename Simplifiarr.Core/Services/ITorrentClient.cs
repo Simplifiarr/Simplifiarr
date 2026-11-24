@@ -11,6 +11,17 @@ public interface ITorrentClient
     /// <summary>The client's name, for messages: "qBittorrent".</summary>
     string Name { get; }
 
+    /// <summary>
+    /// Where new torrents are saved, and each category's folder. Null when
+    /// the client can't say (not supported, or unreachable).
+    /// </summary>
+    Task<TorrentClientLayout?> GetLayoutAsync() =>
+        Task.FromResult<TorrentClientLayout?>(null);
+
+    /// <summary>Sets where new torrents are saved. Null on success, otherwise why not.</summary>
+    Task<string?> SetDefaultSavePathAsync(string path) =>
+        Task.FromResult<string?>($"{Name} can't be changed from Simplifiarr.");
+
     TorrentClientCapabilities Capabilities { get; }
 
     Task<List<TorrentRecord>> GetTorrentsAsync();

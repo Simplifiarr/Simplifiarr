@@ -48,6 +48,46 @@ public class QbittorrentClient : ITorrentClient
     public async Task<List<TorrentRecord>> GetTorrentsAsync() =>
         await TryGetTorrentsAsync() ?? [];
 
+    public async Task<TorrentClientLayout?> GetLayoutAsync()
+    {
+        try
+        {
+            var preferences = await GetStringAsync("/api/v2/app/preferences");
+            var categories = await GetStringAsync("/api/v2/torrents/categories");
+
+            if (preferences is null || categories is null)
+            {
+                return null;
+            }
+
+            using var prefs = JsonDocument.Parse(preferences);
+            using var cats = JsonDocument.Parse(categories);
+
+            var folders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var category in cats.RootElement.EnumerateObject())
+            {
+                folders[category.Name] =
+                    category.Value.TryGetProperty("savePath", out var path) ? path.GetString() ?? string.Empty : string.Empty;
+            }
+
+            return new TorrentClientLayout(
+                prefs.RootElement.TryGetProperty("save_path", out var save) ? save.GetString() ?? string.Empty : string.Empty,
+                folders);
+        }
+        catch (Exception exception) when (IsConnectionProblem(exception) || exception is JsonException)
+        {
+            Utilities.AppLog.Warn("Couldn't read qBittorrent's folders and categories.", exception);
+
+            return null;
+        }
+    }
+
+    public Task<string?> SetDefaultSavePathAsync(string path) =>
+        PostFormAsync(
+            ["/api/v2/app/setPreferences"],
+            new() { ["json"] = JsonSerializer.Serialize(new Dictionary<string, string> { ["save_path"] = path }) });
+
     public async Task<List<TorrentRecord>?> TryGetTorrentsAsync()
     {
         try

@@ -14,19 +14,17 @@ public class QuarantineInventoryService : IQuarantineInventoryService
 
     public async Task<List<QuarantineItem>> GetItemsAsync()
     {
-        var quarantineRoot =
-            await QuarantinePathResolver.ResolveAsync(_settingsService);
+        // The one in Settings, and one at the top of each other drive used.
+        var roots =
+            (await QuarantineService.AllRootsAsync(_settingsService))
+                .Where(Directory.Exists)
+                .ToList();
 
-        if (!Directory.Exists(quarantineRoot))
-        {
-            return new List<QuarantineItem>();
-        }
-
-        var items = Directory
-            .EnumerateFiles(
-                quarantineRoot,
+        var items = roots
+            .SelectMany(root => Directory.EnumerateFiles(
+                root,
                 "*",
-                SearchOption.AllDirectories)
+                SearchOption.AllDirectories))
             .Select(path =>
             {
                 var info = new FileInfo(path);

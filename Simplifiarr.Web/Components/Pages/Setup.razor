@@ -1,0 +1,169 @@
+@page "/setup"
+@rendermode InteractiveServer
+
+@using Simplifiarr.Core.Services
+
+@inject IStackSetupService SetupService
+@inject IDownloadsDriveCheck DownloadsDriveCheck
+
+<PageTitle>Setup - Simplifiarr</PageTitle>
+
+<PageHeader Title="Setup"
+            Subtitle="Checks that your torrent client, Radarr, Sonarr and Seerr are set up the way Simplifiarr expects, and changes what it safely can.">
+    <button type="button" class="btn btn-secondary" disabled="@_busy" @onclick="CheckAsync">
+        <i class="bi bi-arrow-repeat" aria-hidden="true"></i> @(_checking ? "Checking..." : "Check again")
+    </button>
+    <button type="button" class="btn btn-primary" disabled="@(_busy || Fixable.Count == 0)" @onclick="FixAllAsync">
+        Fix everything (@Fixable.Count)
+    </button>
+</PageHeader>
+
+<details class="mb-3">
+    <summary>What Simplifiarr expects</summary>
+    <ul class="mt-2 text-muted">
+        <li>New torrents are saved on the downloads drive picked in <a href="settings">Settings</a>, and new titles are added to a library there, so every import is a hardlink.</li>
+        <li>A title already on another drive downloads to that drive: its Radarr or Sonarr tag picks a download client whose category saves there. When Storage moves a title, its tag moves with it.</li>
+        <li>Radarr and Sonarr hardlink imports instead of copying them.</li>
+        <li>Nothing that would move torrents already in your client is changed for you; those say how to do it yourself.</li>
+    </ul>
+</details>
+
+@if (!string.IsNullOrWhiteSpace(_status))
+{
+    <div class="alert alert-info">@_status</div>
+}
+
+@if (_checks is null)
+{
+    <EmptyState Icon="hourglass-split" Text="Asking your apps..." />
+}
+else
+{
+    @foreach (var app in _checks.GroupBy(check => check.App))
+    {
+        <h2 class="section-title mt-3">@app.Key</h2>
+
+        <div class="panel">
+            @foreach (var check in app)
+            {
+                <div class="action-row @(check.Status is SetupStatus.Manual ? "action-row-warn" : null)" @key="check.Id">
+                    <div>
+                        <div class="action-row-title">
+                            @check.Title
+                            <span class="pill @PillClass(check.Status) ms-1">@PillText(check.Status)</span>
+                        </div>
+                        <div class="action-row-detail">@check.Detail</div>
+                    </div>
+
+                    @if (check.Status == SetupStatus.CanFix)
+                    {
+                        <button type="button" class="btn btn-primary btn-sm text-nowrap" disabled="@_busy" @onclick="() => FixAsync(check)">
+                            @(_fixing == check.Id ? "Changing..." : check.FixLabel ?? "Fix")
+                        </button>
+                    }
+                </div>
+            }
+        </div>
+    }
+}
+
+@code
+{
+    private List<SetupCheck>? _checks;
+    private bool _checking;
+    private string? _fixing;
+    private string _status = string.Empty;
+
+    private bool _busy => _checking || _fixing is not null;
+
+    private List<SetupCheck> Fixable =>
+        _checks?.Where(check => check.Status == SetupStatus.CanFix).ToList() ?? [];
+
+    protected override Task OnInitializedAsync() =>
+        CheckAsync();
+
+    private async Task CheckAsync()
+    {
+        _checking = true;
+
+        try
+        {
+            _checks = await SetupService.CheckAsync();
+
+            // Home shows the same, until the next scan.
+            await DownloadsDriveCheck.CheckAsync();
+        }
+        catch (Exception exception)
+        {
+            _status = $"The check stopped: {exception.Message}";
+            _checks ??= [];
+        }
+        finally
+        {
+            _checking = false;
+        }
+    }
+
+    private async Task FixAsync(SetupCheck check)
+    {
+        _fixing = check.Id;
+        _status = string.Empty;
+
+        try
+        {
+            var problem = await SetupService.FixAsync(check.Id);
+
+            _status = problem is null ? $"Done: {check.Title.ToLowerInvariant()}." : $"{check.Title}: {problem}";
+        }
+        finally
+        {
+            _fixing = null;
+        }
+
+        await CheckAsync();
+    }
+
+    private async Task FixAllAsync()
+    {
+        var problems = new List<string>();
+        var done = 0;
+
+        foreach (var check in Fixable)
+        {
+            _fixing = check.Id;
+            StateHasChanged();
+
+            if (await SetupService.FixAsync(check.Id) is { } problem)
+            {
+                problems.Add($"{check.Title}: {problem}");
+            }
+            else
+            {
+                done++;
+            }
+        }
+
+        _fixing = null;
+        _status = problems.Count == 0 ? $"Changed {done} thing(s)." : $"Changed {done}; {string.Join(" ", problems)}";
+
+        await CheckAsync();
+    }
+
+    private static string PillClass(SetupStatus status) =>
+        status switch
+        {
+            SetupStatus.Ok => "pill-ok",
+            SetupStatus.CanFix => "pill-warn",
+            SetupStatus.Manual => "pill-warn",
+            _ => "pill-muted"
+        };
+
+    private static string PillText(SetupStatus status) =>
+        status switch
+        {
+            SetupStatus.Ok => "OK",
+            SetupStatus.CanFix => "Can fix",
+            SetupStatus.Manual => "Do this yourself",
+            _ => "Not checked"
+        };
+}

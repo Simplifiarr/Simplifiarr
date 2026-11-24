@@ -6,53 +6,47 @@ namespace Simplifiarr.Core.Services;
 /// <summary>
 /// Pure read-only rollup - does not scan anything itself and makes no
 /// network calls. Every number here reflects what the last scan already
-/// found and remembered (duplicates are worked out from the scan's catalog).
+/// found and remembered (Copies' last check for copies and versions).
 /// </summary>
 public class DashboardSummaryService : IDashboardSummaryService
 {
     private readonly IQuarantineInventoryService _quarantineInventoryService;
     private readonly ISettingsService _settingsService;
 
-    private readonly IWasteCandidateCacheService _wasteCandidateCache;
+    private readonly ICopiesService _copies;
+    private readonly IDownloadsDriveCheck? _downloadsDrive;
     private readonly IPromotionCandidateCacheService _promotionCandidateCache;
     private readonly IMediaPromotionService _mediaPromotion;
     private readonly IJunkFileScannerService _junkFiles;
     private readonly IPlaybackErrorService _playbackErrors;
     private readonly IScanCoordinator _scans;
     private readonly IHistoryService _historyService;
-    private readonly IMediaCatalogService _catalog;
-    private readonly IDuplicateAssetAnalysisService _duplicates;
-    private readonly IIgnoredItemsService _ignored;
     private readonly ISeedMoveService _seedMoves;
 
     public DashboardSummaryService(
         IQuarantineInventoryService quarantineInventoryService,
         ISettingsService settingsService,
-        IWasteCandidateCacheService wasteCandidateCache,
+        ICopiesService copies,
         IPromotionCandidateCacheService promotionCandidateCache,
         IMediaPromotionService mediaPromotion,
         IJunkFileScannerService junkFiles,
         IPlaybackErrorService playbackErrors,
         IScanCoordinator scans,
         IHistoryService historyService,
-        IMediaCatalogService catalog,
-        IDuplicateAssetAnalysisService duplicates,
-        IIgnoredItemsService ignored,
-        ISeedMoveService seedMoves)
+        ISeedMoveService seedMoves,
+        IDownloadsDriveCheck? downloadsDrive = null)
     {
+        _downloadsDrive = downloadsDrive;
         _quarantineInventoryService = quarantineInventoryService;
         _settingsService = settingsService;
 
-        _wasteCandidateCache = wasteCandidateCache;
+        _copies = copies;
         _promotionCandidateCache = promotionCandidateCache;
         _mediaPromotion = mediaPromotion;
         _junkFiles = junkFiles;
         _playbackErrors = playbackErrors;
         _scans = scans;
         _historyService = historyService;
-        _catalog = catalog;
-        _duplicates = duplicates;
-        _ignored = ignored;
         _seedMoves = seedMoves;
     }
 
@@ -72,17 +66,14 @@ public class DashboardSummaryService : IDashboardSummaryService
         var quarantinedSizeBytes =
             quarantineItems.Sum(item => item.SizeBytes);
 
-        // Duplicates aren't saved by the scan; they are worked out from the
-        // catalog the same way the Duplicates page does it.
-        var duplicateGroups =
-            DuplicateAssetAnalysisService.RemoveIgnored(
-                await _duplicates.FindDuplicatesAsync(
-                    _catalog.GetAssets(),
-                    enabledProfiles),
-                _ignored);
+        var copies =
+            _copies.Last ?? new CopiesScanResult();
+
+        var matched =
+            new HashSet<string>(copies.MatchedDownloads, StringComparer.OrdinalIgnoreCase);
 
         var duplicateReclaimableBytes =
-            duplicateGroups.Sum(group => group.ReclaimableSizeBytes);
+            copies.VersionBytes;
 
         var seedMoves =
             enabledProfiles
@@ -94,23 +85,22 @@ public class DashboardSummaryService : IDashboardSummaryService
 
         var drives =
             enabledProfiles
-                .Select(profile => SummarizeDrive(profile, duplicateGroups))
-                .ToList();
-
-        // The same library file can show up under two drives when their
-        // folders overlap; count it once in the totals.
-        var wasteCandidates =
-            enabledProfiles
-                .SelectMany(profile =>
-                    _wasteCandidateCache.GetCandidates(profile.Name))
-                .GroupBy(
-                    candidate => candidate.LibraryPath,
-                    StringComparer.OrdinalIgnoreCase)
-                .Select(group => group.First())
+                .Select(profile => SummarizeDrive(profile, copies, matched))
                 .ToList();
 
         var possibleDuplicateCopyBytes =
-            wasteCandidates.Sum(candidate => candidate.SizeBytes);
+            copies.ExtraCopyBytes;
+
+        // Two drive entries can share a downloads folder: each download once.
+        var toLink =
+            enabledProfiles
+                .SelectMany(profile =>
+                    _promotionCandidateCache.GetCandidates(profile.Name).Select(candidate => candidate.SourcePath)
+                        .Concat(MediaTypeDefinitions.All.SelectMany(definition =>
+                            _mediaPromotion.GetCandidates(definition.MediaType, profile.Name).Select(candidate => candidate.SourcePath))))
+                .Where(path => !matched.Contains(path))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count();
 
         var historyRecords =
             await _historyService.GetHistoryAsync();
@@ -124,10 +114,10 @@ public class DashboardSummaryService : IDashboardSummaryService
         return new DashboardSummary
         {
             HealthyHardlinkCount =
-                drives.Sum(drive => drive.HealthyHardlinkCount),
+                copies.AlreadyLinkedCount,
 
             PossibleDuplicateCopyCount =
-                wasteCandidates.Count,
+                copies.ExtraCopyCount,
 
             PossibleDuplicateCopyBytes =
                 possibleDuplicateCopyBytes,
@@ -145,7 +135,7 @@ public class DashboardSummaryService : IDashboardSummaryService
                 SizeFormatter.FormatBytes(quarantinedSizeBytes),
 
             PromotionOpportunityCount =
-                drives.Sum(drive => drive.ToLinkCount),
+                toLink,
 
             JunkFileCount =
                 drives.Sum(drive => drive.LeftoverFileCount),
@@ -154,7 +144,7 @@ public class DashboardSummaryService : IDashboardSummaryService
                 drives.Sum(drive => drive.PlaybackErrorCount),
 
             DuplicateTitleCount =
-                duplicateGroups.Count,
+                copies.Versions.Count,
 
             SeedMoveCount =
                 seedMoves.Count,
@@ -174,6 +164,9 @@ public class DashboardSummaryService : IDashboardSummaryService
             Savings =
                 savings,
 
+            DownloadsDriveProblems =
+                _downloadsDrive?.Problems ?? [],
+
             StorageSavedBytes =
                 storageSavedBytes,
 
@@ -190,29 +183,31 @@ public class DashboardSummaryService : IDashboardSummaryService
 
     private DriveSummary SummarizeDrive(
         DriveProfile profile,
-        IReadOnlyList<DuplicateAssetGroup> duplicateGroups)
+        CopiesScanResult copies,
+        HashSet<string> matched)
     {
-        var fullCopies =
-            _wasteCandidateCache.GetCandidates(profile.Name);
+        bool Here(string drive) =>
+            string.Equals(drive, profile.Name, StringComparison.OrdinalIgnoreCase);
 
         var toLink =
-            _promotionCandidateCache.GetCandidates(profile.Name).Count +
+            _promotionCandidateCache.GetCandidates(profile.Name).Count(candidate => !matched.Contains(candidate.SourcePath)) +
             MediaTypeDefinitions.All.Sum(definition =>
-                _mediaPromotion.GetCandidates(definition.MediaType, profile.Name).Count);
+                _mediaPromotion.GetCandidates(definition.MediaType, profile.Name).Count(candidate => !matched.Contains(candidate.SourcePath)));
+
+        var deletes = copies.ToDelete.Where(leftover => Here(leftover.DriveProfileName)).ToList();
+        var links = copies.ToLink.Where(link => Here(link.Library.DriveName)).ToList();
 
         return new DriveSummary
         {
             Name = profile.Name,
             ToLinkCount = toLink,
-            FullCopyCount = fullCopies.Count,
-            FullCopyBytes = fullCopies.Sum(candidate => candidate.SizeBytes),
+            FullCopyCount = deletes.Count + links.Count,
+            FullCopyBytes = deletes.Sum(leftover => leftover.FreedBytes) + links.Sum(link => link.FreedBytes),
             LeftoverFileCount = _junkFiles.GetCandidates(profile.Name).Count,
             PlaybackErrorCount = _playbackErrors.GetForDrive(profile.Name).Count,
-            DuplicateTitleCount = duplicateGroups.Count(group =>
-                group.Entries.Any(entry =>
-                    string.Equals(entry.DriveProfileName, profile.Name, StringComparison.OrdinalIgnoreCase))),
+            DuplicateTitleCount = copies.Versions.Count(group => group.Versions.Any(version => Here(version.DriveName))),
             SeedMoveCount = _seedMoves.GetCandidates(profile.Name).Count,
-            HealthyHardlinkCount = _wasteCandidateCache.GetHealthyHardlinkCount(profile.Name),
+            HealthyHardlinkCount = copies.LinkedByDrive.GetValueOrDefault(profile.Name),
             LastScanUtc = _scans.GetLastScanUtc(profile.Name),
             SetupProblems = DriveProfileValidator.GetProblems(profile)
         };

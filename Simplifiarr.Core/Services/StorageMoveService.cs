@@ -90,8 +90,14 @@ public class StorageMoveService : IStorageMoveService
         IHistoryService history,
         IScanCoordinator scans,
         ISeerrClient? seerr = null,
-        IJellyfinClient? jellyfin = null)
+        IJellyfinClient? jellyfin = null,
+        ISettingsService? settings = null,
+        ITorrentClient? client = null,
+        IStackSetupService? setup = null)
     {
+        _setup = setup;
+        _settings = settings;
+        _client = client;
         _seerr = seerr;
         _jellyfin = jellyfin;
         _arr = arr;
@@ -156,8 +162,30 @@ public class StorageMoveService : IStorageMoveService
     /// <summary>Rest between titles, so the drives get a breather.</summary>
     public TimeSpan PauseBetweenTitles { get; set; } = TimeSpan.FromSeconds(15);
 
-    /// <summary>For tests: how a folder is removed from its old drive.</summary>
-    public Func<string, bool> RemoveOldFolder { get; set; } = RecycleBinHelper.Send;
+    private readonly ISettingsService? _settings;
+    private readonly ITorrentClient? _client;
+    private readonly IStackSetupService? _setup;
+
+    /// <summary>
+    /// For tests: how a deleted title's folder is removed. Unset, it goes to
+    /// Quarantine on its own drive, where it can be restored.
+    /// </summary>
+    public Func<string, bool>? RemoveOldFolder { get; set; }
+
+    private async Task<string?> TakeOutAsync(string folder) =>
+        RemoveOldFolder is not null ? (RemoveOldFolder(folder) ? string.Empty : null)
+        : _settings is not null ? await QuarantineService.MoveIntoAsync(_settings, folder)
+        : null;
+
+    // Where the last deleted title went in Quarantine, for its History entry.
+    private string _lastQuarantined = string.Empty;
+
+    /// <summary>
+    /// For tests: how a moved title's old folder is removed. Deleted for
+    /// good: the title is on its new drive, every file checked, and the
+    /// Recycle Bin would keep the space taken on the old one.
+    /// </summary>
+    public Func<string, bool> RemoveMovedFolder { get; set; } = FileRemoval.Delete;
 
     /// <summary>
     /// What Jellyfin is playing right now; null when it can't be asked.
@@ -288,6 +316,7 @@ public class StorageMoveService : IStorageMoveService
                 ActionType = HistoryActionType.TitleDeleted,
                 FileName = title.Name,
                 LibraryPath = folder,
+                QuarantinePath = result.Succeeded ? _lastQuarantined : string.Empty,
                 SizeBytes = title.SizeBytes,
                 Success = result.Succeeded,
                 Message = result.Message
@@ -320,14 +349,18 @@ public class StorageMoveService : IStorageMoveService
             }
         }
 
-        if (!RemoveOldFolder(folder))
+        var quarantined = await TakeOutAsync(folder);
+
+        if (quarantined is null)
         {
             return Fail(
                 request,
                 item is null
-                    ? "Its folder couldn't be sent to the Recycle Bin."
-                    : $"{item.Source} no longer has it, but its folder couldn't be sent to the Recycle Bin; delete {folder} yourself.");
+                    ? "Its folder couldn't be moved to Quarantine."
+                    : $"{item.Source} no longer has it, but its folder couldn't be moved to Quarantine; delete {folder} yourself.");
         }
+
+        _lastQuarantined = quarantined;
 
         if (_seerr is not null && seerrMediaId > 0)
         {
@@ -340,7 +373,7 @@ public class StorageMoveService : IStorageMoveService
             request,
             true,
             $"Deleted {title.Name}" + (item is null ? string.Empty : $" and removed it from {item.Source}") +
-            ". It is in the Recycle Bin until you empty it.",
+            ". It is in Quarantine, where you can restore it; empty Quarantine to get the space back.",
             DateTime.UtcNow);
     }
 
@@ -451,10 +484,14 @@ public class StorageMoveService : IStorageMoveService
 
         var total = files.Sum(file => file.Length);
 
-        // Seeding can have started since the last scan.
-        if (files.Any(file => NativeHardlinks.GetIdentity(file.FullName) is { LinkCount: > 1 }))
+        // Other names its files have: a torrent seeding one keeps the title
+        // here; a leftover download or a Recycle Bin name goes with the move,
+        // or the bytes would stay on this drive.
+        var (otherNames, why) = await OtherNamesAsync(files);
+
+        if (why is not null)
         {
-            return Fail(request, "A file in it is hardlinked elsewhere (most likely still seeding), so moving it would free nothing.");
+            return Fail(request, why);
         }
 
         if (await InUseAsync(source, files.Select(file => file.FullName)) is { } busy)
@@ -531,14 +568,25 @@ public class StorageMoveService : IStorageMoveService
             }
         }
 
-        Report(request, "Sending the old folder to the Recycle Bin", total, total);
+        Report(request, "Removing the old folder", total, total);
 
-        var removed = RemoveOldFolder(source);
+        // Same bytes as the checked copy, under another name on the old drive.
+        var leftoversRemoved =
+            otherNames.Count(name =>
+                NativeHardlinks.IsInRecycleBin(name) ? FileRemoval.DeleteRecycledName(name) : FileRemoval.Delete(name));
+
+        var removed = RemoveMovedFolder(source);
 
         if (item is not null)
         {
             await _arr.RescanAsync(title.Kind, item);
         }
+
+        // Its future downloads land on its new drive, so they're hardlinked.
+        var retagged =
+            item is not null && _setup is not null
+                ? await _setup.FollowDriveAsync(title.Kind, item.Id, target)
+                : null;
 
         _storage.Forget(title);
 
@@ -550,12 +598,91 @@ public class StorageMoveService : IStorageMoveService
                     : "."
                 : $" and {item.Source} now uses it.");
 
+        if (leftoversRemoved > 0)
+        {
+            message += $" {leftoversRemoved} leftover download name(s) of its files went too.";
+        }
+
+        if (retagged is not null)
+        {
+            message += " " + retagged;
+        }
+
+        if (leftoversRemoved < otherNames.Count)
+        {
+            message += $" {otherNames.Count - leftoversRemoved} other name(s) of its files couldn't be removed, so part of the space stays taken; Copies lists them.";
+        }
+
         if (!removed)
         {
-            message += $" The old folder couldn't be sent to the Recycle Bin; delete {source} yourself.";
+            message += $" The old folder couldn't be removed; delete {source} yourself.";
         }
 
         return new StorageMoveResult(request, true, message, DateTime.UtcNow);
+    }
+
+    /// <summary>
+    /// The other names a title's files have, all of which can go once the
+    /// title has moved: names in a downloads folder no torrent uses, or in a
+    /// Recycle Bin. Or why the title must stay: a torrent seeds one, or one
+    /// is somewhere else (another library, say), where it would keep the bytes.
+    /// </summary>
+    private async Task<(List<string> Names, string? Why)> OtherNamesAsync(List<FileInfo> files)
+    {
+        var linked = files.Where(file => NativeHardlinks.GetIdentity(file.FullName) is { LinkCount: > 1 }).ToList();
+
+        if (linked.Count == 0)
+        {
+            return ([], null);
+        }
+
+        var torrents = _client is null ? null : await _client.TryGetTorrentsAsync();
+
+        if (torrents is null)
+        {
+            return ([], "A file in it is hardlinked elsewhere and the torrent client couldn't be asked whether it's seeding, so it was left where it is.");
+        }
+
+        var settings = _settings is null ? null : await _settings.GetSettingsAsync();
+
+        var downloadRoots =
+            (settings?.DriveProfiles ?? [])
+                .SelectMany(profile => profile.AllDownloadPaths().Append(profile.SeedOnlyPath))
+                .Concat(torrents.Select(torrent => torrent.SavePath))
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+        var seeding = SeedingCheck.From(torrents.Select(torrent => (torrent.ContentPath, torrent.Name)));
+        var names = new List<string>();
+
+        foreach (var file in linked)
+        {
+            var check = seeding.Check(file.FullName);
+
+            if (check.State == SeedState.Seeding)
+            {
+                return ([], $"{file.Name} is still seeding as \"{check.Torrent}\", so it stays until that torrent is removed.");
+            }
+
+            if (check.OtherNames.Count == 0 && NativeHardlinks.GetIdentity(file.FullName) is { LinkCount: > 1 })
+            {
+                return ([], $"{file.Name} has another name Windows won't list, so moving it would free nothing.");
+            }
+
+            foreach (var name in check.OtherNames)
+            {
+                if (!NativeHardlinks.IsInRecycleBin(name) &&
+                    !downloadRoots.Any(root => PathContainment.IsPathUnderRoot(name, root)))
+                {
+                    return ([], $"{file.Name} is also at {name}, so moving it would free nothing.");
+                }
+
+                names.Add(name);
+            }
+        }
+
+        return (names.Distinct(StringComparer.OrdinalIgnoreCase).ToList(), null);
     }
 
     /// <summary>

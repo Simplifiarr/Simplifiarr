@@ -1139,6 +1139,27 @@ a.stat-card:focus-visible {
     color: var(--app-accent);
 }
 
+/* Tabs inside a tab: smaller, rounded, like filter buttons. */
+
+.app-tabs-sub {
+    gap: .4rem;
+    margin-bottom: 1rem;
+    border-bottom: 0;
+}
+
+.app-tabs-sub .app-tab {
+    height: 2rem;
+    padding: 0 .75rem;
+    margin-bottom: 0;
+    border: 1px solid var(--app-border);
+    border-radius: 999px;
+    font-size: .8125rem;
+}
+
+.app-tabs-sub .app-tab.active {
+    border-color: var(--app-accent);
+}
+
 /* Wrap a wide table in this so the table scrolls, not the page. */
 
 .table-scroll {

@@ -6,6 +6,9 @@ public class FileScannerService : IFileScannerService
 {
     private const int ProgressInterval = 500;
 
+    private static readonly string QuarantineSegment =
+        Path.DirectorySeparatorChar + QuarantineService.DriveFolderName + Path.DirectorySeparatorChar;
+
     // Hidden and system files are included, as they always have been. A
     // folder the service account can't open is skipped instead of failing
     // the whole scan.
@@ -47,6 +50,13 @@ public class FileScannerService : IFileScannerService
                      .EnumerateFiles("*", WalkOptions))
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            // A drive's Quarantine folder holds what was taken out; it is
+            // neither library nor downloads.
+            if (info.FullName.Contains(QuarantineSegment, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
 
             files.Add(
                 new FileRecord

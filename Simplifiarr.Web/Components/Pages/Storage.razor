@@ -331,8 +331,15 @@ else
             <summary class="cell-note">How this works</summary>
             <ul class="cell-note mt-2">
                 <li>
-                    <strong>Protected</strong> drives are kept clear. Once one passes its limit, titles move off it
-                    until it's back down to its target. Nothing is moved onto it.
+                    With a <strong>downloads drive</strong> set in Settings, that is the drive kept clear: everything
+                    new lands there, and finished titles move off it as it fills. Without one, <strong>protected</strong>
+                    drives are kept clear. Either way, once it passes its limit titles move off it until it's back
+                    down to its target, and nothing is moved onto it.
+                </li>
+                <li>
+                    A title stays while a torrent seeds it, and a show Sonarr still gets episodes of stays on the
+                    downloads drive, so new episodes are linked rather than copied. A leftover download name of a
+                    title's files (its torrent removed) is deleted with the move, so the space really comes back.
                 </li>
                 <li>
                     Everything else is an <strong>overflow</strong> drive. Each title goes to the one with the most
@@ -343,7 +350,7 @@ else
                 </li>
                 <li>
                     Each file is copied, read back and checked against the original. Only then is Radarr or Sonarr
-                    given the new folder and the old one removed. If anything fails, the title stays where it was.
+                    given the new folder and the old one deleted. If anything fails, the title stays where it was.
                 </li>
                 <li>Set each drive's role in <a href="settings">Settings</a>, under Drives.</li>
             </ul>
@@ -425,7 +432,7 @@ else
                                         </div>
                                         <div class="cell-note mt-1">
                                             Removes it from @(review.Title.Kind == StorageKinds.Tv ? "Sonarr" : "Radarr")
-                                            @(review.Watch.SeerrMediaId > 0 ? "and Seerr" : null), and sends the folder to the Recycle Bin.
+                                            @(review.Watch.SeerrMediaId > 0 ? "and Seerr" : null), and moves the folder to Quarantine, where you can restore it.
                                         </div>
                                     }
                                     else
@@ -818,7 +825,9 @@ else
     }
 
     private static string LimitText(StorageDrive drive) =>
-        drive.IsProtected
+        drive.IsDownloadsDrive
+            ? $"Downloads drive · moves start at {drive.LimitPercent}%"
+        : drive.IsProtected
             ? $"Protected · moves start at {drive.LimitPercent}%"
             : $"Overflow · keeps {SizeFormatter.FormatBytes(drive.KeepFreeBytes)} free";
 
@@ -829,6 +838,7 @@ else
         reason switch
         {
             "Still seeding" => "seeding",
+            "Still airing" => "airing",
             "Added or changed recently" => "added recently",
             "Too big to move by itself" => "too big",
             _ => reason.ToLowerInvariant()
@@ -867,12 +877,10 @@ else
             ? "Nothing on it can move right now: every title is left alone (see below) or too big for the overflow drives' room."
             : "There's no overflow drive with room. In Settings, leave at least one drive unprotected, or lower what it keeps free.";
 
-    // The service runs as Windows' own account, whose Recycle Bin isn't yours.
+    // Moved folders are deleted for good once their copy is checked: the
+    // service's own Recycle Bin is a hidden folder on the same drive.
     private static string RecycleBinNote =>
-        string.Equals(Environment.UserName, "SYSTEM", StringComparison.OrdinalIgnoreCase) ||
-        Environment.UserName.EndsWith('$')
-            ? "The old folders are gone from their drives, and the space they took is free again."
-            : "Old folders are in the Recycle Bin. Empty it to get the space back.";
+        "The old folders are deleted once their copies are checked, so the space they took is free again.";
 
     private void Browse(string root)
     {

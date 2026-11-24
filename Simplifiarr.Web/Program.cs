@@ -42,10 +42,8 @@ builder.Services.AddHttpClient<IPosterService, PosterService>();
 
 builder.Services.AddSingleton<IFileScannerService, FileScannerService>();
 builder.Services.AddSingleton<IHardlinkService, HardlinkService>();
-builder.Services.AddSingleton<IDuplicateCandidateService, DuplicateCandidateService>();
 builder.Services.AddSingleton<IDashboardSummaryService, DashboardSummaryService>();
 builder.Services.AddSingleton<IHardlinkConversionPlanner, HardlinkConversionPlanner>();
-builder.Services.AddSingleton<IRemediationPreviewService, RemediationPreviewService>();
 builder.Services.AddSingleton<IHardlinkRemediationService, HardlinkRemediationService>();
 builder.Services.AddSingleton<IQuarantineService, QuarantineService>();
 builder.Services.AddSingleton<IQuarantineInventoryService, QuarantineInventoryService>();
@@ -69,8 +67,6 @@ builder.Services.AddSingleton<IMediaMetadataExtractor, FfprobeMediaMetadataExtra
 builder.Services.AddSingleton<ITorrentClassificationService, TorrentClassificationService>();
 builder.Services.AddSingleton<ILibraryTargetResolver, LibraryTargetResolver>();
 builder.Services.AddSingleton<IMediaPromotionService, MediaPromotionService>();
-builder.Services.AddSingleton<IWasteCandidateCacheService, WasteCandidateCacheService>();
-builder.Services.AddSingleton<IWasteCandidateService, WasteCandidateService>();
 // Simplifiarr only runs on Windows; this one says so out loud.
 #pragma warning disable CA1416
 builder.Services.AddSingleton<IPlaybackErrorService, PlaybackErrorService>();
@@ -85,8 +81,28 @@ builder.Services.AddSingleton<ICollectionService, CollectionService>();
 builder.Services.AddSingleton<ICollectionBuilderService, CollectionBuilderService>();
 builder.Services.AddSingleton<IJunkFileScannerService, JunkFileScannerService>();
 builder.Services.AddSingleton<IDownloadCleanupService, DownloadCleanupService>();
+builder.Services.AddHttpClient<IStackSetupService, StackSetupService>();
+builder.Services.AddSingleton<IDownloadsDriveCheck, DownloadsDriveCheck>();
+builder.Services.AddSingleton<ICopiesService>(services =>
+    new CopiesService(
+        services.GetRequiredService<ISettingsService>(),
+        services.GetRequiredService<IFileInventoryService>(),
+        services.GetRequiredService<ITorrentClient>(),
+        services.GetRequiredService<IReleaseParser>(),
+        services.GetRequiredService<IDownloadCleanupService>(),
+        services.GetRequiredService<IHistoryService>(),
+        services.GetRequiredService<IHardlinkConversionPlanner>(),
+        services.GetRequiredService<IHardlinkRemediationService>(),
+        services.GetRequiredService<IQuarantineService>(),
+        services.GetRequiredService<IMediaCatalogService>(),
+        services.GetRequiredService<IDuplicateAssetAnalysisService>(),
+        services.GetRequiredService<IIgnoredItemsService>()));
 builder.Services.AddSingleton<ISeedMoveService, SeedMoveService>();
-builder.Services.AddSingleton<IStorageService, StorageService>();
+builder.Services.AddSingleton<IStorageService>(services => new StorageService(
+    services.GetRequiredService<ISettingsService>(),
+    services.GetRequiredService<IFileInventoryService>(),
+    services.GetRequiredService<ITorrentClient>(),
+    services.GetRequiredService<IArrPathService>()));
 builder.Services.AddHttpClient<IArrPathService, ArrPathService>();
 builder.Services.AddTransient<ISeasonCleanupService, SeasonCleanupService>();
 builder.Services.AddHttpClient<ISeerrClient, SeerrClient>();
@@ -102,7 +118,10 @@ builder.Services.AddSingleton<IStorageMoveService>(services => new StorageMoveSe
     services.GetRequiredService<IHistoryService>(),
     services.GetRequiredService<IScanCoordinator>(),
     services.GetRequiredService<ISeerrClient>(),
-    services.GetRequiredService<IJellyfinClient>()));
+    services.GetRequiredService<IJellyfinClient>(),
+    services.GetRequiredService<ISettingsService>(),
+    services.GetRequiredService<ITorrentClient>(),
+    services.GetRequiredService<IStackSetupService>()));
 builder.Services.AddSingleton<IArrNamingService, ArrNamingService>();
 builder.Services.AddSingleton<ITorrentPieceVerificationService, TorrentPieceVerificationService>();
 builder.Services.AddSingleton<ITorrentReconstructionService, TorrentReconstructionService>();

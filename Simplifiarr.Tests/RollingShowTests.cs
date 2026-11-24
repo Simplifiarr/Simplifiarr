@@ -241,7 +241,7 @@ public class RollingShowServiceTests : TempFolderTest
                 {
                     deleted.Add(path);
                     File.Delete(path);
-                    return true;
+                    return Task.FromResult<string?>(string.Empty);
                 }
             };
 

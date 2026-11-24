@@ -35,9 +35,11 @@
         <ol class="help-steps">
             <li>
                 <strong>Add your drives.</strong>
-                In <a href="settings">Settings</a>, add one entry per drive with its downloads folder
-                and whichever library folders it has. Hardlinks only work within one drive, so each
-                drive is set up on its own.
+                In <a href="settings">Settings</a>, add one entry per drive with whichever library
+                folders it has. Hardlinks only work within one drive, so the simplest setup is one
+                <em>downloads drive</em> where everything new arrives: pick it at the top of the Drives
+                tab, and Storage moves finished titles to the other drives as it fills. Or give each
+                drive its own downloads folder.
             </li>
             <li>
                 <strong>Connect your apps (optional).</strong>
@@ -114,9 +116,14 @@
         <p>Simplifiarr is built so a mistake can be undone:</p>
 
         <ul>
-            <li>It never deletes a file outright: anything removed goes to the Windows Recycle Bin or to Quarantine.</li>
+            <li>
+                It deletes a file outright only when its bytes are kept somewhere else (a moved title's checked
+                copy, a download your library has byte for byte), when you delete it from Quarantine, or when a
+                Rolling rule is set to delete for good. Everything else it removes goes to Quarantine, on the
+                same drive it came from, so nothing is copied and the space comes back when you empty it.
+            </li>
             <li>The only time it copies between drives is a <a href="storage">Storage</a> move you asked for. Each file is checked against the original before the old copy is removed, and titles move one at a time.</li>
-            <li>Anything taken out of a library goes to <a href="quarantine">Quarantine</a> first. Restore puts it back; Delete sends it to the Windows Recycle Bin.</li>
+            <li>Anything taken out of a library goes to <a href="quarantine">Quarantine</a> first. Restore puts it back; Delete removes it for good.</li>
             <li>A hardlink is only counted as done once Simplifiarr has checked it really is the same file.</li>
             <li>Cross-seeds and rebuilt torrents are only offered once every piece has been checked against your files, and are added to your torrent client stopped.</li>
             <li>Anything that changes files asks you to confirm first.</li>
@@ -141,11 +148,16 @@
         <dl class="help-terms">
             <dt>Drives</dt>
             <dd>
+                <em>New downloads land on</em> picks the downloads drive: the one your torrent client
+                saves to and Radarr, Sonarr and Seerr add new titles to. It is kept clear, and the other
+                drives are overflow drives that only need libraries. The Setup page checks your apps
+                fit this, and changes what it can.
                 One entry per drive. <em>Downloads folder</em> is where finished torrents land;
                 the library folders are where your organised Movies, TV, Books, Audiobooks, Music and
-                Comics live. Leave out any you don't have. Movies, TV and books can share the main
-                downloads folder or each have their own; a movie downloads folder is only searched for
-                movies, and a TV one only for TV. Audiobooks, music and comics each need their
+                Comics live. Leave out any you don't have. Movies, TV and books can simply share the main
+                downloads folder: everything under it is looked at, and movies are told from episodes by
+                their names. Giving them their own folders is optional; a movie downloads folder is then
+                only searched for movies, and a TV one only for TV. Audiobooks, music and comics each need their
                 own downloads folder, because their files can't be told apart by content alone.
                 Each path says whether it exists as you type. Starting fresh?
                 <code>scripts\new-media-folders.ps1 -Drive D</code> in the Simplifiarr folder
@@ -155,7 +167,7 @@
             <dt>Connections</dt>
             <dd>
                 Your torrent client, qBittorrent for now (what is still seeding), Radarr and Sonarr (exact titles, genres and episode
-                numbers; Hardlinks uses their folders and folder formats; Storage updates them when titles move or are deleted), Prowlarr (searching your
+                numbers; Copies uses their folders and folder formats; Storage updates them when titles move or are deleted), Prowlarr (searching your
                 indexers), Jellyfin (Collections, Posters and watch history), Seerr (who asked for each title) and an optional fanart.tv key (more
                 artwork). Each has a Test button.
             </dd>
@@ -204,12 +216,8 @@
 
     private static readonly HelpPage[] TorrentPages =
     [
-        new("hardlinks", "link-45deg", "Hardlinks",
-            "Finished downloads that aren't in your library yet. Preview where each one will go, then link it in - it keeps seeding and costs no extra space. TV is grouped by show and season, and new seasons get Sonarr's own folder name."),
-        new("potential-waste", "arrow-repeat", "Potential Waste",
-            "Library files that are full copies of a download. Converting swaps the copy for a hardlink; the old copy goes to Quarantine."),
         new("move-seeds", "truck", "Move Seeds",
-            "Torrents seeding from one drive while Sonarr or Radarr copied them into a library on another. Moving the seed to the library's drive leaves one shared copy. The torrent client checks every piece before the old copy goes to the Recycle Bin, and the torrent is left paused."),
+            "Torrents seeding from one drive while Sonarr or Radarr copied them into a library on another. Moving the seed to the library's drive leaves one shared copy. The torrent client checks every piece before the old copy is deleted, and the torrent is left paused."),
         new("cross-seed", "share", "Cross-Seed",
             "Finds other torrents of files you already seed, so you can seed them on more trackers without downloading anything."),
         new("torrent-rebuilder", "hammer", "Torrent Rebuilder",
@@ -218,14 +226,12 @@
 
     private static readonly HelpPage[] SpacePages =
     [
+        new("copies", "copy", "Copies",
+            "Everything on your drives more than once, every drive checked together, and each download in one tab only. Same file twice: a download with the same bytes as a library file is deleted when nothing seeds it (after every byte is compared), or the library copy becomes a second name for it while it seeds. More than one version: the same movie, episode, book or album as different files; you pick which to keep and the rest go to Quarantine. Not in your library: link finished downloads in without copying, with Sonarr's own folder names for new seasons."),
         new("storage", "device-hdd", "Storage",
-            "How full each drive is, and what fills it. Protected drives are kept under a limit you set: titles nobody watches move off them to the overflow drive with the most free space, one at a time, telling Radarr or Sonarr the new folder. Titles seeding, added recently or being watched stay put. Also lists titles worth a look, which can be deleted through Radarr or Sonarr."),
-        new("duplicates", "copy", "Duplicates",
-            "The same title more than once in your libraries, usually two qualities. Pick the one to keep."),
+            "How full each drive is, and what fills it. The downloads drive (or, without one, each protected drive) is kept under a limit you set: titles nobody watches move off it to the overflow drive with the most free space, one at a time, telling Radarr or Sonarr the new folder. Titles a torrent seeds, shows still airing, and titles added recently or being watched stay put. A moved title's old folder, and any leftover download name of its files, are deleted once the copy is checked, so the space really comes back. Also lists titles worth a look, which can be deleted through Radarr or Sonarr."),
         new("junk-cleanup", "trash3", "Junk",
             "Sample clips, checksum and tracker files, and stray images left in your libraries. You choose what counts as junk, and which kinds of picture to keep."),
-        new("download-cleanup", "folder-x", "Downloads",
-            "Downloads your library already has, on any drive, that your torrent client is no longer seeding. Each is checked byte for byte against the library copy."),
         new("size-reduction", "file-earmark-zip", "Size Reduction",
             "Smaller releases of films and episodes you have, found on your indexers, kept to the encodes you accept. Download one and it is swapped in for yours.")
     ];
@@ -269,6 +275,8 @@
 
     private static readonly HelpPage[] SafetyPages =
     [
+        new("setup", "ui-checks", "Setup",
+            "Checks that your torrent client, Radarr, Sonarr and Seerr fit how Simplifiarr works: new torrents saved on the downloads drive, new titles added to a library there, each title already elsewhere downloading to its own drive (by its tag), and imports hardlinked. Fixes what it safely can with one click, and says how to change the rest yourself. When Storage moves a title, its tag moves with it."),
         new("quarantine", "box-seam", "Quarantine",
             "Everything Simplifiarr took out of a library, waiting for you to restore or delete it."),
         new("history", "clock-history", "History",

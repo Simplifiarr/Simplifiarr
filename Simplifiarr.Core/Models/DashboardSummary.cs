@@ -45,6 +45,9 @@ public class DashboardSummary
     /// <summary>What each tool has freed so far, biggest first.</summary>
     public IReadOnlyList<ToolSaving> Savings { get; set; } = [];
 
+    /// <summary>New downloads or titles landing off the downloads drive.</summary>
+    public IReadOnlyList<string> DownloadsDriveProblems { get; set; } = [];
+
     /// <summary>All of <see cref="Savings"/> together.</summary>
     public long StorageSavedBytes { get; set; }
 

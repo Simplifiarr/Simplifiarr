@@ -2,8 +2,9 @@
 
 @*
     The whole app's navigation, grouped by what you're there to do:
-      Torrents & seeding - get downloads into libraries and keep seeding
-      Free up space      - find what takes space and doesn't need to
+      Torrents & seeding - keep seeding where it costs the least
+      Free up space      - what takes space and doesn't need to (Copies
+                           also links downloads into the library)
       Fix & tidy         - put wrong things right
       Jellyfin           - how the library looks
       Automatic          - rules that run by themselves
@@ -20,12 +21,6 @@
     <div class="nav-group">
         <div class="nav-group-label">Torrents &amp; seeding</div>
 
-        <NavLink class="nav-link" href="hardlinks">
-            <i class="bi bi-link-45deg" aria-hidden="true"></i> Hardlinks
-        </NavLink>
-        <NavLink class="nav-link" href="potential-waste">
-            <i class="bi bi-arrow-repeat" aria-hidden="true"></i> Potential Waste
-        </NavLink>
         <NavLink class="nav-link" href="move-seeds">
             <i class="bi bi-truck" aria-hidden="true"></i> Move Seeds
         </NavLink>
@@ -40,17 +35,14 @@
     <div class="nav-group">
         <div class="nav-group-label">Free up space</div>
 
+        <NavLink class="nav-link" href="copies">
+            <i class="bi bi-copy" aria-hidden="true"></i> Copies
+        </NavLink>
         <NavLink class="nav-link" href="storage">
             <i class="bi bi-device-hdd" aria-hidden="true"></i> Storage
         </NavLink>
-        <NavLink class="nav-link" href="duplicates">
-            <i class="bi bi-copy" aria-hidden="true"></i> Duplicates
-        </NavLink>
         <NavLink class="nav-link" href="junk-cleanup">
             <i class="bi bi-trash3" aria-hidden="true"></i> Junk
-        </NavLink>
-        <NavLink class="nav-link" href="download-cleanup">
-            <i class="bi bi-folder-x" aria-hidden="true"></i> Downloads
         </NavLink>
         <NavLink class="nav-link" href="size-reduction">
             <i class="bi bi-file-earmark-zip" aria-hidden="true"></i> Size Reduction
@@ -110,6 +102,9 @@
     <div class="nav-group nav-group-bottom">
         <NavLink class="nav-link" href="settings">
             <i class="bi bi-gear" aria-hidden="true"></i> Settings
+        </NavLink>
+        <NavLink class="nav-link" href="setup">
+            <i class="bi bi-ui-checks" aria-hidden="true"></i> Setup
         </NavLink>
         <NavLink class="nav-link" href="updates">
             <i class="bi bi-cloud-arrow-down" aria-hidden="true"></i> Updates
