@@ -203,31 +203,43 @@ else
 
     @if (_dashboard.Savings.Count > 0)
     {
-        var biggest = Math.Max(1, _dashboard.Savings.Max(saving => saving.Bytes));
+        var savings = _dashboard.Savings.OrderByDescending(saving => saving.Bytes).ToList();
+        var total = Math.Max(1, savings.Sum(saving => saving.Bytes));
+
+        // Five tiles and a sixth for the rest, unless there are only six.
+        var shown = _showAllSavings || savings.Count <= 6 ? savings : savings.Take(5).ToList();
+        var rest = savings.Skip(shown.Count).ToList();
 
         <section class="section">
-            <h2 class="section-title">Space saved so far</h2>
+            <div class="saved-header">
+                <h2 class="section-title mb-0">Space saved</h2>
+                <div class="saved-total">@_dashboard.StorageSavedFormatted</div>
+                <div class="cell-note">
+                    across @savings.Count @(savings.Count == 1 ? "tool" : "tools"). Things in Quarantine count now; they come off if you restore them.
+                </div>
+            </div>
 
-            <div class="panel">
-                @foreach (var saving in _dashboard.Savings)
+            <div class="saved-grid">
+                @foreach (var saving in shown)
                 {
-                    <a class="saving-row" href="@saving.Href" @key="saving.Tool">
-                        <div>
-                            <div>@saving.Tool</div>
-                            <div class="cell-note">@saving.Count.ToString("N0") @saving.Things</div>
+                    <a class="saved-tile" href="@saving.Href" @key="saving.Tool">
+                        <div class="saved-tile-name">@saving.Tool</div>
+                        <div class="saved-tile-size">@SizeFormatter.FormatBytes(saving.Bytes)</div>
+                        <div class="cell-note">@saving.Count.ToString("N0") @saving.Things</div>
+                        <div class="saved-share" aria-hidden="true" title="@Share(saving.Bytes, total) of the total">
+                            <span style="width: @Css(Math.Max(2, saving.Bytes * 100.0 / total))%"></span>
                         </div>
-                        <div class="saving-bar" aria-hidden="true">
-                            <span style="width: @(Math.Max(1, saving.Bytes * 100.0 / biggest).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></span>
-                        </div>
-                        <div class="saving-size">@SizeFormatter.FormatBytes(saving.Bytes)</div>
                     </a>
                 }
 
-                <div class="saving-row saving-total">
-                    <div>Total</div>
-                    <div class="cell-note fw-normal">Things in Quarantine count now; they come off if you restore them.</div>
-                    <div class="saving-size">@_dashboard.StorageSavedFormatted</div>
-                </div>
+                @if (rest.Count > 0)
+                {
+                    <button type="button" class="saved-tile saved-tile-more" @onclick="() => _showAllSavings = true">
+                        <div class="saved-tile-name">@rest.Count more</div>
+                        <div class="saved-tile-size">@SizeFormatter.FormatBytes(rest.Sum(saving => saving.Bytes))</div>
+                        <div class="cell-note">@string.Join(", ", rest.Select(saving => saving.Tool))</div>
+                    </button>
+                }
             </div>
         </section>
     }
@@ -287,6 +299,13 @@ else
 @code
 {
     private DashboardSummary? _dashboard;
+    private bool _showAllSavings;
+
+    private static string Css(double value) =>
+        value.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string Share(long bytes, long total) =>
+        $"{bytes * 100.0 / total:0}%";
     private bool _scanWasRunning;
 
     private bool HasEverScanned =>

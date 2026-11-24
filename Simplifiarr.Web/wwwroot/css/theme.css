@@ -943,57 +943,97 @@ a.stat-card:focus-visible {
 
 /* Home: what each tool has freed, one row each with a bar. */
 
-.saving-row {
+.saved-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: .25rem 1rem;
+    margin-bottom: 1rem;
+}
+
+.saved-header .section-title {
+    flex-basis: 100%;
+}
+
+.saved-total {
+    font-size: 2.25rem;
+    font-weight: 700;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    color: var(--app-accent);
+}
+
+.saved-grid {
     display: grid;
-    grid-template-columns: minmax(9rem, 12rem) 1fr auto;
-    align-items: center;
-    gap: .5rem 1rem;
-    padding: .65rem 1.25rem;
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+    gap: .75rem;
+}
+
+.saved-tile {
+    display: flex;
+    flex-direction: column;
+    gap: .15rem;
+    padding: .9rem 1rem .8rem;
+    background: var(--app-surface);
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius);
     color: var(--app-text);
     text-decoration: none;
+    text-align: left;
+    font: inherit;
+    transition: border-color .15s ease;
 }
 
-.saving-row + .saving-row {
-    border-top: 1px solid var(--app-border);
-}
-
-a.saving-row:hover {
-    background: color-mix(in srgb, var(--app-muted) 8%, transparent);
+.saved-tile:hover {
+    border-color: var(--app-accent);
     color: var(--app-text);
 }
 
-.saving-bar {
-    height: .5rem;
+.saved-tile-name {
+    color: var(--app-muted);
+    font-size: .85rem;
+}
+
+.saved-tile-size {
+    font-size: 1.35rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.saved-tile-more .cell-note {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* How much of the total this tool saved. */
+.saved-share {
+    height: .3rem;
+    margin-top: auto;
+    padding-top: 0;
     border-radius: 999px;
     background: color-mix(in srgb, var(--app-muted) 18%, transparent);
     overflow: hidden;
 }
 
-.saving-bar > span {
+.saved-tile .cell-note + .saved-share {
+    margin-top: .55rem;
+}
+
+.saved-share > span {
     display: block;
     height: 100%;
     border-radius: inherit;
     background: var(--app-accent);
 }
 
-.saving-size {
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-}
-
-.saving-total {
-    font-weight: 600;
-}
-
 @media (max-width: 575.98px) {
-    .saving-row {
-        grid-template-columns: 1fr auto;
+    .saved-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .saving-bar {
-        grid-column: 1 / -1;
-        grid-row: 2;
+    .saved-total {
+        font-size: 1.9rem;
     }
 }
 
